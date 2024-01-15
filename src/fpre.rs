@@ -121,7 +121,7 @@ async fn fpre_channel<C: Channel>(
 
 /// The global key known only to a single party that is used to authenticate bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Delta(pub u128);
+pub(crate) struct Delta(pub(crate) u128);
 
 impl BitAnd<Delta> for bool {
     type Output = Delta;
@@ -137,7 +137,7 @@ impl BitAnd<Delta> for bool {
 
 /// A message authentication code held by a party together with an authenticated bit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Mac(pub u128);
+pub(crate) struct Mac(pub(crate) u128);
 
 impl BitXor<Delta> for Mac {
     type Output = Key;
@@ -157,7 +157,7 @@ impl BitXor for Mac {
 
 /// A key used to authenticate (together with the [Delta] global key) a bit for the other party.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Key(pub u128);
+pub(crate) struct Key(pub(crate) u128);
 
 impl BitXor<Delta> for Key {
     type Output = Mac;
@@ -177,11 +177,11 @@ impl BitXor for Key {
 
 /// One half of a shared secret consisting of 2 XORed bits `r` and `s`.
 ///
-/// Party A holds (`r`, [MAC]_r, [Key]_s) and party B holds (`s`, [MAC]_s, [Key]_r), so that each
+/// Party A holds (`r`, [Mac]_r, [Key]_s) and party B holds (`s`, [Mac]_s, [Key]_r), so that each
 /// party holds bit + MAC, with the other holding key + global key for the corresponding half of the
 /// bit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthBit(pub bool, pub Mac, pub Key);
+pub(crate) struct AuthBit(pub(crate) bool, pub(crate) Mac, pub(crate) Key);
 
 impl BitXor for AuthBit {
     type Output = Self;

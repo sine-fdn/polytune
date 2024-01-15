@@ -6,6 +6,7 @@
 
 pub mod channel;
 pub mod circuit;
-pub mod fpre;
-pub mod hash;
 pub mod protocol;
+
+mod fpre;
+mod hash;

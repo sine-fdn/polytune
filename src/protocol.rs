@@ -1,5 +1,5 @@
 //! Secure 2-party computation protocol with communication via channels.
-use std::{collections::HashSet, ops::BitXor};
+use std::ops::BitXor;
 
 use rand::random;
 use serde::{Deserialize, Serialize};
@@ -13,18 +13,15 @@ use crate::{
 };
 
 /// The index of a particular wire in a circuit.
-pub type Wire = usize;
-
-/// A collection of wire indices.
-pub type Wires = HashSet<Wire>;
+pub(crate) type Wire = usize;
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct GarbledGate(pub [(bool, Mac, Label); 4]);
+pub(crate) struct GarbledGate(pub(crate) [(bool, Mac, Label); 4]);
 
 /// A label for a particular wire in the circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Label(pub u128);
+pub(crate) struct Label(pub(crate) u128);
 
 impl BitXor for Label {
     type Output = Self;
@@ -113,13 +110,17 @@ pub fn simulate_mpc(
     })
 }
 
+/// The role played by a particular party in the protocol execution.
 #[derive(Debug, Clone, Copy)]
-enum Role {
+pub enum Role {
+    /// The party contributes inputs, but does not evaluate the circuit.
     PartyContrib,
+    /// The party contributes inputs and evaluates the circuit.
     PartyEval,
 }
 
-async fn mpc<Fpre: Channel, Party: Channel>(
+/// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
+pub async fn mpc<Fpre: Channel, Party: Channel>(
     circuit: &Circuit,
     inputs: &[bool],
     mut fpre: MsgChannel<Fpre>,

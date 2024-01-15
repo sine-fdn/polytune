@@ -93,8 +93,7 @@ impl<C: Channel> MsgChannel<C> {
     }
 }
 
-/// A simple synchronous channel that uses `[std::sync::mpsc::Sender]` and
-/// `[std::sync::mpsc::Receiver]`.
+/// A simple synchronous channel using [`Sender`] and [`Receiver`].
 pub struct SimpleChannel {
     s: Sender<Vec<u8>>,
     r: Receiver<Vec<u8>>,
