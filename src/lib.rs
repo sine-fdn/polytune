@@ -5,7 +5,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod channel;
-pub mod circuit;
 pub mod protocol;
 
 mod fpre;

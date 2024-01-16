@@ -1,13 +1,13 @@
 //! Secure 2-party computation protocol with communication via channels.
 use std::ops::BitXor;
 
+use garble_lang::circuit::{self, Circuit};
 use rand::random;
 use serde::{Deserialize, Serialize};
 use tokio::{runtime::Runtime, task};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
-    circuit::{self, Circuit, Gate},
     fpre::{f_pre, AuthBit, Delta, Key, Mac},
     hash::{hash, hash_xor_triple},
 };
@@ -45,20 +45,44 @@ pub enum Error {
     /// A message could not be sent or received.
     ChannelError(channel::Error),
     /// The specified circuit is invalid (e.g. cyclic / contains invalid wirings).
-    CircuitError(circuit::Error),
+    CircuitError(CircuitError),
     /// Caused by the core SMPC protocol computation.
     MpcError(MpcError),
-}
-
-impl From<circuit::Error> for Error {
-    fn from(e: circuit::Error) -> Self {
-        Self::CircuitError(e)
-    }
+    /// The specified party does not exist in the circuit.
+    PartyDoesNotExist,
+    /// The number of provided input bits does not match the inputs expected in the circuit.
+    WrongInputSize {
+        /// The number of input bits specified in the circuit.
+        expected: usize,
+        /// The number of input bits provided by the user.
+        actual: usize,
+    },
 }
 
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelError(e)
+    }
+}
+
+/// Errors occurring during the validation or the execution of the MPC protocol.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CircuitError {
+    /// The gate with the specified wire contains invalid gate connections.
+    InvalidGate(usize),
+    /// The specified output gate does not exist in the circuit.
+    InvalidOutput(usize),
+    /// The circuit does not specify any output gates.
+    EmptyOutputs,
+    /// The provided circuit has too many gates to be processed.
+    MaxCircuitSizeExceeded,
+    /// The provided index does not correspond to any party.
+    PartyIndexOutOfBounds,
+}
+
+impl From<CircuitError> for Error {
+    fn from(e: CircuitError) -> Self {
+        Self::CircuitError(e)
     }
 }
 
@@ -85,28 +109,38 @@ impl From<MpcError> for Error {
     }
 }
 
-/// Simulates the 2-party computation of the specified circuit and inputs.
-pub fn simulate_mpc(
-    circuit: &Circuit,
-    in_a: &[bool],
-    in_b: &[bool],
-) -> Result<Vec<Option<bool>>, Error> {
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<Option<bool>>, Error> {
     let tokio = Runtime::new().expect("Could not start tokio runtime");
     tokio.block_on(async {
         let (fpre_a, fpre_b) = f_pre().await;
         let (party_a, party_b) = SimpleChannel::channels();
 
-        {
+        for (party, inputs) in inputs.iter().enumerate().skip(1) {
             let circuit = circuit.clone();
-            let in_a = in_a.to_vec();
+            let inputs = inputs.to_vec();
             task::spawn(async move {
-                if let Err(e) = mpc(&circuit, &in_a, fpre_a, party_a, Role::PartyContrib).await {
+                if let Err(e) = mpc(
+                    &circuit,
+                    &inputs,
+                    fpre_a,
+                    party_a,
+                    party,
+                    Role::PartyContrib,
+                )
+                .await
+                {
                     eprintln!("SMPC protocol failed for party A: {:?}", e);
                 }
             });
+            // TODO: only works for the 2 party case at the moment
+            break;
         }
 
-        return mpc(circuit, in_b, fpre_b, party_b, Role::PartyEval).await;
+        let Some(inputs) = inputs.get(0) else {
+            return Ok(vec![]);
+        };
+        return mpc(circuit, inputs, fpre_b, party_b, 0, Role::PartyEval).await;
     })
 }
 
@@ -125,13 +159,18 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     inputs: &[bool],
     mut fpre: MsgChannel<Fpre>,
     mut party: MsgChannel<Party>,
+    participant: usize,
     role: Role,
 ) -> Result<Vec<Option<bool>>, Error> {
-    circuit.validate()?;
-    if let Role::PartyContrib = role {
-        circuit.validate_contributor_input(&inputs)?;
-    } else {
-        circuit.validate_evaluator_input(&inputs)?;
+    validate(circuit)?;
+    let Some(expected_inputs) = circuit.input_gates.get(participant as usize) else {
+        return Err(Error::PartyDoesNotExist);
+    };
+    if *expected_inputs != inputs.len() {
+        return Err(Error::WrongInputSize {
+            expected: *expected_inputs,
+            actual: inputs.len(),
+        });
     }
 
     // fn-independent preprocessing:
@@ -139,16 +178,22 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     fpre.send("delta", &()).await?;
     let delta: Delta = fpre.recv("delta").await?;
 
-    let secret_bits = circuit.contrib_inputs() + circuit.eval_inputs() + circuit.and_gates();
+    let num_input_gates: usize = circuit.input_gates.iter().sum();
+    let num_and_gates = circuit
+        .gates
+        .iter()
+        .filter(|g| matches!(g, circuit::Gate::And(_, _)))
+        .count();
+    let num_gates = num_input_gates + circuit.gates.len();
+    let secret_bits = num_input_gates + num_and_gates;
     fpre.send("random shares", &(secret_bits as u32)).await?;
 
     let random_shares: Vec<AuthBit> = fpre.recv("random shares").await?;
     let mut random_shares = random_shares.into_iter();
 
-    let mut wire_shares_and_labels =
-        vec![(AuthBit(false, Mac(0), Key(0)), Label(0)); circuit.gates().len()];
-    for (w, gate) in circuit.gates().iter().enumerate() {
-        if let Gate::InContrib | Gate::InEval | Gate::And(_, _) = gate {
+    let mut wire_shares_and_labels = vec![(AuthBit(false, Mac(0), Key(0)), Label(0)); num_gates];
+    for (w, gate) in wires(circuit).iter().enumerate() {
+        if let Gate::Input(_) | Gate::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
                 return Err(MpcError::MissingShareForWire(w).into());
             };
@@ -164,9 +209,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     // fn-dependent preprocessing:
 
     let mut and_shares = Vec::new();
-    for (w, gate) in circuit.gates().iter().enumerate() {
+    for (w, gate) in wires(circuit).iter().enumerate() {
         match gate {
-            Gate::InContrib | Gate::InEval => {}
+            Gate::Input(_) => {}
             Gate::Not(x) => {
                 let (auth_bit, label) = wire_shares_and_labels[*x as usize];
                 wire_shares_and_labels[w] = (auth_bit, label ^ delta);
@@ -187,11 +232,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let auth_bits: Vec<AuthBit> = fpre.recv("AND shares").await?;
     let mut auth_bits = auth_bits.into_iter();
 
-    let mut table_shares = vec![None; circuit.gates().len()];
-    let mut garbled_gates: Vec<Option<GarbledGate>> = vec![None; circuit.gates().len()];
+    let mut table_shares = vec![None; num_gates];
+    let mut garbled_gates: Vec<Option<GarbledGate>> = vec![None; num_gates];
     if let Role::PartyContrib = role {
-        let mut preprocessed_gates = vec![None; circuit.gates().len()];
-        for (w, gate) in circuit.gates().iter().enumerate() {
+        let mut preprocessed_gates = vec![None; num_gates];
+        for (w, gate) in wires(circuit).iter().enumerate() {
             if let Gate::And(x, y) = gate {
                 let x = wire_shares_and_labels[*x as usize];
                 let y = wire_shares_and_labels[*y as usize];
@@ -241,7 +286,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             .await?;
     } else {
         garbled_gates = party.recv("preprocessed gates").await?;
-        for (w, gate) in circuit.gates().iter().enumerate() {
+        for (w, gate) in wires(circuit).iter().enumerate() {
             if let Gate::And(x, y) = gate {
                 let (x, _) = wire_shares_and_labels[*x as usize];
                 let (y, _) = wire_shares_and_labels[*y as usize];
@@ -271,12 +316,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     // input processing:
 
-    let wire_shares_for_other_party: Vec<_> = circuit
-        .gates()
+    let wire_shares_for_other_party: Vec<_> = wires(circuit)
         .iter()
         .enumerate()
-        .map(|(w, gate)| match (role, gate) {
-            (Role::PartyContrib, Gate::InEval) | (Role::PartyEval, Gate::InContrib) => {
+        .map(|(w, gate)| match (participant, gate) {
+            (p, Gate::Input(i)) if p != *i => {
                 let (AuthBit(bit, mac, _), _) = wire_shares_and_labels[w];
                 Some((bit, mac))
             }
@@ -382,14 +426,14 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     // circuit evaluation:
 
-    let mut values: Vec<bool> = Vec::with_capacity(circuit.gates().len());
+    let mut values: Vec<bool> = Vec::with_capacity(num_gates);
     if let Role::PartyContrib = role {
         // nothing to do for party A
     } else {
-        let mut labels: Vec<Label> = Vec::with_capacity(circuit.gates().len());
-        for (w, gate) in circuit.gates().iter().enumerate() {
+        let mut labels: Vec<Label> = Vec::with_capacity(num_gates);
+        for (w, gate) in wires(circuit).iter().enumerate() {
             let (input, label) = match gate {
-                Gate::InContrib | Gate::InEval => {
+                Gate::Input(_) => {
                     let input = masked_inputs[w].expect("No value for input gate");
                     let label = input_labels[w].expect("No label for input gate");
                     (input, label)
@@ -440,10 +484,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     // output determination:
 
     if let Role::PartyContrib = role {
-        let mut outputs = vec![None; circuit.gates().len()];
-        for w in circuit.output_gates() {
-            let (AuthBit(bit, mac, _key), _label) = wire_shares_and_labels[*w as usize];
-            outputs[*w as usize] = Some((bit, mac));
+        let mut outputs = vec![None; num_gates];
+        for w in circuit.output_gates.iter().copied() {
+            let (AuthBit(bit, mac, _key), _label) = wire_shares_and_labels[w];
+            outputs[w] = Some((bit, mac));
         }
         party.send("output wire shares", &outputs).await?;
         Ok(vec![])
@@ -464,4 +508,73 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         }
         Ok(outputs)
     }
+}
+
+const MAX_GATES: usize = (u32::MAX >> 4) as usize;
+const MAX_AND_GATES: usize = (u32::MAX >> 8) as usize;
+
+enum Gate {
+    Input(usize),
+    Xor(usize, usize),
+    And(usize, usize),
+    Not(usize),
+}
+
+fn wires(circuit: &Circuit) -> Vec<Gate> {
+    let mut gates = vec![];
+    for (party, inputs) in circuit.input_gates.iter().enumerate() {
+        for _ in 0..*inputs {
+            gates.push(Gate::Input(party))
+        }
+    }
+    for gate in circuit.gates.iter() {
+        let gate = match gate {
+            circuit::Gate::Xor(x, y) => Gate::Xor(*x, *y),
+            circuit::Gate::And(x, y) => Gate::And(*x, *y),
+            circuit::Gate::Not(x) => Gate::Not(*x),
+        };
+        gates.push(gate);
+    }
+    gates
+}
+
+fn validate(circuit: &Circuit) -> Result<(), CircuitError> {
+    let mut num_and_gates = 0;
+    let wires = wires(circuit);
+    for (i, g) in wires.iter().enumerate() {
+        match g {
+            Gate::Input(_) => {}
+            &Gate::Xor(x, y) => {
+                if x >= i || y >= i {
+                    return Err(CircuitError::InvalidGate(i));
+                }
+            }
+            &Gate::And(x, y) => {
+                if x >= i || y >= i {
+                    return Err(CircuitError::InvalidGate(i));
+                }
+                num_and_gates += 1;
+            }
+            &Gate::Not(x) => {
+                if x >= i {
+                    return Err(CircuitError::InvalidGate(i));
+                }
+            }
+        }
+    }
+    if circuit.output_gates.is_empty() {
+        return Err(CircuitError::EmptyOutputs);
+    }
+    for &o in circuit.output_gates.iter() {
+        if o >= wires.len() {
+            return Err(CircuitError::InvalidOutput(o));
+        }
+    }
+    if num_and_gates > MAX_AND_GATES {
+        return Err(CircuitError::MaxCircuitSizeExceeded);
+    }
+    if wires.len() > MAX_GATES {
+        return Err(CircuitError::MaxCircuitSizeExceeded);
+    }
+    Ok(())
 }

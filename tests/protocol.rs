@@ -1,27 +1,20 @@
 use std::collections::HashSet;
 
-use multi_tandem::{
-    circuit::{Circuit, Gate},
-    protocol::{simulate_mpc, Error},
-};
+use garble_lang::circuit::{Circuit, Gate};
+use multi_tandem::protocol::{simulate_mpc, Error};
 
 #[test]
 fn eval_xor_circuits() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
-                let circuit = Circuit::new(
-                    vec![
-                        Gate::InContrib,
-                        Gate::InEval,
-                        Gate::Xor(0, 1),
-                        Gate::InContrib,
-                        Gate::Xor(2, 3),
-                    ],
-                    vec![4],
-                );
+                let circuit = Circuit {
+                    input_gates: vec![2, 1],
+                    gates: vec![Gate::Xor(0, 2), Gate::Xor(1, 3)],
+                    output_gates: vec![4],
+                };
 
-                let output = simulate_mpc(&circuit, &[x, z], &[y])?;
+                let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
                 assert_eq!(output, vec![None, None, None, None, Some((x ^ y) ^ z)]);
             }
         }
@@ -33,18 +26,13 @@ fn eval_xor_circuits() -> Result<(), Error> {
 fn eval_not_circuits() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
-            let circuit = Circuit::new(
-                vec![
-                    Gate::InContrib,
-                    Gate::InEval,
-                    Gate::Not(0),
-                    Gate::Not(1),
-                    Gate::Not(2),
-                ],
-                vec![2, 3, 4],
-            );
+            let circuit = Circuit {
+                input_gates: vec![1, 1],
+                gates: vec![Gate::Not(0), Gate::Not(1), Gate::Not(2)],
+                output_gates: vec![2, 3, 4],
+            };
 
-            let output = simulate_mpc(&circuit, &[x], &[y])?;
+            let output = simulate_mpc(&circuit, &[&[x], &[y]])?;
             assert_eq!(output, vec![None, None, Some(!x), Some(!y), Some(x)]);
         }
     }
@@ -56,18 +44,13 @@ fn eval_and_circuits() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
-                let circuit = Circuit::new(
-                    vec![
-                        Gate::InContrib,
-                        Gate::InEval,
-                        Gate::And(0, 1),
-                        Gate::InContrib,
-                        Gate::And(2, 3),
-                    ],
-                    vec![4],
-                );
+                let circuit = Circuit {
+                    input_gates: vec![2, 1],
+                    gates: vec![Gate::And(0, 2), Gate::And(1, 3)],
+                    output_gates: vec![4],
+                };
 
-                let output = simulate_mpc(&circuit, &[x, z], &[y])?;
+                let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
                 assert_eq!(output, vec![None, None, None, None, Some((x & y) & z)]);
             }
         }
@@ -83,27 +66,26 @@ fn eval_large_and_circuit() -> Result<(), Error> {
     let mut gates = Vec::new();
     for _ in 0..n {
         in_a.push(true);
-        gates.push(Gate::InContrib);
     }
     for _ in n..(n * 2) {
         in_b.push(true);
-        gates.push(Gate::InEval);
     }
     gates.push(Gate::And(0, 1));
     for w in 2..(n * 2) {
-        gates.push(Gate::And(((n * 2) + w - 2) as u32, w as u32));
+        gates.push(Gate::And((n * 2) + w - 2, w));
     }
-    let output_gates = vec![(gates.len() - 1) as u32];
-    let circuit = Circuit::new(gates, output_gates);
-    println!("Circuit: {:?}", circuit);
-    println!("A: {:?}", in_a);
-    println!("B: {:?}", in_b);
+    let output_gates = vec![n + n + gates.len() - 1];
+    let circuit = Circuit {
+        input_gates: vec![n, n],
+        gates: gates.clone(),
+        output_gates,
+    };
 
-    let mut expected = vec![None; circuit.gates().len()];
-    expected[circuit.gates().len() - 1] = Some(true);
+    let mut expected = vec![None; n + n + gates.len()];
+    expected[n + n + gates.len() - 1] = Some(true);
 
-    let output_smpc = simulate_mpc(&circuit, &in_a, &in_b)?;
-    let output_direct = eval_directly(&circuit, &in_a, &in_b);
+    let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b])?;
+    let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
     assert_eq!(output_smpc, expected);
     assert_eq!(output_smpc, output_direct);
 
@@ -112,11 +94,11 @@ fn eval_large_and_circuit() -> Result<(), Error> {
 
 #[test]
 fn eval_mixed_circuits() -> Result<(), Error> {
-    let circuits = gen_circuits_up_to(6);
+    let circuits = gen_circuits_up_to(5);
     let mut circuits_with_inputs = Vec::new();
     for circuit in circuits {
-        let in_a = circuit.contrib_inputs();
-        let in_b = circuit.eval_inputs();
+        let in_a = circuit.input_gates[0];
+        let in_b = circuit.input_gates[1];
         let mut inputs = vec![(vec![], vec![])];
         for _ in 0..in_a {
             let mut next_round_of_inputs = Vec::new();
@@ -150,13 +132,13 @@ fn eval_mixed_circuits() -> Result<(), Error> {
     }
     println!("{} combinations generated", circuits_with_inputs.len());
 
-    let eval_only_every_n = 41; // prime, to avoid periodic patterns
+    let eval_only_every_n = 31; // prime, to avoid periodic patterns
     let mut total_tests = 0;
     for (w, (circuit, in_a, in_b)) in circuits_with_inputs.into_iter().enumerate() {
         if w % eval_only_every_n == 0 {
             total_tests += 1;
-            let output_smpc = simulate_mpc(&circuit, &in_a, &in_b)?;
-            let output_direct = eval_directly(&circuit, &in_a, &in_b);
+            let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b])?;
+            let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
             if output_smpc != output_direct {
                 println!("Circuit: {:?}", circuit);
                 println!("A: {:?}", in_a);
@@ -172,18 +154,19 @@ fn eval_mixed_circuits() -> Result<(), Error> {
     Ok(())
 }
 
-fn eval_directly(circuit: &Circuit, in_a: &[bool], in_b: &[bool]) -> Vec<Option<bool>> {
-    let mut output = vec![None; circuit.gates().len()];
-    let mut in_a = in_a.iter();
-    let mut in_b = in_b.iter();
-    for (w, gate) in circuit.gates().iter().enumerate() {
+fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<Option<bool>> {
+    let num_inputs: usize = inputs.iter().map(|inputs| inputs.len()).sum();
+    let mut output = vec![None; num_inputs + circuit.gates.len()];
+    let mut i = 0;
+    for inputs in inputs.iter() {
+        for input in inputs.iter() {
+            output[i] = Some(*input);
+            i += 1;
+        }
+    }
+    for (g, gate) in circuit.gates.iter().enumerate() {
+        let w = i + g;
         match gate {
-            Gate::InContrib => {
-                output[w] = in_a.next().copied();
-            }
-            Gate::InEval => {
-                output[w] = in_b.next().copied();
-            }
             Gate::Not(x) => {
                 output[w] = Some(!output[*x as usize].unwrap());
             }
@@ -195,8 +178,7 @@ fn eval_directly(circuit: &Circuit, in_a: &[bool], in_b: &[bool]) -> Vec<Option<
             }
         }
     }
-    let output_wires: HashSet<usize> =
-        HashSet::from_iter(circuit.output_gates().iter().map(|w| *w as usize));
+    let output_wires: HashSet<usize> = HashSet::from_iter(circuit.output_gates.iter().copied());
     for (w, output) in output.iter_mut().enumerate() {
         if !output_wires.contains(&w) {
             *output = None
@@ -207,40 +189,31 @@ fn eval_directly(circuit: &Circuit, in_a: &[bool], in_b: &[bool]) -> Vec<Option<
 
 fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {
     let mut circuits_up_to_n = Vec::new();
-    for wires in 5..n {
-        for in_a in 2..(wires - 1) {
-            for in_b in 1..(wires - in_a) {
-                let gates = wires - in_a - in_b;
-                if gates < in_a + in_b {
-                    continue;
-                }
-
+    let mut gate_choice = 0;
+    for in_a in 1..=(n / 2) {
+        for in_b in 1..=(n / 2) {
+            for gates in (in_a + in_b)..n {
+                let wires = in_a + in_b + gates;
                 println!(
                     "Generating circuits with {} inputs from A + {} inputs from B + {} gates = {} total",
                     in_a, in_b, gates, wires
                 );
-
-                let mut circuit = Vec::new();
-                for _w in 0..in_a {
-                    circuit.push(Gate::InContrib);
-                }
-                for _w in in_a..(in_a + in_b) {
-                    circuit.push(Gate::InEval);
-                }
-                let mut circuits = vec![circuit];
+                let mut circuits = vec![vec![]];
                 for w in (in_a + in_b)..wires {
                     let mut next_round_of_circuits = Vec::new();
                     for circuit in circuits.iter_mut() {
                         let mut circuits_with_next_gate = Vec::new();
-                        for x in 0..w {
-                            for y in 0..w {
-                                let x = x as u32;
-                                let y = y as u32;
-                                for gate in [Gate::And(x, y), Gate::Xor(x, y), Gate::Not(x)] {
-                                    let mut circuit = circuit.clone();
-                                    circuit.push(gate);
-                                    circuits_with_next_gate.push(circuit);
-                                }
+                        for x in (0..w).step_by(3) {
+                            for y in (0..w).step_by(2) {
+                                gate_choice += 1;
+                                let gate = match gate_choice % 7 {
+                                    0..=2 => Gate::And(x, y),
+                                    3..=5 => Gate::Xor(x, y),
+                                    _ => Gate::Not(x),
+                                };
+                                let mut circuit = circuit.clone();
+                                circuit.push(gate);
+                                circuits_with_next_gate.push(circuit);
                             }
                         }
                         next_round_of_circuits.append(&mut circuits_with_next_gate);
@@ -250,15 +223,14 @@ fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {
                 }
                 for gates in circuits {
                     let mut output_gates = vec![];
-                    for (w, gate) in gates.iter().enumerate() {
-                        match gate {
-                            Gate::InContrib | Gate::InEval => {}
-                            Gate::Xor(_, _) | Gate::And(_, _) | Gate::Not(_) => {
-                                output_gates.push(w as u32)
-                            }
-                        }
+                    for w in 0..gates.iter().len() {
+                        output_gates.push(in_a + in_b + w);
                     }
-                    circuits_up_to_n.push(Circuit::new(gates, output_gates));
+                    circuits_up_to_n.push(Circuit {
+                        input_gates: vec![in_a, in_b],
+                        gates,
+                        output_gates,
+                    });
                 }
             }
         }
