@@ -38,34 +38,48 @@ pub trait Channel {
     type RecvError: fmt::Debug;
 
     /// Sends a message to the other party.
-    fn send_bytes(
+    fn send_bytes_to(
         &mut self,
+        party: usize,
         msg: Vec<u8>,
     ) -> impl Future<Output = Result<(), Self::SendError>> + Send;
 
     /// Blocks until it receives a response from the other party.
-    fn recv_bytes(&mut self) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
+    fn recv_bytes_from(
+        &mut self,
+        party: usize,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
 }
 
 /// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
+#[derive(Debug)]
 pub struct MsgChannel<C: Channel>(C);
 
 impl<C: Channel> MsgChannel<C> {
     /// Serializes and sends an MPC message to the other party.
-    pub(crate) async fn send(&mut self, phase: &str, msg: &impl Serialize) -> Result<(), Error> {
+    pub(crate) async fn send_to(
+        &mut self,
+        party: usize,
+        phase: &str,
+        msg: &impl Serialize,
+    ) -> Result<(), Error> {
         let msg = bincode::serialize(msg).map_err(|e| Error {
             phase: format!("sending {phase}"),
             reason: ErrorKind::SerdeError(format!("{e:?}")),
         })?;
-        self.0.send_bytes(msg).await.map_err(|e| Error {
+        self.0.send_bytes_to(party, msg).await.map_err(|e| Error {
             phase: phase.to_string(),
             reason: ErrorKind::SendError(format!("{e:?}")),
         })
     }
 
     /// Receives and deserializes an MPC message from the other party.
-    pub(crate) async fn recv<T: DeserializeOwned>(&mut self, phase: &str) -> Result<T, Error> {
-        let msg = self.0.recv_bytes().await.map_err(|e| Error {
+    pub(crate) async fn recv_from<T: DeserializeOwned>(
+        &mut self,
+        party: usize,
+        phase: &str,
+    ) -> Result<T, Error> {
+        let msg = self.0.recv_bytes_from(party).await.map_err(|e| Error {
             phase: phase.to_string(),
             reason: ErrorKind::RecvError(format!("{e:?}")),
         })?;
@@ -76,12 +90,13 @@ impl<C: Channel> MsgChannel<C> {
     }
 
     /// Receives and deserializes a Vec from the other party (while checking the length).
-    pub(crate) async fn recv_vec<T: DeserializeOwned>(
+    pub(crate) async fn recv_vec_from<T: DeserializeOwned>(
         &mut self,
+        party: usize,
         phase: &str,
         len: usize,
     ) -> Result<Vec<T>, Error> {
-        let v: Vec<T> = self.recv(phase).await?;
+        let v: Vec<T> = self.recv_from(party, phase).await?;
         if v.len() == len {
             Ok(v)
         } else {
@@ -94,26 +109,40 @@ impl<C: Channel> MsgChannel<C> {
 }
 
 /// A simple synchronous channel using [`Sender`] and [`Receiver`].
+#[derive(Debug)]
 pub struct SimpleChannel {
-    s: Sender<Vec<u8>>,
-    r: Receiver<Vec<u8>>,
+    s: Vec<Option<Sender<Vec<u8>>>>,
+    r: Vec<Option<Receiver<Vec<u8>>>>,
 }
 
 impl SimpleChannel {
-    /// Creates channels for 2 parties to communicate with each other.
-    pub fn channels() -> (MsgChannel<Self>, MsgChannel<Self>) {
+    /// Creates channels for N parties to communicate with each other.
+    pub fn channels(parties: usize) -> Vec<MsgChannel<Self>> {
         let buffer_capacity = 1024;
-        let (msg_a_send, msg_a_recv) = channel(buffer_capacity);
-        let (msg_b_send, msg_b_recv) = channel(buffer_capacity);
-        let a = MsgChannel(SimpleChannel {
-            s: msg_a_send,
-            r: msg_b_recv,
-        });
-        let b = MsgChannel(SimpleChannel {
-            s: msg_b_send,
-            r: msg_a_recv,
-        });
-        (a, b)
+        let mut channels = vec![];
+        for _ in 0..parties {
+            let mut s = vec![];
+            let mut r = vec![];
+            for _ in 0..parties {
+                s.push(None);
+                r.push(None);
+            }
+            channels.push(MsgChannel(SimpleChannel { s, r }));
+        }
+        for a in 0..parties {
+            for b in 0..parties {
+                if a == b {
+                    continue;
+                }
+                let (send_a_to_b, recv_a_to_b) = channel(buffer_capacity);
+                let (send_b_to_a, recv_b_to_a) = channel(buffer_capacity);
+                channels[a].0.s[b] = Some(send_a_to_b);
+                channels[b].0.s[a] = Some(send_b_to_a);
+                channels[a].0.r[b] = Some(recv_b_to_a);
+                channels[b].0.r[a] = Some(recv_a_to_b);
+            }
+        }
+        channels
     }
 }
 
@@ -130,12 +159,21 @@ impl Channel for SimpleChannel {
     type SendError = SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
 
-    async fn send_bytes(&mut self, msg: Vec<u8>) -> Result<(), SendError<Vec<u8>>> {
-        self.s.send(msg).await
+    async fn send_bytes_to(
+        &mut self,
+        party: usize,
+        msg: Vec<u8>,
+    ) -> Result<(), SendError<Vec<u8>>> {
+        self.s[party].as_ref().unwrap().send(msg).await
     }
 
-    async fn recv_bytes(&mut self) -> Result<Vec<u8>, AsyncRecvError> {
-        match timeout(Duration::from_secs(1), self.r.recv()).await {
+    async fn recv_bytes_from(&mut self, party: usize) -> Result<Vec<u8>, AsyncRecvError> {
+        match timeout(
+            Duration::from_secs(1),
+            self.r[party].as_mut().unwrap().recv(),
+        )
+        .await
+        {
             Ok(Some(bytes)) => Ok(bytes),
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),

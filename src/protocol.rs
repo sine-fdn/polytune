@@ -112,19 +112,28 @@ impl From<MpcError> for Error {
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<Option<bool>>, Error> {
     let tokio = Runtime::new().expect("Could not start tokio runtime");
+    let parties = SimpleChannel::channels(inputs.len());
     tokio.block_on(async {
-        let (fpre_a, fpre_b) = f_pre().await;
-        let (party_a, party_b) = SimpleChannel::channels();
+        let fpre_channels = f_pre(inputs.len()).await;
 
-        for (party, inputs) in inputs.iter().enumerate().skip(1) {
+        let mut parties = fpre_channels
+            .into_iter()
+            .zip(parties.into_iter())
+            .zip(inputs)
+            .enumerate();
+        let Some(evaluator) = parties.next() else {
+            return Ok(vec![]);
+        };
+
+        for (party, ((fpre_channel, party_channel), inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
             task::spawn(async move {
                 if let Err(e) = mpc(
                     &circuit,
                     &inputs,
-                    fpre_a,
-                    party_a,
+                    fpre_channel,
+                    party_channel,
                     party,
                     Role::PartyContrib,
                 )
@@ -136,11 +145,16 @@ pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<Option<
             // TODO: only works for the 2 party case at the moment
             break;
         }
-
-        let Some(inputs) = inputs.get(0) else {
-            return Ok(vec![]);
-        };
-        return mpc(circuit, inputs, fpre_b, party_b, 0, Role::PartyEval).await;
+        let (_, ((fpre_channel, party_channel), inputs)) = evaluator;
+        return mpc(
+            circuit,
+            inputs,
+            fpre_channel,
+            party_channel,
+            0,
+            Role::PartyEval,
+        )
+        .await;
     })
 }
 
@@ -173,10 +187,13 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         });
     }
 
+    let fpre_party = 0;
+    let other_party = if participant == 0 { 1 } else { 0 };
+
     // fn-independent preprocessing:
 
-    fpre.send("delta", &()).await?;
-    let delta: Delta = fpre.recv("delta").await?;
+    fpre.send_to(fpre_party, "delta", &()).await?;
+    let delta: Delta = fpre.recv_from(fpre_party, "delta").await?;
 
     let num_input_gates: usize = circuit.input_gates.iter().sum();
     let num_and_gates = circuit
@@ -186,12 +203,14 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         .count();
     let num_gates = num_input_gates + circuit.gates.len();
     let secret_bits = num_input_gates + num_and_gates;
-    fpre.send("random shares", &(secret_bits as u32)).await?;
+    fpre.send_to(fpre_party, "random shares", &(secret_bits as u32))
+        .await?;
 
-    let random_shares: Vec<AuthBit> = fpre.recv("random shares").await?;
+    let random_shares: Vec<AuthBit> = fpre.recv_from(fpre_party, "random shares").await?;
     let mut random_shares = random_shares.into_iter();
 
-    let mut wire_shares_and_labels = vec![(AuthBit(false, Mac(0), Key(0)), Label(0)); num_gates];
+    todo!()
+    /*let mut wire_shares_and_labels = vec![(AuthBit(false, Mac(0), Key(0)), Label(0)); num_gates];
     for (w, gate) in wires(circuit).iter().enumerate() {
         if let Gate::Input(_) | Gate::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
@@ -228,8 +247,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             }
         }
     }
-    fpre.send("AND shares", &and_shares).await?;
-    let auth_bits: Vec<AuthBit> = fpre.recv("AND shares").await?;
+    fpre.send_to(fpre_party, "AND shares", &and_shares).await?;
+    let auth_bits: Vec<AuthBit> = fpre.recv_from(fpre_party, "AND shares").await?;
     let mut auth_bits = auth_bits.into_iter();
 
     let mut table_shares = vec![None; num_gates];
@@ -282,10 +301,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             }
         }
         party
-            .send("preprocessed gates", &preprocessed_gates)
+            .send_to(other_party, "preprocessed gates", &preprocessed_gates)
             .await?;
     } else {
-        garbled_gates = party.recv("preprocessed gates").await?;
+        garbled_gates = party.recv_from(other_party, "preprocessed gates").await?;
         for (w, gate) in wires(circuit).iter().enumerate() {
             if let Gate::And(x, y) = gate {
                 let (x, _) = wire_shares_and_labels[*x as usize];
@@ -328,11 +347,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         })
         .collect();
     party
-        .send("wire shares", &wire_shares_for_other_party)
+        .send_to(other_party, "wire shares", &wire_shares_for_other_party)
         .await?;
 
     let wire_shares_from_other_party: Vec<Option<(bool, Mac)>> = party
-        .recv_vec("wire shares", wire_shares_and_labels.len())
+        .recv_vec_from(other_party, "wire shares", wire_shares_and_labels.len())
         .await?;
 
     let mut masked_inputs = vec![None; wire_shares_and_labels.len()];
@@ -356,9 +375,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 }
             }
         }
-        party.send("masked inputs", &masked_inputs).await?;
         party
-            .send("contributor labels", &labels_of_own_inputs)
+            .send_to(other_party, "masked inputs", &masked_inputs)
+            .await?;
+        party
+            .send_to(other_party, "contributor labels", &labels_of_own_inputs)
             .await?;
     } else {
         let mut inputs = inputs.iter();
@@ -375,11 +396,13 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 }
             }
         }
-        party.send("masked inputs", &masked_inputs).await?;
+        party
+            .send_to(other_party, "masked inputs", &masked_inputs)
+            .await?;
     }
 
     let masked_other_inputs: Vec<Option<bool>> = party
-        .recv_vec("masked inputs", wire_shares_and_labels.len())
+        .recv_vec_from(other_party, "masked inputs", wire_shares_and_labels.len())
         .await?;
 
     let mut input_labels = vec![None; wire_shares_and_labels.len()];
@@ -399,7 +422,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             })
             .collect();
         party
-            .send("evaluator labels", &labels_of_other_inputs)
+            .send_to(other_party, "evaluator labels", &labels_of_other_inputs)
             .await?;
     } else {
         for (w, input) in masked_other_inputs.into_iter().enumerate() {
@@ -407,15 +430,16 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 masked_inputs[w] = Some(input);
             }
         }
-        let labels_of_other_inputs: Vec<Option<Label>> =
-            party.recv_vec("other labels", input_labels.len()).await?;
+        let labels_of_other_inputs: Vec<Option<Label>> = party
+            .recv_vec_from(other_party, "other labels", input_labels.len())
+            .await?;
         for (w, label) in labels_of_other_inputs.into_iter().enumerate() {
             if let Some(label) = label {
                 input_labels[w] = Some(label);
             }
         }
         let labels_of_own_inputs: Vec<Option<Label>> = party
-            .recv_vec("evaluator labels", input_labels.len())
+            .recv_vec_from(other_party, "evaluator labels", input_labels.len())
             .await?;
         for (w, label) in labels_of_own_inputs.into_iter().enumerate() {
             if let Some(label) = label {
@@ -489,11 +513,14 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             let (AuthBit(bit, mac, _key), _label) = wire_shares_and_labels[w];
             outputs[w] = Some((bit, mac));
         }
-        party.send("output wire shares", &outputs).await?;
+        party
+            .send_to(other_party, "output wire shares", &outputs)
+            .await?;
         Ok(vec![])
     } else {
-        let output_wire_shares: Vec<Option<(bool, Mac)>> =
-            party.recv_vec("output wire shares", values.len()).await?;
+        let output_wire_shares: Vec<Option<(bool, Mac)>> = party
+            .recv_vec_from(other_party, "output wire shares", values.len())
+            .await?;
         let mut outputs = vec![None; output_wire_shares.len()];
         for (w, output_wire) in output_wire_shares.into_iter().enumerate() {
             if let Some((r, mac_r)) = output_wire {
@@ -507,7 +534,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             }
         }
         Ok(outputs)
-    }
+    }*/
 }
 
 const MAX_GATES: usize = (u32::MAX >> 4) as usize;
