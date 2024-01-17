@@ -296,12 +296,16 @@ pub(crate) fn xor_shares(
 }
 
 pub(crate) fn xor_delta_to_keys(
-    shares: Vec<Option<(Mac, Key)>>,
+    mut shares: Vec<Option<(Mac, Key)>>,
     i: usize,
     delta: Delta,
 ) -> Vec<Option<(Mac, Key)>> {
-    let mac_and_key = &mut shares[i].unwrap();
-    mac_and_key.1 = Key((mac_and_key.1 ^ delta).0);
+    for (j, share) in shares.iter_mut().enumerate() {
+        if i == j {
+            let share = share.as_mut().unwrap();
+            share.1.0 ^= delta.0
+        }
+    }
     shares
 }
 

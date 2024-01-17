@@ -9,7 +9,7 @@ use tokio::{runtime::Runtime, task};
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
     fpre::{f_pre, only_macs, xor_delta_to_keys, xor_keys, xor_shares, AuthBit, Delta, Mac},
-    hash::{hash, hash_xor_triple},
+    garble::{self, decrypt, encrypt, GarblingKey},
 };
 
 /// The index of a particular wire in a circuit.
@@ -17,7 +17,7 @@ pub(crate) type Wire = usize;
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GarbledGate(pub(crate) [(bool, Vec<Option<Mac>>, Label); 4]);
+pub(crate) struct GarbledGate(pub(crate) [Vec<u8>; 4]);
 
 /// A label for a particular wire in the circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +46,8 @@ pub enum Error {
     ChannelError(channel::Error),
     /// The specified circuit is invalid (e.g. cyclic / contains invalid wirings).
     CircuitError(CircuitError),
+    /// A table row could not be encrypted or decrypted.
+    GarblingError(garble::Error),
     /// Caused by the core SMPC protocol computation.
     MpcError(MpcError),
     /// The specified party does not exist in the circuit.
@@ -83,6 +85,12 @@ pub enum CircuitError {
 impl From<CircuitError> for Error {
     fn from(e: CircuitError) -> Self {
         Self::CircuitError(e)
+    }
+}
+
+impl From<garble::Error> for Error {
+    fn from(e: garble::Error) -> Self {
+        Self::GarblingError(e)
     }
 }
 
@@ -284,20 +292,20 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let label_x_1 = label_x_0 ^ Label(delta.0);
                 let label_y_1 = label_y_0 ^ Label(delta.0);
 
-                let h0 = hash(label_x_0, label_y_0, w, 0);
-                let h1 = hash(label_x_0, label_y_1, w, 1);
-                let h2 = hash(label_x_1, label_y_0, w, 2);
-                let h3 = hash(label_x_1, label_y_1, w, 3);
+                let k0 = GarblingKey::new(label_x_0, label_y_0, w, 0);
+                let k1 = GarblingKey::new(label_x_0, label_y_1, w, 1);
+                let k2 = GarblingKey::new(label_x_1, label_y_0, w, 2);
+                let k3 = GarblingKey::new(label_x_1, label_y_1, w, 3);
 
                 let row0_label = Label(label_gamma_0.0 ^ xor_keys(&row0.1).0 ^ (row0.0 & delta).0);
                 let row1_label = Label(label_gamma_0.0 ^ xor_keys(&row1.1).0 ^ (row1.0 & delta).0);
                 let row2_label = Label(label_gamma_0.0 ^ xor_keys(&row2.1).0 ^ (row2.0 & delta).0);
                 let row3_label = Label(label_gamma_0.0 ^ xor_keys(&row3.1).0 ^ (row3.0 & delta).0);
 
-                let garbled0 = hash_xor_triple(&h0, (row0.0, only_macs(&row0.1), row0_label));
-                let garbled1 = hash_xor_triple(&h1, (row1.0, only_macs(&row1.1), row1_label));
-                let garbled2 = hash_xor_triple(&h2, (row2.0, only_macs(&row2.1), row2_label));
-                let garbled3 = hash_xor_triple(&h3, (row3.0, only_macs(&row3.1), row3_label));
+                let garbled0 = encrypt(&k0, (row0.0, only_macs(&row0.1), row0_label))?;
+                let garbled1 = encrypt(&k1, (row1.0, only_macs(&row1.1), row1_label))?;
+                let garbled2 = encrypt(&k2, (row2.0, only_macs(&row2.1), row2_label))?;
+                let garbled3 = encrypt(&k3, (row3.0, only_macs(&row3.1), row3_label))?;
 
                 preprocessed_gates[w] = Some(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
             }
@@ -497,23 +505,22 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     let Some(garbled_gate) = &garbled_gates[w] else {
                         return Err(MpcError::MissingGarbledGate(w).into());
                     };
-                    let hash = hash(label_x, label_y, w, i as u8);
+                    let garbling_key = GarblingKey::new(label_x, label_y, w, i as u8);
                     let garbled_row = garbled_gate.0[i].clone();
-                    let (r, mac_r, label_share) = hash_xor_triple(&hash, garbled_row);
+                    let (r, mac_r, label_share) = decrypt(&garbling_key, &garbled_row)?;
 
                     let Some(table_shares) = &table_shares[w] else {
                         return Err(MpcError::MissingShareForWire(w).into());
                     };
                     let AuthBit(s, mac_s_key_r) = table_shares[i].clone();
                     let mut label = label_share.0;
-                    for (mac_r, mac_s_key_r) in mac_r.iter().zip(mac_s_key_r) {
-                        if let (Some(mac_r), Some((mac_s, key_r))) = (mac_r, mac_s_key_r) {
-                            if *mac_r != key_r ^ (r & delta) {
-                                return Err(MpcError::InvalidInputMacOnWire(w).into());
-                            }
-                            label ^= mac_s.0;
+                    for party in [1] {
+                        let mac_r = mac_r[0].unwrap(); // todo: must be the index of the evaluator
+                        let (mac_s, key_r) = mac_s_key_r[party].unwrap();
+                        if mac_r != key_r ^ (r & delta) {
+                            return Err(MpcError::InvalidInputMacOnWire(w).into());
                         }
-                        // todo: check that the other case is (None, None), fail in all other cases
+                        label ^= mac_s.0;
                     }
                     (r ^ s, Label(label))
                 }

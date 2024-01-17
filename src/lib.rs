@@ -8,4 +8,4 @@ pub mod channel;
 pub mod protocol;
 
 mod fpre;
-mod hash;
+mod garble;
