@@ -8,7 +8,7 @@ use tokio::{runtime::Runtime, task};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
-    fpre::{f_pre, AuthBit, Delta, Key, Mac},
+    fpre::{f_pre, only_macs, xor_delta_to_keys, xor_keys, xor_shares, AuthBit, Delta, Mac},
     hash::{hash, hash_xor_triple},
 };
 
@@ -16,8 +16,8 @@ use crate::{
 pub(crate) type Wire = usize;
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct GarbledGate(pub(crate) [(bool, Mac, Label); 4]);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GarbledGate(pub(crate) [(bool, Vec<Option<Mac>>, Label); 4]);
 
 /// A label for a particular wire in the circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,8 +209,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let random_shares: Vec<AuthBit> = fpre.recv_from(fpre_party, "random shares").await?;
     let mut random_shares = random_shares.into_iter();
 
-    todo!()
-    /*let mut wire_shares_and_labels = vec![(AuthBit(false, Mac(0), Key(0)), Label(0)); num_gates];
+    let mut wire_shares_and_labels = vec![(AuthBit(false, vec![]), Label(0)); num_gates];
     for (w, gate) in wires(circuit).iter().enumerate() {
         if let Gate::Input(_) | Gate::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
@@ -232,17 +231,17 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         match gate {
             Gate::Input(_) => {}
             Gate::Not(x) => {
-                let (auth_bit, label) = wire_shares_and_labels[*x as usize];
+                let (auth_bit, label) = wire_shares_and_labels[*x as usize].clone();
                 wire_shares_and_labels[w] = (auth_bit, label ^ delta);
             }
             Gate::Xor(x, y) => {
-                let (share_x, label_x) = wire_shares_and_labels[*x as usize];
-                let (share_y, label_y) = wire_shares_and_labels[*y as usize];
+                let (share_x, label_x) = wire_shares_and_labels[*x as usize].clone();
+                let (share_y, label_y) = wire_shares_and_labels[*y as usize].clone();
                 wire_shares_and_labels[w] = (share_x ^ share_y, label_x ^ label_y);
             }
             Gate::And(x, y) => {
-                let (share_x, _) = wire_shares_and_labels[*x as usize];
-                let (share_y, _) = wire_shares_and_labels[*y as usize];
+                let (share_x, _) = wire_shares_and_labels[*x as usize].clone();
+                let (share_y, _) = wire_shares_and_labels[*y as usize].clone();
                 and_shares.push((share_x, share_y));
             }
         }
@@ -257,26 +256,29 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         let mut preprocessed_gates = vec![None; num_gates];
         for (w, gate) in wires(circuit).iter().enumerate() {
             if let Gate::And(x, y) = gate {
-                let x = wire_shares_and_labels[*x as usize];
-                let y = wire_shares_and_labels[*y as usize];
-                let gamma = wire_shares_and_labels[w];
-                let (AuthBit(r_x, mac_r_x, key_s_x), label_x_0) = x;
-                let (AuthBit(r_y, mac_r_y, key_s_y), label_y_0) = y;
-                let (AuthBit(r_gamma, mac_r_gamma, key_s_gamma), label_gamma_0) = gamma;
+                let x = wire_shares_and_labels[*x as usize].clone();
+                let y = wire_shares_and_labels[*y as usize].clone();
+                let gamma = wire_shares_and_labels[w].clone();
+                let (AuthBit(r_x, mac_r_x_key_s_x), label_x_0) = x;
+                let (AuthBit(r_y, mac_r_y_key_s_y), label_y_0) = y;
+                let (AuthBit(r_gamma, mac_r_gamma_key_s_gamma), label_gamma_0) = gamma;
                 let Some(sigma) = auth_bits.next() else {
                     return Err(MpcError::MissingAndShareForWire(w).into());
                 };
-                let AuthBit(r_sig, mac_r_sig, key_s_sig) = sigma;
+                let AuthBit(r_sig, mac_r_sig_key_s_sig) = sigma;
                 let r = r_sig ^ r_gamma;
-                let mac_r = mac_r_sig ^ mac_r_gamma;
-                let key_s = key_s_sig ^ key_s_gamma;
-                let row0 = AuthBit(r, mac_r, key_s);
-                let row1 = AuthBit(r ^ r_x, mac_r ^ mac_r_x, key_s ^ key_s_x);
-                let row2 = AuthBit(r ^ r_y, mac_r ^ mac_r_y, key_s ^ key_s_y);
+                let mac_r_key_s_0 = xor_shares(&mac_r_sig_key_s_sig, &mac_r_gamma_key_s_gamma);
+                let mac_r_key_s_1 = xor_shares(&mac_r_key_s_0, &mac_r_x_key_s_x);
+                let row0 = AuthBit(r, mac_r_key_s_0.clone());
+                let row1 = AuthBit(r ^ r_x, mac_r_key_s_1.clone());
+                let row2 = AuthBit(r ^ r_y, xor_shares(&mac_r_key_s_0, &mac_r_y_key_s_y));
                 let row3 = AuthBit(
                     r ^ r_x ^ r_y,
-                    mac_r ^ mac_r_x ^ mac_r_y,
-                    key_s ^ key_s_x ^ key_s_y ^ Key(delta.0),
+                    xor_delta_to_keys(
+                        xor_shares(&mac_r_key_s_1, &mac_r_y_key_s_y),
+                        0, // todo: must be the evaluator, currently always 1
+                        delta,
+                    ),
                 );
 
                 let label_x_1 = label_x_0 ^ Label(delta.0);
@@ -287,15 +289,15 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let h2 = hash(label_x_1, label_y_0, w, 2);
                 let h3 = hash(label_x_1, label_y_1, w, 3);
 
-                let row0_label = Label(label_gamma_0.0 ^ (row0.2 .0) ^ (row0.0 & delta).0);
-                let row1_label = Label(label_gamma_0.0 ^ (row1.2 .0) ^ (row1.0 & delta).0);
-                let row2_label = Label(label_gamma_0.0 ^ (row2.2 .0) ^ (row2.0 & delta).0);
-                let row3_label = Label(label_gamma_0.0 ^ (row3.2 .0) ^ (row3.0 & delta).0);
+                let row0_label = Label(label_gamma_0.0 ^ xor_keys(&row0.1).0 ^ (row0.0 & delta).0);
+                let row1_label = Label(label_gamma_0.0 ^ xor_keys(&row1.1).0 ^ (row1.0 & delta).0);
+                let row2_label = Label(label_gamma_0.0 ^ xor_keys(&row2.1).0 ^ (row2.0 & delta).0);
+                let row3_label = Label(label_gamma_0.0 ^ xor_keys(&row3.1).0 ^ (row3.0 & delta).0);
 
-                let garbled0 = hash_xor_triple(&h0, (row0.0, row0.1, row0_label));
-                let garbled1 = hash_xor_triple(&h1, (row1.0, row1.1, row1_label));
-                let garbled2 = hash_xor_triple(&h2, (row2.0, row2.1, row2_label));
-                let garbled3 = hash_xor_triple(&h3, (row3.0, row3.1, row3_label));
+                let garbled0 = hash_xor_triple(&h0, (row0.0, only_macs(&row0.1), row0_label));
+                let garbled1 = hash_xor_triple(&h1, (row1.0, only_macs(&row1.1), row1_label));
+                let garbled2 = hash_xor_triple(&h2, (row2.0, only_macs(&row2.1), row2_label));
+                let garbled3 = hash_xor_triple(&h3, (row3.0, only_macs(&row3.1), row3_label));
 
                 preprocessed_gates[w] = Some(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
             }
@@ -307,26 +309,25 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         garbled_gates = party.recv_from(other_party, "preprocessed gates").await?;
         for (w, gate) in wires(circuit).iter().enumerate() {
             if let Gate::And(x, y) = gate {
-                let (x, _) = wire_shares_and_labels[*x as usize];
-                let (y, _) = wire_shares_and_labels[*y as usize];
-                let (gamma, _) = wire_shares_and_labels[w];
-                let AuthBit(s_x, mac_s_x, key_r_x) = x;
-                let AuthBit(s_y, mac_s_y, key_r_y) = y;
-                let AuthBit(s_gamma, mac_s_gamma, key_r_gamma) = gamma;
+                let (x, _) = wire_shares_and_labels[*x as usize].clone();
+                let (y, _) = wire_shares_and_labels[*y as usize].clone();
+                let (gamma, _) = wire_shares_and_labels[w].clone();
+                let AuthBit(s_x, mac_s_x_key_r_x) = x;
+                let AuthBit(s_y, mac_s_y_key_r_y) = y;
+                let AuthBit(s_gamma, mac_s_gamma_key_r_gamma) = gamma;
                 let Some(sigma) = auth_bits.next() else {
                     return Err(MpcError::MissingAndShareForWire(w).into());
                 };
-                let AuthBit(s_sig, mac_s_sig, key_r_sig) = sigma;
+                let AuthBit(s_sig, mac_s_sig_key_r_sig) = sigma;
                 let s = s_sig ^ s_gamma;
-                let mac_s = mac_s_sig ^ mac_s_gamma;
-                let key_r = key_r_sig ^ key_r_gamma;
-                let row0 = AuthBit(s, mac_s, key_r);
-                let row1 = AuthBit(s ^ s_x, mac_s ^ mac_s_x, key_r ^ key_r_x);
-                let row2 = AuthBit(s ^ s_y, mac_s ^ mac_s_y, key_r ^ key_r_y);
+                let mac_s_key_r_0 = xor_shares(&mac_s_sig_key_r_sig, &mac_s_gamma_key_r_gamma);
+                let mac_s_key_r_1 = xor_shares(&mac_s_key_r_0, &mac_s_x_key_r_x);
+                let row0 = AuthBit(s, mac_s_key_r_0.clone());
+                let row1 = AuthBit(s ^ s_x, mac_s_key_r_1.clone());
+                let row2 = AuthBit(s ^ s_y, xor_shares(&mac_s_key_r_0, &mac_s_y_key_r_y));
                 let row3 = AuthBit(
                     s ^ s_x ^ s_y ^ true,
-                    mac_s ^ mac_s_x ^ mac_s_y,
-                    key_r ^ key_r_x ^ key_r_y,
+                    xor_shares(&mac_s_key_r_1, &mac_s_y_key_r_y),
                 );
                 table_shares[w] = Some([row0, row1, row2, row3]);
             }
@@ -340,7 +341,13 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         .enumerate()
         .map(|(w, gate)| match (participant, gate) {
             (p, Gate::Input(i)) if p != *i => {
-                let (AuthBit(bit, mac, _), _) = wire_shares_and_labels[w];
+                // TODO: this assumes that there will only be 2 participants (and thus 1 MAC)
+                let (AuthBit(bit, macs_and_keys), _) = wire_shares_and_labels[w].clone();
+                let mac = macs_and_keys
+                    .iter()
+                    .filter_map(|s| s.map(|(mac, _)| mac))
+                    .next()
+                    .unwrap();
                 Some((bit, mac))
             }
             _ => None,
@@ -360,9 +367,12 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         let mut inputs = inputs.iter();
         for (w, wire) in wire_shares_from_other_party.into_iter().enumerate() {
             if let Some((s, mac_s)) = wire {
-                let (AuthBit(r, _mac_r, key_s), label_0) = wire_shares_and_labels[w];
                 let Some(input) = inputs.next() else {
                     return Err(MpcError::WireWithoutInput(w as Wire).into());
+                };
+                let (AuthBit(r, mac_r_key_s), label_0) = wire_shares_and_labels[w].clone();
+                let Some((_, key_s)) = mac_r_key_s.get(other_party).copied().unwrap_or(None) else {
+                    todo!()
                 };
                 if mac_s != key_s ^ (s & delta) {
                     return Err(MpcError::InvalidInputMacOnWire(w as Wire).into());
@@ -385,9 +395,12 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         let mut inputs = inputs.iter();
         for (w, wire_a) in wire_shares_from_other_party.into_iter().enumerate() {
             if let Some((r, mac_r)) = wire_a {
-                let (AuthBit(s, _mac_s, key_r), _) = wire_shares_and_labels[w];
+                let (AuthBit(s, mac_s_key_r), _) = wire_shares_and_labels[w].clone();
                 let Some(input) = inputs.next() else {
                     return Err(MpcError::WireWithoutInput(w as Wire).into());
+                };
+                let Some((_, key_r)) = mac_s_key_r.get(other_party).copied().unwrap_or(None) else {
+                    todo!()
                 };
                 if mac_r != key_r ^ (r & delta) {
                     return Err(MpcError::InvalidInputMacOnWire(w as Wire).into());
@@ -481,23 +494,28 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     let label_y = labels[*y as usize];
                     let i = 2 * (input_x as usize) + (input_y as usize);
 
-                    let Some(table_shares) = table_shares[w] else {
-                        return Err(MpcError::MissingShareForWire(w).into());
-                    };
-                    let AuthBit(s, mac_s, key_r) = table_shares[i];
-                    let Some(garbled_gate) = garbled_gates[w] else {
+                    let Some(garbled_gate) = &garbled_gates[w] else {
                         return Err(MpcError::MissingGarbledGate(w).into());
                     };
                     let hash = hash(label_x, label_y, w, i as u8);
-                    let garbled_row = garbled_gate.0[i];
+                    let garbled_row = garbled_gate.0[i].clone();
                     let (r, mac_r, label_share) = hash_xor_triple(&hash, garbled_row);
-                    if mac_r != key_r ^ (r & delta) {
-                        return Err(MpcError::InvalidInputMacOnWire(w).into());
-                    } else {
-                        let input = r ^ s;
-                        let label = Label(label_share.0 ^ mac_s.0);
-                        (input, label)
+
+                    let Some(table_shares) = &table_shares[w] else {
+                        return Err(MpcError::MissingShareForWire(w).into());
+                    };
+                    let AuthBit(s, mac_s_key_r) = table_shares[i].clone();
+                    let mut label = label_share.0;
+                    for (mac_r, mac_s_key_r) in mac_r.iter().zip(mac_s_key_r) {
+                        if let (Some(mac_r), Some((mac_s, key_r))) = (mac_r, mac_s_key_r) {
+                            if *mac_r != key_r ^ (r & delta) {
+                                return Err(MpcError::InvalidInputMacOnWire(w).into());
+                            }
+                            label ^= mac_s.0;
+                        }
+                        // todo: check that the other case is (None, None), fail in all other cases
                     }
+                    (r ^ s, Label(label))
                 }
             };
             values.push(input);
@@ -510,7 +528,13 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     if let Role::PartyContrib = role {
         let mut outputs = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
-            let (AuthBit(bit, mac, _key), _label) = wire_shares_and_labels[w];
+            // TODO: this assumes that there will only be 2 participants (and thus 1 MAC)
+            let (AuthBit(bit, macs_and_keys), _) = &wire_shares_and_labels[w];
+            let mac = macs_and_keys
+                .iter()
+                .filter_map(|s| s.map(|(mac, _)| mac))
+                .next()
+                .unwrap();
             outputs[w] = Some((bit, mac));
         }
         party
@@ -525,7 +549,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         for (w, output_wire) in output_wire_shares.into_iter().enumerate() {
             if let Some((r, mac_r)) = output_wire {
                 let input = values[w];
-                let (AuthBit(s, _mac_s, key_r), _) = wire_shares_and_labels[w];
+                let (AuthBit(s, mac_s_key_r), _) = &wire_shares_and_labels[w];
+                let Some((_, key_r)) = mac_s_key_r.get(other_party).copied().unwrap_or(None) else {
+                    todo!()
+                };
                 if mac_r != key_r ^ (r & delta) {
                     return Err(MpcError::InvalidOutputMacOnWire(w as Wire).into());
                 } else {
@@ -534,7 +561,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             }
         }
         Ok(outputs)
-    }*/
+    }
 }
 
 const MAX_GATES: usize = (u32::MAX >> 4) as usize;

@@ -49,7 +49,10 @@ impl From<channel::Error> for Error {
     }
 }
 
-async fn fpre_channel<C: Channel>(other_party: usize, fpre_channels: &mut Vec<MsgChannel<C>>) -> Result<(), Error> {
+async fn fpre_channel<C: Channel>(
+    other_party: usize,
+    fpre_channels: &mut Vec<MsgChannel<C>>,
+) -> Result<(), Error> {
     for fpre in fpre_channels.iter_mut() {
         let _: () = fpre.recv_from(other_party, "delta (fpre)").await?;
     }
@@ -154,7 +157,11 @@ async fn fpre_channel<C: Channel>(other_party: usize, fpre_channels: &mut Vec<Ms
         let mut keys = vec![];
         for i in 0..fpre_channels.len() {
             bits[i] = if i == fpre_channels.len() - 1 {
-                if current_share == c { false } else { true }
+                if current_share == c {
+                    false
+                } else {
+                    true
+                }
             } else {
                 let share: bool = random();
                 current_share ^= share;
@@ -271,6 +278,45 @@ impl BitXor for AuthBit {
         }
         AuthBit(self.0 ^ rhs.0, macs_and_keys)
     }
+}
+
+pub(crate) fn xor_shares(
+    a: &[Option<(Mac, Key)>],
+    b: &[Option<(Mac, Key)>],
+) -> Vec<Option<(Mac, Key)>> {
+    let mut xor = vec![];
+    for (a, b) in a.iter().zip(b.iter()) {
+        if let (Some((mac_a, key_a)), Some((mac_b, key_b))) = (a, b) {
+            xor.push(Some((*mac_a ^ *mac_b, *key_a ^ *key_b)))
+        } else {
+            xor.push(None);
+        }
+    }
+    xor
+}
+
+pub(crate) fn xor_delta_to_keys(
+    shares: Vec<Option<(Mac, Key)>>,
+    i: usize,
+    delta: Delta,
+) -> Vec<Option<(Mac, Key)>> {
+    let mac_and_key = &mut shares[i].unwrap();
+    mac_and_key.1 = Key((mac_and_key.1 ^ delta).0);
+    shares
+}
+
+pub(crate) fn xor_keys(shares: &[Option<(Mac, Key)>]) -> Key {
+    let mut k = 0;
+    for share in shares {
+        if let Some((_, key)) = share {
+            k ^= key.0;
+        }
+    }
+    Key(k)
+}
+
+pub(crate) fn only_macs(shares: &[Option<(Mac, Key)>]) -> Vec<Option<Mac>> {
+    shares.iter().map(|s| s.map(|(mac, _)| mac)).collect()
 }
 
 #[cfg(test)]
