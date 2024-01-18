@@ -40,14 +40,12 @@ pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
     triple: (bool, Vec<Option<Mac>>, Label),
 ) -> Result<Vec<u8>, Error> {
-    println!("encrypting {garbling_key:?}, {triple:?}");
     let (key, nonce) = hash(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
     let bytes = bincode::serialize(&triple).map_err(|e| Error::SerdeError(format!("{e:?}")))?;
     let ciphertext = cipher
         .encrypt(&nonce, bytes.as_ref())
         .map_err(|_| Error::EncryptionFailed)?;
-    println!("{ciphertext:?}");
     Ok(ciphertext)
 }
 
@@ -55,17 +53,12 @@ pub(crate) fn decrypt(
     garbling_key: &GarblingKey,
     bytes: &[u8],
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
-    println!("decrypting with {garbling_key:?}\n{bytes:?}");
     let (key, nonce) = hash(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
-    let plaintext = cipher.decrypt(&nonce, bytes).map_err(|e| {
-        eprintln!("Decryption failed: {e}");
-        Error::DecryptionFailed
-    })?;
-    let triple =
-        bincode::deserialize(&plaintext).map_err(|e| Error::SerdeError(format!("{e:?}")))?;
-    println!("decrypted as {triple:?}");
-    Ok(triple)
+    let plaintext = cipher
+        .decrypt(&nonce, bytes)
+        .map_err(|_| Error::DecryptionFailed)?;
+    bincode::deserialize(&plaintext).map_err(|e| Error::SerdeError(format!("{e:?}")))
 }
 
 fn hash(
