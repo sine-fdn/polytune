@@ -1,6 +1,10 @@
-use std::collections::HashSet;
-
-use garble_lang::circuit::{Circuit, Gate};
+use garble_lang::{
+    ast::Type,
+    circuit::{Circuit, Gate},
+    compile,
+    literal::Literal,
+    token::UnsignedNumType,
+};
 use multi_tandem::protocol::{simulate_mpc, Error};
 
 #[test]
@@ -15,7 +19,7 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
                 };
 
                 let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
-                assert_eq!(output, vec![None, None, None, None, Some((x ^ y) ^ z)]);
+                assert_eq!(output, vec![x ^ y ^ z]);
             }
         }
     }
@@ -34,7 +38,7 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
                 };
 
                 let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
-                assert_eq!(output, vec![None, None, None, None, Some(x ^ y ^ z)]);
+                assert_eq!(output, vec![x ^ y ^ z]);
             }
         }
     }
@@ -52,7 +56,7 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
             };
 
             let output = simulate_mpc(&circuit, &[&[x], &[y]])?;
-            assert_eq!(output, vec![None, None, Some(!x), Some(!y), Some(x), Some(y)]);
+            assert_eq!(output, vec![!x, !y, x, y]);
         }
     }
     Ok(())
@@ -65,12 +69,19 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
             for z in [true, false] {
                 let circuit = Circuit {
                     input_gates: vec![1, 1, 1],
-                    gates: vec![Gate::Not(0), Gate::Not(1), Gate::Not(2), Gate::Not(3), Gate::Not(4), Gate::Not(5)],
+                    gates: vec![
+                        Gate::Not(0),
+                        Gate::Not(1),
+                        Gate::Not(2),
+                        Gate::Not(3),
+                        Gate::Not(4),
+                        Gate::Not(5),
+                    ],
                     output_gates: vec![3, 4, 5, 6, 7, 8],
                 };
 
                 let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
-                assert_eq!(output, vec![None, None, None, Some(!x), Some(!y), Some(!z), Some(x), Some(y), Some(z)]);
+                assert_eq!(output, vec![!x, !y, !z, x, y, z]);
             }
         }
     }
@@ -89,7 +100,7 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
                 };
 
                 let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
-                assert_eq!(output, vec![None, None, None, None, Some((x & y) & z)]);
+                assert_eq!(output, vec![x & y & z]);
             }
         }
     }
@@ -108,7 +119,36 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
                 };
 
                 let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
-                assert_eq!(output, vec![None, None, None, None, Some(x & y & z)]);
+                assert_eq!(output, vec![x & y & z]);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn eval_garble_prg_3pc() -> Result<(), Error> {
+    let (typed, _, circuit) = compile(
+        "pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }",
+        "main",
+    )
+    .unwrap();
+    for x in 0..3 {
+        for y in 0..3 {
+            for z in 0..3 {
+                let expected = x * y * z;
+                let u8_type = Type::Unsigned(UnsignedNumType::U8);
+                let x = Literal::parse(&typed, &u8_type, &format!("{x}u8")).unwrap();
+                let y = Literal::parse(&typed, &u8_type, &format!("{y}u8")).unwrap();
+                let z = Literal::parse(&typed, &u8_type, &format!("{z}u8")).unwrap();
+                let calculation = format!("{x} * {y} * {z}");
+                let x = x.as_bits(&typed);
+                let y = y.as_bits(&typed);
+                let z = z.as_bits(&typed);
+                let output = simulate_mpc(&circuit, &[&x, &y, &z])?;
+                let result = Literal::from_result_bits(&typed, &u8_type, &output).unwrap();
+                println!("{calculation} = {result}");
+                assert_eq!(format!("{result}"), format!("{expected}u8"));
             }
         }
     }
@@ -138,12 +178,9 @@ fn eval_large_and_circuit() -> Result<(), Error> {
         output_gates,
     };
 
-    let mut expected = vec![None; n + n + gates.len()];
-    expected[n + n + gates.len() - 1] = Some(true);
-
     let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b])?;
     let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
-    assert_eq!(output_smpc, expected);
+    assert_eq!(output_smpc, vec![true]);
     assert_eq!(output_smpc, output_direct);
 
     Ok(())
@@ -211,7 +248,7 @@ fn eval_mixed_circuits() -> Result<(), Error> {
     Ok(())
 }
 
-fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<Option<bool>> {
+fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<bool> {
     let num_inputs: usize = inputs.iter().map(|inputs| inputs.len()).sum();
     let mut output = vec![None; num_inputs + circuit.gates.len()];
     let mut i = 0;
@@ -235,13 +272,11 @@ fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<Option<bool>> {
             }
         }
     }
-    let output_wires: HashSet<usize> = HashSet::from_iter(circuit.output_gates.iter().copied());
-    for (w, output) in output.iter_mut().enumerate() {
-        if !output_wires.contains(&w) {
-            *output = None
-        }
+    let mut outputs = vec![];
+    for w in circuit.output_gates.iter() {
+        outputs.push(output[*w].unwrap());
     }
-    output
+    outputs
 }
 
 fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {

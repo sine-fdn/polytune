@@ -126,7 +126,7 @@ impl From<MpcError> for Error {
 }
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
-pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<Option<bool>>, Error> {
+pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<bool>, Error> {
     let n_parties = inputs.len();
     let eval_i = 0;
     let tokio = Runtime::new().expect("Could not start tokio runtime");
@@ -197,7 +197,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     max_i: usize,
     p_i: usize,
     role: Role,
-) -> Result<Vec<Option<bool>>, Error> {
+) -> Result<Vec<bool>, Error> {
     validate(circuit)?;
     let Some(expected_inputs) = circuit.input_gates.get(p_i as usize) else {
         return Err(Error::PartyDoesNotExist);
@@ -544,11 +544,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 .recv_vec_from(i, "output wire shares", values.len())
                 .await?;
         }
-        let mut outputs: Vec<Option<bool>> = vec![None; wire_shares_and_labels.len()];
+        let mut output_wires: Vec<Option<bool>> = vec![None; wire_shares_and_labels.len()];
         for w in circuit.output_gates.iter().copied() {
             let input = values[w];
             let (AuthBit(s, _), _) = &wire_shares_and_labels[w];
-            outputs[w] = Some(input ^ s);
+            output_wires[w] = Some(input ^ s);
         }
         for i in (0..max_i).filter(|i| *i != p_i) {
             for (w, output_wire) in output_wire_shares[i].iter().enumerate() {
@@ -558,11 +558,15 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     if *mac_r != key_r ^ (*r & delta) {
                         return Err(MpcError::InvalidOutputMacOnWire(w as Wire).into());
                     } else {
-                        let o = outputs[w].unwrap();
-                        outputs[w] = Some(o ^ r);
+                        let o = output_wires[w].unwrap();
+                        output_wires[w] = Some(o ^ r);
                     }
                 }
             }
+        }
+        let mut outputs = vec![];
+        for w in circuit.output_gates.iter() {
+            outputs.push(output_wires[*w].unwrap());
         }
         Ok(outputs)
     }
