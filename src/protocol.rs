@@ -154,8 +154,6 @@ pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<Option<
                     eprintln!("SMPC protocol failed for party A: {:?}", e);
                 }
             });
-            // TODO: only works for the 2 party case at the moment
-            break;
         }
         let (_, ((fpre_channel, party_channel), inputs)) = evaluator;
         return mpc(
@@ -204,7 +202,6 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     }
 
     let fpre_party = 0;
-    let other_party = if p_i == 0 { 1 } else { 0 };
 
     // fn-independent preprocessing:
 
@@ -377,8 +374,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut masked_inputs = vec![None; wire_shares_and_labels.len()];
     if let Role::PartyContrib = role {
+        let mut labels_of_own_inputs: Vec<Vec<Option<Label>>> = vec![vec![]; max_i];
         for i in (0..max_i).filter(|i| *i != p_i) {
-            let mut labels_of_own_inputs = vec![None; wire_shares_and_labels.len()];
+            labels_of_own_inputs[i] = vec![None; wire_shares_and_labels.len()];
             let mut inputs = inputs.iter();
             for (w, wire) in wire_shares_from_others[i].iter().enumerate() {
                 if let Some((s, mac_s)) = wire {
@@ -386,8 +384,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                         return Err(MpcError::WireWithoutInput(w as Wire).into());
                     };
                     let (AuthBit(r, mac_r_key_s), label_0) = wire_shares_and_labels[w].clone();
-                    let Some((_, key_s)) = mac_r_key_s.get(other_party).copied().unwrap_or(None)
-                    else {
+                    let Some((_, key_s)) = mac_r_key_s.get(i).copied().unwrap_or(None) else {
                         todo!()
                     };
                     if *mac_s != key_s ^ (*s & delta) {
@@ -397,15 +394,15 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                         masked_inputs[w] = Some(masked_input);
                         let label_1 = Label(label_0.0 ^ delta.0);
                         let label = if masked_input { label_1 } else { label_0 };
-                        labels_of_own_inputs[w] = Some(label);
+                        labels_of_own_inputs[i][w] = Some(label);
                     }
                 }
             }
             party.send_to(i, "masked inputs", &masked_inputs).await?;
-            party
-                .send_to(eval_i, "contributor labels", &labels_of_own_inputs)
-                .await?;
         }
+        party
+            .send_to(eval_i, "contributor labels", &labels_of_own_inputs)
+            .await?;
     } else {
         for i in (0..max_i).filter(|i| *i != p_i) {
             let mut inputs = inputs.iter();
@@ -415,8 +412,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     let Some(input) = inputs.next() else {
                         return Err(MpcError::WireWithoutInput(w as Wire).into());
                     };
-                    let Some((_, key_r)) = mac_s_key_r.get(other_party).copied().unwrap_or(None)
-                    else {
+                    let Some((_, key_r)) = mac_s_key_r.get(i).copied().unwrap_or(None) else {
                         todo!()
                     };
                     if *mac_r != key_r ^ (*r & delta) {
@@ -439,8 +435,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut input_labels = vec![None; wire_shares_and_labels.len()];
     if let Role::PartyContrib = role {
+        let mut labels_of_other_inputs: Vec<Vec<Option<Label>>> = vec![vec![]; max_i];
         for i in (0..max_i).filter(|i| *i != p_i) {
-            let labels_of_other_inputs: Vec<_> = masked_other_inputs[i]
+            labels_of_other_inputs[i] = masked_other_inputs[i]
                 .iter()
                 .enumerate()
                 .map(|(w, input)| {
@@ -454,10 +451,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     })
                 })
                 .collect();
-            party
-                .send_to(eval_i, "evaluator labels", &labels_of_other_inputs)
-                .await?;
         }
+        party
+            .send_to(eval_i, "evaluator labels", &labels_of_other_inputs)
+            .await?;
     } else {
         for i in (0..max_i).filter(|i| *i != p_i) {
             for (w, input) in masked_other_inputs[i].iter().enumerate() {
@@ -465,23 +462,29 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     masked_inputs[w] = Some(*input);
                 }
             }
-            let labels_of_other_inputs: Vec<Option<Label>> = party
-                .recv_vec_from(i, "other labels", input_labels.len())
-                .await?;
-            for (w, label) in labels_of_other_inputs.into_iter().enumerate() {
-                if let Some(label) = label {
-                    input_labels[w] = Some(label);
+            let labels_of_other_inputs: Vec<Vec<Option<Label>>> =
+                party.recv_vec_from(i, "contributor labels", max_i).await?;
+            for i in 0..max_i {
+                for (w, label) in labels_of_other_inputs[i].iter().enumerate() {
+                    if let Some(label) = label {
+                        input_labels[w] = Some(*label);
+                    }
                 }
             }
-            let labels_of_own_inputs: Vec<Option<Label>> = party
-                .recv_vec_from(i, "evaluator labels", input_labels.len())
+            let labels_of_own_inputs: Vec<Vec<Option<Label>>> = party
+                .recv_vec_from(i, "{p_i}: evaluator labels", max_i)
                 .await?;
-            for (w, label) in labels_of_own_inputs.into_iter().enumerate() {
-                if let Some(label) = label {
-                    input_labels[w] = Some(label);
+            for i in 0..max_i {
+                for (w, label) in labels_of_own_inputs[i].iter().enumerate() {
+                    if let Some(label) = label {
+                        input_labels[w] = Some(*label);
+                    }
                 }
             }
         }
+    }
+    if p_i == eval_i {
+        println!("{p_i}: input labels: {input_labels:#?}");
     }
 
     // circuit evaluation:
@@ -494,8 +497,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         for (w, gate) in wires(circuit).iter().enumerate() {
             let (input, label) = match gate {
                 Gate::Input(_) => {
-                    let input = masked_inputs[w].expect("No value for input gate");
-                    let label = input_labels[w].expect("No label for input gate");
+                    let input =
+                        masked_inputs[w].unwrap_or_else(|| panic!("No value for input gate {w}"));
+                    let label =
+                        input_labels[w].unwrap_or_else(|| panic!("No label for input gate {w}"));
                     (input, label)
                 }
                 Gate::Not(x) => {
@@ -578,7 +583,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         for i in (0..max_i).filter(|i| *i != p_i) {
             for (w, output_wire) in output_wire_shares[i].iter().enumerate() {
                 let (AuthBit(_, mac_s_key_r), _) = &wire_shares_and_labels[w];
-                let Some((_, key_r)) = mac_s_key_r.get(other_party).copied().unwrap_or(None) else {
+                let Some((_, key_r)) = mac_s_key_r.get(i).copied().unwrap_or(None) else {
                     todo!()
                 };
                 if let Some((r, mac_r)) = output_wire {

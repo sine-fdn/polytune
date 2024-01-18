@@ -4,7 +4,7 @@ use garble_lang::circuit::{Circuit, Gate};
 use multi_tandem::protocol::{simulate_mpc, Error};
 
 #[test]
-fn eval_xor_circuits() -> Result<(), Error> {
+fn eval_xor_circuits_2pc() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -23,7 +23,7 @@ fn eval_xor_circuits() -> Result<(), Error> {
 }
 
 #[test]
-fn eval_not_circuits() -> Result<(), Error> {
+fn eval_not_circuits_2pc() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
             let circuit = Circuit {
@@ -40,7 +40,7 @@ fn eval_not_circuits() -> Result<(), Error> {
 }
 
 #[test]
-fn eval_and_circuits() -> Result<(), Error> {
+fn eval_and_circuits_2pc() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -52,6 +52,25 @@ fn eval_and_circuits() -> Result<(), Error> {
 
                 let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
                 assert_eq!(output, vec![None, None, None, None, Some((x & y) & z)]);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn eval_and_circuits_3pc() -> Result<(), Error> {
+    for x in [true, false] {
+        for y in [true, false] {
+            for z in [true, false] {
+                let circuit = Circuit {
+                    input_gates: vec![1, 1, 1],
+                    gates: vec![Gate::And(0, 2), Gate::And(1, 3)],
+                    output_gates: vec![4],
+                };
+
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
+                assert_eq!(output, vec![None, None, None, None, Some(x & y & z)]);
             }
         }
     }
