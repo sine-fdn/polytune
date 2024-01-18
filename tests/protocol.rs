@@ -23,17 +23,55 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
 }
 
 #[test]
+fn eval_xor_circuits_3pc() -> Result<(), Error> {
+    for x in [true, false] {
+        for y in [true, false] {
+            for z in [true, false] {
+                let circuit = Circuit {
+                    input_gates: vec![1, 1, 1],
+                    gates: vec![Gate::Xor(0, 2), Gate::Xor(1, 3)],
+                    output_gates: vec![4],
+                };
+
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
+                assert_eq!(output, vec![None, None, None, None, Some(x ^ y ^ z)]);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn eval_not_circuits_2pc() -> Result<(), Error> {
     for x in [true, false] {
         for y in [true, false] {
             let circuit = Circuit {
                 input_gates: vec![1, 1],
-                gates: vec![Gate::Not(0), Gate::Not(1), Gate::Not(2)],
-                output_gates: vec![2, 3, 4],
+                gates: vec![Gate::Not(0), Gate::Not(1), Gate::Not(2), Gate::Not(3)],
+                output_gates: vec![2, 3, 4, 5],
             };
 
             let output = simulate_mpc(&circuit, &[&[x], &[y]])?;
-            assert_eq!(output, vec![None, None, Some(!x), Some(!y), Some(x)]);
+            assert_eq!(output, vec![None, None, Some(!x), Some(!y), Some(x), Some(y)]);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn eval_not_circuits_3pc() -> Result<(), Error> {
+    for x in [true, false] {
+        for y in [true, false] {
+            for z in [true, false] {
+                let circuit = Circuit {
+                    input_gates: vec![1, 1, 1],
+                    gates: vec![Gate::Not(0), Gate::Not(1), Gate::Not(2), Gate::Not(3), Gate::Not(4), Gate::Not(5)],
+                    output_gates: vec![3, 4, 5, 6, 7, 8],
+                };
+
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
+                assert_eq!(output, vec![None, None, None, Some(!x), Some(!y), Some(!z), Some(x), Some(y), Some(z)]);
+            }
         }
     }
     Ok(())
