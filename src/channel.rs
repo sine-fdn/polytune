@@ -37,18 +37,21 @@ pub trait Channel {
     /// The error that can occur receiving messages over the channel.
     type RecvError: fmt::Debug;
 
-    /// Sends a message to the other party.
+    /// Sends a message to the party with the given index (must be between `0..participants`).
     fn send_bytes_to(
         &mut self,
         party: usize,
         msg: Vec<u8>,
     ) -> impl Future<Output = Result<(), Self::SendError>> + Send;
 
-    /// Blocks until it receives a response from the other party.
+    /// Awaits a response from the party with the given index (must be between `0..participants`).
     fn recv_bytes_from(
         &mut self,
         party: usize,
     ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
+
+    /// Returns the number of participants.
+    fn participants(&self) -> usize;
 }
 
 /// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
@@ -105,6 +108,10 @@ impl<C: Channel> MsgChannel<C> {
                 reason: ErrorKind::InvalidLength,
             })
         }
+    }
+
+    pub(crate) fn participants(&self) -> usize {
+        self.0.participants()
     }
 }
 
@@ -178,5 +185,9 @@ impl Channel for SimpleChannel {
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),
         }
+    }
+
+    fn participants(&self) -> usize {
+        self.s.len()
     }
 }

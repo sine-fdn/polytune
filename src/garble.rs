@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Error {
-    SerdeError(String),
+    Serde(String),
     EncryptionFailed,
     DecryptionFailed,
 }
@@ -42,7 +42,7 @@ pub(crate) fn encrypt(
 ) -> Result<Vec<u8>, Error> {
     let (key, nonce) = hash(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
-    let bytes = bincode::serialize(&triple).map_err(|e| Error::SerdeError(format!("{e:?}")))?;
+    let bytes = bincode::serialize(&triple).map_err(|e| Error::Serde(format!("{e:?}")))?;
     let ciphertext = cipher
         .encrypt(&nonce, bytes.as_ref())
         .map_err(|_| Error::EncryptionFailed)?;
@@ -58,7 +58,7 @@ pub(crate) fn decrypt(
     let plaintext = cipher
         .decrypt(&nonce, bytes)
         .map_err(|_| Error::DecryptionFailed)?;
-    bincode::deserialize(&plaintext).map_err(|e| Error::SerdeError(format!("{e:?}")))
+    bincode::deserialize(&plaintext).map_err(|e| Error::Serde(format!("{e:?}")))
 }
 
 fn hash(

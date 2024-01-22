@@ -40,12 +40,12 @@ enum Error {
     CheatingDetected,
     RandomSharesMismatch(u32, u32),
     AndSharesMismatch(usize, usize),
-    ChannelError(channel::Error),
+    Channel(channel::Error),
 }
 
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
-        Error::ChannelError(e)
+        Error::Channel(e)
     }
 }
 
@@ -54,7 +54,7 @@ async fn fpre_channel<C: Channel>(
     fpre_channels: &mut Vec<MsgChannel<C>>,
 ) -> Result<(), Error> {
     for fpre in fpre_channels.iter_mut() {
-        let _: () = fpre.recv_from(other_party, "delta (fpre)").await?;
+        fpre.recv_from(other_party, "delta (fpre)").await?;
     }
     let mut deltas = vec![];
     for fpre in fpre_channels.iter_mut() {
@@ -157,11 +157,7 @@ async fn fpre_channel<C: Channel>(
         let mut keys = vec![];
         for i in 0..fpre_channels.len() {
             bits[i] = if i == fpre_channels.len() - 1 {
-                if current_share == c {
-                    false
-                } else {
-                    true
-                }
+                current_share != c
             } else {
                 let share: bool = random();
                 current_share ^= share;
@@ -303,7 +299,7 @@ pub(crate) fn xor_delta_to_keys(
     for (j, share) in shares.iter_mut().enumerate() {
         if i == j {
             let share = share.as_mut().unwrap();
-            share.1.0 ^= delta.0
+            share.1 .0 ^= delta.0
         }
     }
     shares
@@ -311,10 +307,8 @@ pub(crate) fn xor_delta_to_keys(
 
 pub(crate) fn xor_keys(shares: &[Option<(Mac, Key)>]) -> Key {
     let mut k = 0;
-    for share in shares {
-        if let Some((_, key)) = share {
-            k ^= key.0;
-        }
+    for (_, key) in shares.iter().flatten() {
+        k ^= key.0;
     }
     Key(k)
 }
@@ -344,8 +338,8 @@ mod tests {
         let delta_b: Delta = b.recv_from(fpre_party, "delta").await?;
 
         // random r1, r2, s1, s2:
-        a.send_to(fpre_party, "random shares", &(2 as u32)).await?;
-        b.send_to(fpre_party, "random shares", &(2 as u32)).await?;
+        a.send_to(fpre_party, "random shares", &2_u32).await?;
+        b.send_to(fpre_party, "random shares", &2_u32).await?;
 
         let mut r = a
             .recv_vec_from(fpre_party, "random shares", 2)
@@ -398,8 +392,8 @@ mod tests {
             let delta_b: Delta = b.recv_from(fpre_party, "delta").await?;
 
             // random r1, r2, s1, s2:
-            a.send_to(fpre_party, "random shares", &(2 as u32)).await?;
-            b.send_to(fpre_party, "random shares", &(2 as u32)).await?;
+            a.send_to(fpre_party, "random shares", &2_u32).await?;
+            b.send_to(fpre_party, "random shares", &2_u32).await?;
 
             let mut r = a
                 .recv_vec_from::<AuthBit>(fpre_party, "random shares", 2)

@@ -262,13 +262,13 @@ fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<bool> {
         let w = i + g;
         match gate {
             Gate::Not(x) => {
-                output[w] = Some(!output[*x as usize].unwrap());
+                output[w] = Some(!output[*x].unwrap());
             }
             Gate::Xor(x, y) => {
-                output[w] = Some(output[*x as usize].unwrap() ^ output[*y as usize].unwrap());
+                output[w] = Some(output[*x].unwrap() ^ output[*y].unwrap());
             }
             Gate::And(x, y) => {
-                output[w] = Some(output[*x as usize].unwrap() & output[*y as usize].unwrap());
+                output[w] = Some(output[*x].unwrap() & output[*y].unwrap());
             }
         }
     }
