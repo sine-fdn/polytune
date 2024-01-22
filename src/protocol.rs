@@ -8,7 +8,7 @@ use tokio::{runtime::Runtime, task};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
-    fpre::{f_pre, Auth, Delta, Mac, Share},
+    fpre::{f_pre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
 };
 
@@ -35,6 +35,22 @@ impl BitXor<Delta> for Label {
     type Output = Self;
 
     fn bitxor(self, rhs: Delta) -> Self::Output {
+        Label(self.0 ^ rhs.0)
+    }
+}
+
+impl BitXor<Mac> for Label {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Mac) -> Self::Output {
+        Label(self.0 ^ rhs.0)
+    }
+}
+
+impl BitXor<Key> for Label {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Key) -> Self::Output {
         Label(self.0 ^ rhs.0)
     }
 }
@@ -296,23 +312,23 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     (&mac_r_key_s_1 ^ &mac_r_y_key_s_y).xor_key(eval_i, delta),
                 );
 
-                let label_x_1 = label_x_0 ^ Label(delta.0);
-                let label_y_1 = label_y_0 ^ Label(delta.0);
+                let label_x_1 = label_x_0 ^ delta;
+                let label_y_1 = label_y_0 ^ delta;
 
                 let k0 = GarblingKey::new(label_x_0, label_y_0, w, 0);
                 let k1 = GarblingKey::new(label_x_0, label_y_1, w, 1);
                 let k2 = GarblingKey::new(label_x_1, label_y_0, w, 2);
                 let k3 = GarblingKey::new(label_x_1, label_y_1, w, 3);
 
-                let row0_label = Label(label_gamma_0.0 ^ row0.xor_keys().0 ^ (row0.0 & delta).0);
-                let row1_label = Label(label_gamma_0.0 ^ row1.xor_keys().0 ^ (row1.0 & delta).0);
-                let row2_label = Label(label_gamma_0.0 ^ row2.xor_keys().0 ^ (row2.0 & delta).0);
-                let row3_label = Label(label_gamma_0.0 ^ row3.xor_keys().0 ^ (row3.0 & delta).0);
+                let row0_label = label_gamma_0 ^ row0.xor_keys() ^ (row0.bit() & delta);
+                let row1_label = label_gamma_0 ^ row1.xor_keys() ^ (row1.bit() & delta);
+                let row2_label = label_gamma_0 ^ row2.xor_keys() ^ (row2.bit() & delta);
+                let row3_label = label_gamma_0 ^ row3.xor_keys() ^ (row3.bit() & delta);
 
-                let garbled0 = encrypt(&k0, (row0.0, row0.macs(), row0_label))?;
-                let garbled1 = encrypt(&k1, (row1.0, row1.macs(), row1_label))?;
-                let garbled2 = encrypt(&k2, (row2.0, row2.macs(), row2_label))?;
-                let garbled3 = encrypt(&k3, (row3.0, row3.macs(), row3_label))?;
+                let garbled0 = encrypt(&k0, (row0.bit(), row0.macs(), row0_label))?;
+                let garbled1 = encrypt(&k1, (row1.bit(), row1.macs(), row1_label))?;
+                let garbled2 = encrypt(&k2, (row2.bit(), row2.macs(), row2_label))?;
+                let garbled3 = encrypt(&k3, (row3.bit(), row3.macs(), row3_label))?;
 
                 preprocessed_gates[w] = Some(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
             }
@@ -342,10 +358,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let row0 = Share(s, mac_s_key_r_0.clone());
                 let row1 = Share(s ^ s_x, mac_s_key_r_1.clone());
                 let row2 = Share(s ^ s_y, &mac_s_key_r_0 ^ &mac_s_y_key_r_y);
-                let row3 = Share(
-                    s ^ s_x ^ s_y ^ true,
-                    &mac_s_key_r_1 ^ &mac_s_y_key_r_y,
-                );
+                let row3 = Share(s ^ s_x ^ s_y ^ true, &mac_s_key_r_1 ^ &mac_s_y_key_r_y);
                 table_shares[w] = Some([row0, row1, row2, row3]);
             }
         }
@@ -386,7 +399,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let Some(input) = inputs.next() else {
                     return Err(MpcError::WireWithoutInput(w as Wire).into());
                 };
-                let (Share(own_share, Auth(own_macs_and_keys)), _) = wire_shares_and_labels[w].clone();
+                let (Share(own_share, Auth(own_macs_and_keys)), _) =
+                    wire_shares_and_labels[w].clone();
                 masked_inputs[w] = Some(*input ^ own_share);
                 for i in (0..max_i).filter(|i| *i != p_i) {
                     let (_, key) = own_macs_and_keys[i].unwrap();
@@ -488,29 +502,31 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     let Some(table_shares) = &table_shares[w] else {
                         return Err(MpcError::MissingShareForWire(w).into());
                     };
-                    let Share(mut s, mac_s_key_r) = table_shares[i].clone();
+
                     let mut label = vec![Label(0); max_i];
                     let mut macs = vec![vec![]; max_i];
+                    let Share(mut s, mac_s_key_r) = table_shares[i].clone();
                     macs[eval_i] = mac_s_key_r.macs();
+                    let Auth(mac_s_key_r) = mac_s_key_r;
                     for p in (0..max_i).filter(|i| *i != eval_i) {
-                        let Some(garbled_gate) = &garbled_gates[p][w] else {
+                        let Some(GarbledGate(garbled_gate)) = &garbled_gates[p][w] else {
                             return Err(MpcError::MissingGarbledGate(w).into());
                         };
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
-                        let garbled_row = garbled_gate.0[i].clone();
+                        let garbled_row = garbled_gate[i].clone();
                         let (r, mac_r, label_share) = decrypt(&garbling_key, &garbled_row)?;
-                        let (_, key_r) = mac_s_key_r.0[p].unwrap();
+                        let (_, key_r) = mac_s_key_r[p].unwrap();
                         if mac_r[eval_i].unwrap() != key_r ^ (r & delta) {
                             return Err(MpcError::InvalidInputMacOnWire(w).into());
                         }
                         s ^= r;
-                        label[p] = Label(label_share.0);
+                        label[p] = label_share;
                         macs[p] = mac_r;
                     }
                     for p in (0..max_i).filter(|i| *i != eval_i) {
                         for party in (0..max_i).filter(|i| *i != p) {
                             if let Some(macs) = macs.get(party) {
-                                label[p].0 ^= macs[p].unwrap().0
+                                label[p] = label[p] ^ macs[p].unwrap()
                             }
                         }
                     }

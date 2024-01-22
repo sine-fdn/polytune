@@ -264,6 +264,10 @@ impl BitXor for &Share {
 }
 
 impl Share {
+    pub(crate) fn bit(&self) -> bool {
+        self.0
+    }
+
     pub(crate) fn macs(&self) -> Vec<Option<Mac>> {
         self.1.macs()
     }
