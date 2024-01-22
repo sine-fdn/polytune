@@ -5,7 +5,7 @@ use garble_lang::{
     literal::Literal,
     token::UnsignedNumType,
 };
-use multi_tandem::protocol::{simulate_mpc, Error};
+use parlay::protocol::{simulate_mpc, Error};
 
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {
