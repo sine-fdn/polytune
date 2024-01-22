@@ -96,7 +96,7 @@ async fn fpre_channel<C: Channel>(
                     mac_and_key[j] = Some((mac, key));
                 }
             }
-            random_shares[i].push(AuthBit(bits[i], mac_and_key));
+            random_shares[i].push(Share(bits[i], Auth(mac_and_key)));
         }
     }
     for (fpre, random_shares) in fpre_channels.iter_mut().zip(random_shares.into_iter()) {
@@ -107,7 +107,7 @@ async fn fpre_channel<C: Channel>(
     let mut num_shares = None;
     let mut shares = vec![];
     for fpre in fpre_channels.iter_mut() {
-        let and_shares: Vec<(AuthBit, AuthBit)> =
+        let and_shares: Vec<(Share, Share)> =
             fpre.recv_from(other_party, "AND shares (fpre)").await?;
         if let Some(num_shares) = num_shares {
             if num_shares != and_shares.len() {
@@ -126,11 +126,11 @@ async fn fpre_channel<C: Channel>(
     let mut has_cheated = false;
     for share in shares.iter() {
         for (i, (a, b)) in share.iter().enumerate() {
-            for (AuthBit(bit, macs_i), round) in [(a, 0), (b, 1)] {
+            for (Share(bit, Auth(macs_i)), round) in [(a, 0), (b, 1)] {
                 for (j, macs_i) in macs_i.iter().enumerate() {
                     if let Some((mac_i, _)) = macs_i {
                         let (a, b) = &share[j];
-                        let AuthBit(_, keys_j) = if round == 0 { a } else { b };
+                        let Share(_, Auth(keys_j)) = if round == 0 { a } else { b };
                         let (_, key_j) = keys_j[i].unwrap();
                         if *mac_i != key_j ^ (*bit & deltas[j]) {
                             has_cheated = true;
@@ -147,7 +147,7 @@ async fn fpre_channel<C: Channel>(
     for share in shares {
         let mut a = false;
         let mut b = false;
-        for (AuthBit(a_i, _), AuthBit(b_i, _)) in share {
+        for (Share(a_i, _), Share(b_i, _)) in share {
             a ^= a_i;
             b ^= b_i;
         }
@@ -179,7 +179,7 @@ async fn fpre_channel<C: Channel>(
                     mac_and_key[j] = Some((mac, key));
                 }
             }
-            and_shares[i].push(AuthBit(bits[i], mac_and_key));
+            and_shares[i].push(Share(bits[i], Auth(mac_and_key)));
         }
     }
     for (fpre, and_shares) in fpre_channels.iter_mut().zip(and_shares.into_iter()) {
@@ -251,77 +251,78 @@ impl BitXor for Key {
 /// party holds bit + MAC, with the other holding key + global key for the corresponding half of the
 /// bit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AuthBit(pub(crate) bool, pub(crate) Vec<Option<(Mac, Key)>>);
+pub(crate) struct Share(pub(crate) bool, pub(crate) Auth);
 
-impl BitXor for AuthBit {
-    type Output = Self;
+impl BitXor for &Share {
+    type Output = Share;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
-        if self.1.len() != rhs.1.len() {
-            panic!(
-                "Cannot XOR AuthBits with different number of parties: {} vs {}",
-                self.1.len(),
-                rhs.1.len()
-            );
-        }
-        let mut macs_and_keys = vec![];
-        for (a, b) in self.1.into_iter().zip(rhs.1.into_iter()) {
-            macs_and_keys.push(match (a, b) {
-                (Some((mac1, key1)), Some((mac2, key2))) => Some((mac1 ^ mac2, key1 ^ key2)),
+        let Share(bit0, auth0) = self;
+        let Share(bit1, auth1) = rhs;
+        Share(bit0 ^ bit1, auth0 ^ auth1)
+    }
+}
+
+impl Share {
+    pub(crate) fn macs(&self) -> Vec<Option<Mac>> {
+        self.1.macs()
+    }
+
+    pub(crate) fn xor_keys(&self) -> Key {
+        self.1.xor_keys()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Auth(pub(crate) Vec<Option<(Mac, Key)>>);
+
+impl BitXor for &Auth {
+    type Output = Auth;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        let Auth(auth0) = self;
+        let Auth(auth1) = rhs;
+        let mut xor = vec![];
+        for (a, b) in auth0.iter().zip(auth1.iter()) {
+            xor.push(match (a, b) {
+                (Some((mac1, key1)), Some((mac2, key2))) => Some((*mac1 ^ *mac2, *key1 ^ *key2)),
                 (None, None) => None,
                 (a, b) => panic!("Invalid AuthBits: {a:?} vs {b:?}"),
             });
         }
-        AuthBit(self.0 ^ rhs.0, macs_and_keys)
+        Auth(xor)
     }
 }
 
-pub(crate) fn xor_shares(
-    a: &[Option<(Mac, Key)>],
-    b: &[Option<(Mac, Key)>],
-) -> Vec<Option<(Mac, Key)>> {
-    let mut xor = vec![];
-    for (a, b) in a.iter().zip(b.iter()) {
-        if let (Some((mac_a, key_a)), Some((mac_b, key_b))) = (a, b) {
-            xor.push(Some((*mac_a ^ *mac_b, *key_a ^ *key_b)))
-        } else {
-            xor.push(None);
+impl Auth {
+    pub(crate) fn macs(&self) -> Vec<Option<Mac>> {
+        self.0.iter().map(|s| s.map(|(mac, _)| mac)).collect()
+    }
+
+    pub(crate) fn xor_keys(&self) -> Key {
+        let mut k = 0;
+        for (_, key) in self.0.iter().flatten() {
+            k ^= key.0;
         }
+        Key(k)
     }
-    xor
-}
 
-pub(crate) fn xor_delta_to_keys(
-    mut shares: Vec<Option<(Mac, Key)>>,
-    i: usize,
-    delta: Delta,
-) -> Vec<Option<(Mac, Key)>> {
-    for (j, share) in shares.iter_mut().enumerate() {
-        if i == j {
-            let share = share.as_mut().unwrap();
-            share.1 .0 ^= delta.0
+    pub(crate) fn xor_key(mut self, i: usize, delta: Delta) -> Auth {
+        for (j, share) in self.0.iter_mut().enumerate() {
+            if i == j {
+                let share = share.as_mut().unwrap();
+                share.1 .0 ^= delta.0
+            }
         }
+        self
     }
-    shares
-}
-
-pub(crate) fn xor_keys(shares: &[Option<(Mac, Key)>]) -> Key {
-    let mut k = 0;
-    for (_, key) in shares.iter().flatten() {
-        k ^= key.0;
-    }
-    Key(k)
-}
-
-pub(crate) fn only_macs(shares: &[Option<(Mac, Key)>]) -> Vec<Option<Mac>> {
-    shares.iter().map(|s| s.map(|(mac, _)| mac)).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         channel::Error,
-        fpre::{f_pre, AuthBit, Delta},
+        fpre::{f_pre, Auth, Delta, Share},
     };
 
     #[tokio::test]
@@ -352,8 +353,8 @@ mod tests {
 
         let (auth_r1, auth_r2) = (r.next().unwrap(), r.next().unwrap());
         let (auth_s1, auth_s2) = (s.next().unwrap(), s.next().unwrap());
-        let (AuthBit(r1, mac_r1_key_s1), AuthBit(r2, mac_r2_key_s2)) = (auth_r1, auth_r2);
-        let (AuthBit(s1, mac_s1_key_r1), AuthBit(s2, mac_s2_key_r2)) = (auth_s1, auth_s2);
+        let (Share(r1, Auth(mac_r1_key_s1)), Share(r2, Auth(mac_r2_key_s2))) = (auth_r1, auth_r2);
+        let (Share(s1, Auth(mac_s1_key_r1)), Share(s2, Auth(mac_s2_key_r2))) = (auth_s1, auth_s2);
         let (mac_r1, key_s1) = mac_r1_key_s1[1].unwrap();
         let (mac_r2, key_s2) = mac_r2_key_s2[1].unwrap();
         let (mac_s1, key_r1) = mac_s1_key_r1[0].unwrap();
@@ -396,18 +397,18 @@ mod tests {
             b.send_to(fpre_party, "random shares", &2_u32).await?;
 
             let mut r = a
-                .recv_vec_from::<AuthBit>(fpre_party, "random shares", 2)
+                .recv_vec_from::<Share>(fpre_party, "random shares", 2)
                 .await?
                 .into_iter();
             let mut s = b
-                .recv_vec_from::<AuthBit>(fpre_party, "random shares", 2)
+                .recv_vec_from::<Share>(fpre_party, "random shares", 2)
                 .await?
                 .into_iter();
 
             let (auth_r1, auth_r2) = (r.next().unwrap(), r.next().unwrap());
             let (auth_s1, auth_s2) = (s.next().unwrap(), s.next().unwrap());
-            let (AuthBit(r1, mac_r1_key_s1), AuthBit(r2, _)) = (auth_r1.clone(), auth_r2.clone());
-            let (AuthBit(s1, mac_s1_key_r1), AuthBit(s2, _)) = (auth_s1.clone(), auth_s2.clone());
+            let (Share(r1, Auth(mac_r1_key_s1)), Share(r2, _)) = (auth_r1.clone(), auth_r2.clone());
+            let (Share(s1, Auth(mac_s1_key_r1)), Share(s2, _)) = (auth_s1.clone(), auth_s2.clone());
             let (mac_r1, key_s1) = mac_r1_key_s1[1].unwrap();
             let (_, key_r1) = mac_s1_key_r1[0].unwrap();
 
@@ -417,13 +418,13 @@ mod tests {
                     .await?;
                 b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
                     .await?;
-                let AuthBit(r3, mac_r3_key_s3) = a
-                    .recv_from::<Vec<AuthBit>>(fpre_party, "AND shares")
+                let Share(r3, Auth(mac_r3_key_s3)) = a
+                    .recv_from::<Vec<Share>>(fpre_party, "AND shares")
                     .await?
                     .pop()
                     .unwrap();
-                let AuthBit(s3, mac_s3_key_r3) = b
-                    .recv_from::<Vec<AuthBit>>(fpre_party, "AND shares")
+                let Share(s3, Auth(mac_s3_key_r3)) = b
+                    .recv_from::<Vec<Share>>(fpre_party, "AND shares")
                     .await?
                     .pop()
                     .unwrap();
@@ -434,7 +435,7 @@ mod tests {
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted = AuthBit(!r1, vec![None, Some((mac_r1, key_s1))]);
+                let auth_r1_corrupted = Share(!r1, Auth(vec![None, Some((mac_r1, key_s1))]));
                 a.send_to(
                     fpre_party,
                     "AND shares",
@@ -454,7 +455,8 @@ mod tests {
             } else if i == 2 {
                 // A would need knowledge of B's key and delta to corrupt the shared secret:
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
-                let auth_r1_corrupted = AuthBit(!r1, vec![None, Some((mac_r1_corrupted, key_s1))]);
+                let auth_r1_corrupted =
+                    Share(!r1, Auth(vec![None, Some((mac_r1_corrupted, key_s1))]));
                 a.send_to(
                     fpre_party,
                     "AND shares",
@@ -464,13 +466,13 @@ mod tests {
                 b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
                     .await?;
                 assert_eq!(
-                    a.recv_from::<Vec<AuthBit>>(fpre_party, "AND shares")
+                    a.recv_from::<Vec<Share>>(fpre_party, "AND shares")
                         .await?
                         .len(),
                     1
                 );
                 assert_eq!(
-                    b.recv_from::<Vec<AuthBit>>(fpre_party, "AND shares")
+                    b.recv_from::<Vec<Share>>(fpre_party, "AND shares")
                         .await?
                         .len(),
                     1
