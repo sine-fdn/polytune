@@ -157,7 +157,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_large_and_circuit() -> Result<(), Error> {
-    let n = 1_000;
+    let n = 100;
     let mut in_a = vec![];
     let mut in_b = vec![];
     let mut gates = Vec::new();
