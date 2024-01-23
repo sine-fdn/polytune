@@ -1,9 +1,6 @@
 use garble_lang::{
-    ast::Type,
     circuit::{Circuit, Gate},
     compile,
-    literal::Literal,
-    token::UnsignedNumType,
 };
 use parlay::protocol::{simulate_mpc, Error};
 
@@ -128,25 +125,17 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_garble_prg_3pc() -> Result<(), Error> {
-    let (typed, _, circuit) = compile(
-        "pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }",
-        "main",
-    )
-    .unwrap();
+    let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
     for x in 0..3 {
         for y in 0..3 {
             for z in 0..3 {
                 let expected = x * y * z;
-                let u8_type = Type::Unsigned(UnsignedNumType::U8);
-                let x = Literal::parse(&typed, &u8_type, &format!("{x}u8")).unwrap();
-                let y = Literal::parse(&typed, &u8_type, &format!("{y}u8")).unwrap();
-                let z = Literal::parse(&typed, &u8_type, &format!("{z}u8")).unwrap();
-                let calculation = format!("{x} * {y} * {z}");
-                let x = x.as_bits(&typed);
-                let y = y.as_bits(&typed);
-                let z = z.as_bits(&typed);
-                let output = simulate_mpc(&circuit, &[&x, &y, &z])?;
-                let result = Literal::from_result_bits(&typed, &u8_type, &output).unwrap();
+                let calculation = format!("{x}u8 * {y}u8 * {z}u8");
+                let x = prg.parse_arg(0, &format!("{x}u8")).unwrap().as_bits();
+                let y = prg.parse_arg(1, &format!("{y}u8")).unwrap().as_bits();
+                let z = prg.parse_arg(2, &format!("{z}u8")).unwrap().as_bits();
+                let output = simulate_mpc(&prg.circuit, &[&x, &y, &z])?;
+                let result = prg.parse_output(&output).unwrap();
                 println!("{calculation} = {result}");
                 assert_eq!(format!("{result}"), format!("{expected}u8"));
             }

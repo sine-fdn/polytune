@@ -7,7 +7,7 @@ use chacha20poly1305::{
 
 use crate::{
     fpre::Mac,
-    protocol::{Label, Wire},
+    protocol::Label,
 };
 
 #[derive(Debug, Clone)]
@@ -21,12 +21,12 @@ pub enum Error {
 pub(crate) struct GarblingKey {
     label_x: Label,
     label_y: Label,
-    w: Wire,
+    w: usize,
     row: u8,
 }
 
 impl GarblingKey {
-    pub(crate) fn new(label_x: Label, label_y: Label, w: Wire, row: u8) -> Self {
+    pub(crate) fn new(label_x: Label, label_y: Label, w: usize, row: u8) -> Self {
         Self {
             label_x,
             label_y,
