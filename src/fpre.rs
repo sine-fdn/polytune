@@ -290,8 +290,7 @@ impl BitXor for &Auth {
         for (a, b) in auth0.iter().zip(auth1.iter()) {
             xor.push(match (a, b) {
                 (Some((mac1, key1)), Some((mac2, key2))) => Some((*mac1 ^ *mac2, *key1 ^ *key2)),
-                (None, None) => None,
-                (a, b) => panic!("Invalid AuthBits: {a:?} vs {b:?}"),
+                _ => None,
             });
         }
         Auth(xor)
@@ -314,8 +313,9 @@ impl Auth {
     pub(crate) fn xor_key(mut self, i: usize, delta: Delta) -> Auth {
         for (j, share) in self.0.iter_mut().enumerate() {
             if i == j {
-                let share = share.as_mut().unwrap();
-                share.1 .0 ^= delta.0
+                if let Some((_, key)) = share.as_mut() {
+                    key.0 ^= delta.0
+                }
             }
         }
         self
