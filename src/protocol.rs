@@ -1,7 +1,7 @@
 //! Secure 2-party computation protocol with communication via channels.
 use std::ops::BitXor;
 
-use garble_lang::circuit::{self, Circuit};
+use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::random;
 use serde::{Deserialize, Serialize};
 use tokio::{runtime::Runtime, task};
@@ -11,9 +11,6 @@ use crate::{
     fpre::{f_pre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
 };
-
-/// The index of a particular wire in a circuit.
-pub(crate) type Wire = usize;
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,21 +88,6 @@ impl From<channel::Error> for Error {
     }
 }
 
-/// Errors occurring during the validation or the execution of the MPC protocol.
-#[derive(Debug, PartialEq, Eq)]
-pub enum CircuitError {
-    /// The gate with the specified wire contains invalid gate connections.
-    InvalidGate(usize),
-    /// The specified output gate does not exist in the circuit.
-    InvalidOutput(usize),
-    /// The circuit does not specify any output gates.
-    EmptyOutputs,
-    /// The provided circuit has too many gates to be processed.
-    MaxCircuitSizeExceeded,
-    /// The provided index does not correspond to any party.
-    PartyIndexOutOfBounds,
-}
-
 impl From<CircuitError> for Error {
     fn from(e: CircuitError) -> Self {
         Self::CircuitError(e)
@@ -122,17 +104,17 @@ impl From<garble::Error> for Error {
 #[derive(Debug)]
 pub enum MpcError {
     /// No secret share was sent for the specified wire.
-    MissingShareForWire(Wire),
+    MissingShareForWire(usize),
     /// No AND share was sent for the specified wire.
-    MissingAndShareForWire(Wire),
+    MissingAndShareForWire(usize),
     /// The input on the specified wire did not match the message authenatication code.
-    InvalidInputMacOnWire(Wire),
+    InvalidInputMacOnWire(usize),
     /// The specified wire is not an input wire or the input is missing.
-    WireWithoutInput(Wire),
+    WireWithoutInput(usize),
     /// No garbled gate was sent for the specified wire.
-    MissingGarbledGate(Wire),
+    MissingGarbledGate(usize),
     /// The output on the specified wire did not match the message authenatication code.
-    InvalidOutputMacOnWire(Wire),
+    InvalidOutputMacOnWire(usize),
 }
 
 impl From<MpcError> for Error {
@@ -211,7 +193,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     p_i: usize,
     role: Role,
 ) -> Result<Vec<bool>, Error> {
-    validate(circuit)?;
+    circuit.validate()?;
     let Some(expected_inputs) = circuit.input_gates.get(p_i) else {
         return Err(Error::PartyDoesNotExist);
     };
@@ -231,11 +213,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let delta: Delta = fpre.recv_from(fpre_party, "delta").await?;
 
     let num_input_gates: usize = circuit.input_gates.iter().sum();
-    let num_and_gates = circuit
-        .gates
-        .iter()
-        .filter(|g| matches!(g, circuit::Gate::And(_, _)))
-        .count();
+    let num_and_gates = circuit.and_gates();
     let num_gates = num_input_gates + circuit.gates.len();
     let secret_bits = num_input_gates + num_and_gates;
     fpre.send_to(fpre_party, "random shares", &(secret_bits as u32))
@@ -245,8 +223,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let mut random_shares = random_shares.into_iter();
 
     let mut wire_shares_and_labels = vec![(Share(false, Auth(vec![])), Label(0)); num_gates];
-    for (w, gate) in wires(circuit).iter().enumerate() {
-        if let Gate::Input(_) | Gate::And(_, _) = gate {
+    for (w, gate) in circuit.wires().iter().enumerate() {
+        if let Wire::Input(_) | Wire::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
                 return Err(MpcError::MissingShareForWire(w).into());
             };
@@ -262,19 +240,19 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     // fn-dependent preprocessing:
 
     let mut and_shares = Vec::new();
-    for (w, gate) in wires(circuit).iter().enumerate() {
+    for (w, gate) in circuit.wires().iter().enumerate() {
         match gate {
-            Gate::Input(_) => {}
-            Gate::Not(x) => {
+            Wire::Input(_) => {}
+            Wire::Not(x) => {
                 let (auth_bit, label) = wire_shares_and_labels[*x].clone();
                 wire_shares_and_labels[w] = (auth_bit, label ^ delta);
             }
-            Gate::Xor(x, y) => {
+            Wire::Xor(x, y) => {
                 let (share_x, label_x) = wire_shares_and_labels[*x].clone();
                 let (share_y, label_y) = wire_shares_and_labels[*y].clone();
                 wire_shares_and_labels[w] = (&share_x ^ &share_y, label_x ^ label_y);
             }
-            Gate::And(x, y) => {
+            Wire::And(x, y) => {
                 let (share_x, _) = wire_shares_and_labels[*x].clone();
                 let (share_y, _) = wire_shares_and_labels[*y].clone();
                 and_shares.push((share_x, share_y));
@@ -289,8 +267,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let mut garbled_gates: Vec<Vec<Option<GarbledGate>>> = vec![vec![None; num_gates]; max_i];
     if let Role::PartyContrib = role {
         let mut preprocessed_gates = vec![None; num_gates];
-        for (w, gate) in wires(circuit).iter().enumerate() {
-            if let Gate::And(x, y) = gate {
+        for (w, gate) in circuit.wires().iter().enumerate() {
+            if let Wire::And(x, y) = gate {
                 let x = wire_shares_and_labels[*x].clone();
                 let y = wire_shares_and_labels[*y].clone();
                 let gamma = wire_shares_and_labels[w].clone();
@@ -340,8 +318,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         for i in (0..max_i).filter(|i| *i != eval_i) {
             garbled_gates[i] = parties.recv_from(i, "preprocessed gates").await?
         }
-        for (w, gate) in wires(circuit).iter().enumerate() {
-            if let Gate::And(x, y) = gate {
+        for (w, gate) in circuit.wires().iter().enumerate() {
+            if let Wire::And(x, y) = gate {
                 let (x, _) = wire_shares_and_labels[*x].clone();
                 let (y, _) = wire_shares_and_labels[*y].clone();
                 let (gamma, _) = wire_shares_and_labels[w].clone();
@@ -368,8 +346,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut wire_shares_for_others: Vec<Vec<Option<(bool, Mac)>>> =
         vec![vec![None; wire_shares_and_labels.len()]; max_i];
-    for (w, gate) in wires(circuit).iter().enumerate() {
-        if let Gate::Input(i) = gate {
+    for (w, gate) in circuit.wires().iter().enumerate() {
+        if let Wire::Input(i) = gate {
             if p_i != *i {
                 let (Share(bit, Auth(macs_and_keys)), _) = wire_shares_and_labels[w].clone();
                 let (mac, _) = macs_and_keys[*i].unwrap();
@@ -393,11 +371,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut inputs = inputs.iter();
     let mut masked_inputs: Vec<Option<bool>> = vec![None; wire_shares_and_labels.len()];
-    for (w, gate) in wires(circuit).iter().enumerate() {
-        if let Gate::Input(p_input) = gate {
+    for (w, gate) in circuit.wires().iter().enumerate() {
+        if let Wire::Input(p_input) = gate {
             if p_i == *p_input {
                 let Some(input) = inputs.next() else {
-                    return Err(MpcError::WireWithoutInput(w as Wire).into());
+                    return Err(MpcError::WireWithoutInput(w).into());
                 };
                 let (Share(own_share, Auth(own_macs_and_keys)), _) =
                     wire_shares_and_labels[w].clone();
@@ -406,7 +384,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                     let (_, key) = own_macs_and_keys[i].unwrap();
                     let (other_share, mac) = wire_shares_from_others[i][w].unwrap();
                     if mac != key ^ (other_share & delta) {
-                        return Err(MpcError::InvalidInputMacOnWire(w as Wire).into());
+                        return Err(MpcError::InvalidInputMacOnWire(w).into());
                     } else {
                         *masked_inputs[w].as_mut().unwrap() ^= other_share;
                     }
@@ -471,9 +449,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         // nothing to do for party A
     } else {
         let mut labels: Vec<Vec<Label>> = Vec::with_capacity(num_gates);
-        for (w, gate) in wires(circuit).iter().enumerate() {
+        for (w, gate) in circuit.wires().iter().enumerate() {
             let (input, label) = match gate {
-                Gate::Input(_) => {
+                Wire::Input(_) => {
                     let input =
                         masked_inputs[w].unwrap_or_else(|| panic!("No value for input gate {w}"));
                     let label = input_labels[w]
@@ -481,19 +459,19 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                         .unwrap_or_else(|| panic!("No label for input gate {w}"));
                     (input, label.clone())
                 }
-                Gate::Not(x) => {
+                Wire::Not(x) => {
                     let input = values[*x];
                     let label = &labels[*x];
                     (!input, label.clone())
                 }
-                Gate::Xor(x, y) => {
+                Wire::Xor(x, y) => {
                     let input_x = values[*x];
                     let label_x = &labels[*x];
                     let input_y = values[*y];
                     let label_y = &labels[*y];
                     (input_x ^ input_y, xor_labels(label_x, label_y))
                 }
-                Gate::And(x, y) => {
+                Wire::And(x, y) => {
                     let input_x = values[*x];
                     let label_x = &labels[*x];
                     let input_y = values[*y];
@@ -570,7 +548,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let (_, key_r) = mac_s_key_r.get(i).copied().unwrap().unwrap();
                 if let Some((r, mac_r)) = output_wire {
                     if *mac_r != key_r ^ (*r & delta) {
-                        return Err(MpcError::InvalidOutputMacOnWire(w as Wire).into());
+                        return Err(MpcError::InvalidOutputMacOnWire(w).into());
                     } else {
                         let o = output_wires[w].unwrap();
                         output_wires[w] = Some(o ^ r);
@@ -584,73 +562,4 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         }
         Ok(outputs)
     }
-}
-
-const MAX_GATES: usize = (u32::MAX >> 4) as usize;
-const MAX_AND_GATES: usize = (u32::MAX >> 8) as usize;
-
-enum Gate {
-    Input(usize),
-    Xor(usize, usize),
-    And(usize, usize),
-    Not(usize),
-}
-
-fn wires(circuit: &Circuit) -> Vec<Gate> {
-    let mut gates = vec![];
-    for (party, inputs) in circuit.input_gates.iter().enumerate() {
-        for _ in 0..*inputs {
-            gates.push(Gate::Input(party))
-        }
-    }
-    for gate in circuit.gates.iter() {
-        let gate = match gate {
-            circuit::Gate::Xor(x, y) => Gate::Xor(*x, *y),
-            circuit::Gate::And(x, y) => Gate::And(*x, *y),
-            circuit::Gate::Not(x) => Gate::Not(*x),
-        };
-        gates.push(gate);
-    }
-    gates
-}
-
-fn validate(circuit: &Circuit) -> Result<(), CircuitError> {
-    let mut num_and_gates = 0;
-    let wires = wires(circuit);
-    for (i, g) in wires.iter().enumerate() {
-        match g {
-            Gate::Input(_) => {}
-            &Gate::Xor(x, y) => {
-                if x >= i || y >= i {
-                    return Err(CircuitError::InvalidGate(i));
-                }
-            }
-            &Gate::And(x, y) => {
-                if x >= i || y >= i {
-                    return Err(CircuitError::InvalidGate(i));
-                }
-                num_and_gates += 1;
-            }
-            &Gate::Not(x) => {
-                if x >= i {
-                    return Err(CircuitError::InvalidGate(i));
-                }
-            }
-        }
-    }
-    if circuit.output_gates.is_empty() {
-        return Err(CircuitError::EmptyOutputs);
-    }
-    for &o in circuit.output_gates.iter() {
-        if o >= wires.len() {
-            return Err(CircuitError::InvalidOutput(o));
-        }
-    }
-    if num_and_gates > MAX_AND_GATES {
-        return Err(CircuitError::MaxCircuitSizeExceeded);
-    }
-    if wires.len() > MAX_GATES {
-        return Err(CircuitError::MaxCircuitSizeExceeded);
-    }
-    Ok(())
 }
