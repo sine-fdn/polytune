@@ -63,27 +63,25 @@ async fn fpre_channel<C: Channel>(
         deltas.push(delta);
     }
 
-    let mut num_shares = None;
+    let mut num_shares = 0;
     for fpre in fpre_channels.iter_mut() {
         let r: u32 = fpre.recv_from(other_party, "random shares (fpre)").await?;
-        if let Some(random_shares) = num_shares {
-            if random_shares != r {
-                return Err(Error::RandomSharesMismatch(random_shares, r));
-            }
+        if num_shares > 0 && num_shares != r {
+            return Err(Error::RandomSharesMismatch(num_shares, r));
         }
-        num_shares = Some(r);
+        num_shares = r;
     }
-    let num_shares = num_shares.unwrap() as usize;
+    let num_shares = num_shares as usize;
     let mut random_shares = vec![vec![]; fpre_channels.len()];
     for _ in 0..num_shares {
         let mut bits = vec![];
         let mut keys = vec![];
         for i in 0..fpre_channels.len() {
             bits.push(random());
-            keys.push(vec![None; fpre_channels.len()]);
+            keys.push(vec![Key(0); fpre_channels.len()]);
             for j in 0..fpre_channels.len() {
                 if i != j {
-                    keys[i][j] = Some(Key(random()));
+                    keys[i][j] = Key(random());
                 }
             }
         }
@@ -91,8 +89,8 @@ async fn fpre_channel<C: Channel>(
             let mut mac_and_key = vec![None; fpre_channels.len()];
             for j in 0..fpre_channels.len() {
                 if i != j {
-                    let mac = keys[j][i].unwrap() ^ (bits[i] & deltas[j]);
-                    let key = keys[i][j].unwrap();
+                    let mac = keys[j][i] ^ (bits[i] & deltas[j]);
+                    let key = keys[i][j];
                     mac_and_key[j] = Some((mac, key));
                 }
             }
@@ -131,9 +129,10 @@ async fn fpre_channel<C: Channel>(
                     if let Some((mac_i, _)) = macs_i {
                         let (a, b) = &share[j];
                         let Share(_, Auth(keys_j)) = if round == 0 { a } else { b };
-                        let (_, key_j) = keys_j[i].unwrap();
-                        if *mac_i != key_j ^ (*bit & deltas[j]) {
-                            has_cheated = true;
+                        if let Some((_, key_j)) = keys_j[i] {
+                            if *mac_i != key_j ^ (*bit & deltas[j]) {
+                                has_cheated = true;
+                            }
                         }
                     }
                 }
@@ -163,10 +162,10 @@ async fn fpre_channel<C: Channel>(
                 current_share ^= share;
                 share
             };
-            keys.push(vec![None; fpre_channels.len()]);
+            keys.push(vec![Key(0); fpre_channels.len()]);
             for j in 0..fpre_channels.len() {
                 if i != j {
-                    keys[i][j] = Some(Key(random()));
+                    keys[i][j] = Key(random());
                 }
             }
         }
@@ -174,8 +173,8 @@ async fn fpre_channel<C: Channel>(
             let mut mac_and_key = vec![None; fpre_channels.len()];
             for j in 0..fpre_channels.len() {
                 if i != j {
-                    let mac = keys[j][i].unwrap() ^ (bits[i] & deltas[j]);
-                    let key = keys[i][j].unwrap();
+                    let mac = keys[j][i] ^ (bits[i] & deltas[j]);
+                    let key = keys[i][j];
                     mac_and_key[j] = Some((mac, key));
                 }
             }
@@ -290,8 +289,7 @@ impl BitXor for &Auth {
         for (a, b) in auth0.iter().zip(auth1.iter()) {
             xor.push(match (a, b) {
                 (Some((mac1, key1)), Some((mac2, key2))) => Some((*mac1 ^ *mac2, *key1 ^ *key2)),
-                (None, None) => None,
-                (a, b) => panic!("Invalid AuthBits: {a:?} vs {b:?}"),
+                _ => None,
             });
         }
         Auth(xor)
@@ -314,8 +312,9 @@ impl Auth {
     pub(crate) fn xor_key(mut self, i: usize, delta: Delta) -> Auth {
         for (j, share) in self.0.iter_mut().enumerate() {
             if i == j {
-                let share = share.as_mut().unwrap();
-                share.1 .0 ^= delta.0
+                if let Some((_, key)) = share.as_mut() {
+                    key.0 ^= delta.0
+                }
             }
         }
         self

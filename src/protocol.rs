@@ -100,7 +100,7 @@ impl From<garble::Error> for Error {
     }
 }
 
-/// A custom error type for all SMPC operations.
+/// A custom error type for all MPC operations.
 #[derive(Debug)]
 pub enum MpcError {
     /// No secret share was sent for the specified wire.
@@ -109,8 +109,14 @@ pub enum MpcError {
     MissingAndShareForWire(usize),
     /// The input on the specified wire did not match the message authenatication code.
     InvalidInputMacOnWire(usize),
+    /// Two different parties tried to provide an input mask for the wire.
+    ConflictingInputMask(usize),
     /// The specified wire is not an input wire or the input is missing.
     WireWithoutInput(usize),
+    /// No (masked) value was sent for the wire.
+    WireWithoutValue(usize),
+    /// No label was sent for the wire.
+    WireWithoutLabel(usize),
     /// No garbled gate was sent for the specified wire.
     MissingGarbledGate(usize),
     /// The output on the specified wire did not match the message authenatication code.
@@ -126,7 +132,7 @@ impl From<MpcError> for Error {
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<bool>, Error> {
     let n_parties = inputs.len();
-    let eval_i = 0;
+    let p_eval = 0;
     let tokio = Runtime::new().expect("Could not start tokio runtime");
     let parties = SimpleChannel::channels(n_parties);
     tokio.block_on(async {
@@ -141,7 +147,7 @@ pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<bool>, 
             return Ok(vec![]);
         };
 
-        for (party, ((fpre_channel, party_channel), inputs)) in parties {
+        for (p_own, ((fpre_channel, party_channel), inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
             task::spawn(async move {
@@ -150,8 +156,8 @@ pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<bool>, 
                     &inputs,
                     fpre_channel,
                     party_channel,
-                    eval_i,
-                    party,
+                    p_eval,
+                    p_own,
                     Role::PartyContrib,
                 )
                 .await
@@ -166,8 +172,8 @@ pub fn simulate_mpc(circuit: &Circuit, inputs: &[&[bool]]) -> Result<Vec<bool>, 
             inputs,
             fpre_channel,
             party_channel,
-            eval_i,
-            eval_i,
+            p_eval,
+            p_eval,
             Role::PartyEval,
         )
         .await
@@ -189,12 +195,12 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     inputs: &[bool],
     mut fpre: MsgChannel<Fpre>,
     mut parties: MsgChannel<Party>,
-    eval_i: usize,
-    p_i: usize,
+    p_eval: usize,
+    p_own: usize,
     role: Role,
 ) -> Result<Vec<bool>, Error> {
     circuit.validate()?;
-    let Some(expected_inputs) = circuit.input_gates.get(p_i) else {
+    let Some(expected_inputs) = circuit.input_gates.get(p_own) else {
         return Err(Error::PartyDoesNotExist);
     };
     if *expected_inputs != inputs.len() {
@@ -205,7 +211,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     }
 
     let fpre_party = 0;
-    let max_i = parties.participants();
+    let p_max = parties.participants();
 
     // fn-independent preprocessing:
 
@@ -222,7 +228,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let random_shares: Vec<Share> = fpre.recv_from(fpre_party, "random shares").await?;
     let mut random_shares = random_shares.into_iter();
 
-    let mut wire_shares_and_labels = vec![(Share(false, Auth(vec![])), Label(0)); num_gates];
+    //let mut wire_shares_and_labels = vec![(Share(false, Auth(vec![])), Label(0)); num_gates];
+    let mut shares = vec![Share(false, Auth(vec![])); num_gates];
+    let mut labels = vec![Label(0); num_gates];
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(_) | Wire::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
@@ -233,7 +241,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 // the labels are calculated later by the evaluator, so we just use 0 for now:
                 Role::PartyEval => Label(0),
             };
-            wire_shares_and_labels[w] = (share, label);
+            shares[w] = share;
+            labels[w] = label;
         }
     }
 
@@ -244,37 +253,30 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         match gate {
             Wire::Input(_) => {}
             Wire::Not(x) => {
-                let (auth_bit, label) = wire_shares_and_labels[*x].clone();
-                wire_shares_and_labels[w] = (auth_bit, label ^ delta);
+                shares[w] = shares[*x].clone();
+                labels[w] = labels[*x] ^ delta;
             }
             Wire::Xor(x, y) => {
-                let (share_x, label_x) = wire_shares_and_labels[*x].clone();
-                let (share_y, label_y) = wire_shares_and_labels[*y].clone();
-                wire_shares_and_labels[w] = (&share_x ^ &share_y, label_x ^ label_y);
+                shares[w] = &shares[*x] ^ &shares[*y];
+                labels[w] = labels[*x] ^ labels[*y];
             }
             Wire::And(x, y) => {
-                let (share_x, _) = wire_shares_and_labels[*x].clone();
-                let (share_y, _) = wire_shares_and_labels[*y].clone();
-                and_shares.push((share_x, share_y));
+                and_shares.push((shares[*x].clone(), shares[*y].clone()));
             }
         }
     }
     fpre.send_to(fpre_party, "AND shares", &and_shares).await?;
     let auth_bits: Vec<Share> = fpre.recv_from(fpre_party, "AND shares").await?;
     let mut auth_bits = auth_bits.into_iter();
-
     let mut table_shares = vec![None; num_gates];
-    let mut garbled_gates: Vec<Vec<Option<GarbledGate>>> = vec![vec![None; num_gates]; max_i];
+    let mut garbled_gates: Vec<Vec<Option<GarbledGate>>> = vec![vec![None; num_gates]; p_max];
     if let Role::PartyContrib = role {
         let mut preprocessed_gates = vec![None; num_gates];
         for (w, gate) in circuit.wires().iter().enumerate() {
             if let Wire::And(x, y) = gate {
-                let x = wire_shares_and_labels[*x].clone();
-                let y = wire_shares_and_labels[*y].clone();
-                let gamma = wire_shares_and_labels[w].clone();
-                let (Share(r_x, mac_r_x_key_s_x), label_x_0) = x;
-                let (Share(r_y, mac_r_y_key_s_y), label_y_0) = y;
-                let (Share(r_gamma, mac_r_gamma_key_s_gamma), label_gamma_0) = gamma;
+                let Share(r_x, mac_r_x_key_s_x) = shares[*x].clone();
+                let Share(r_y, mac_r_y_key_s_y) = shares[*y].clone();
+                let Share(r_gamma, mac_r_gamma_key_s_gamma) = shares[w].clone();
                 let Some(sigma) = auth_bits.next() else {
                     return Err(MpcError::MissingAndShareForWire(w).into());
                 };
@@ -287,9 +289,11 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let row2 = Share(r ^ r_y, &mac_r_key_s_0 ^ &mac_r_y_key_s_y);
                 let row3 = Share(
                     r ^ r_x ^ r_y,
-                    (&mac_r_key_s_1 ^ &mac_r_y_key_s_y).xor_key(eval_i, delta),
+                    (&mac_r_key_s_1 ^ &mac_r_y_key_s_y).xor_key(p_eval, delta),
                 );
 
+                let label_x_0 = labels[*x];
+                let label_y_0 = labels[*y];
                 let label_x_1 = label_x_0 ^ delta;
                 let label_y_1 = label_y_0 ^ delta;
 
@@ -298,6 +302,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 let k2 = GarblingKey::new(label_x_1, label_y_0, w, 2);
                 let k3 = GarblingKey::new(label_x_1, label_y_1, w, 3);
 
+                let label_gamma_0 = labels[w];
                 let row0_label = label_gamma_0 ^ row0.xor_keys() ^ (row0.bit() & delta);
                 let row1_label = label_gamma_0 ^ row1.xor_keys() ^ (row1.bit() & delta);
                 let row2_label = label_gamma_0 ^ row2.xor_keys() ^ (row2.bit() & delta);
@@ -312,17 +317,17 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             }
         }
         parties
-            .send_to(eval_i, "preprocessed gates", &preprocessed_gates)
+            .send_to(p_eval, "preprocessed gates", &preprocessed_gates)
             .await?;
     } else {
-        for i in (0..max_i).filter(|i| *i != eval_i) {
-            garbled_gates[i] = parties.recv_from(i, "preprocessed gates").await?
+        for p in (0..p_max).filter(|p| *p != p_eval) {
+            garbled_gates[p] = parties.recv_from(p, "preprocessed gates").await?
         }
         for (w, gate) in circuit.wires().iter().enumerate() {
             if let Wire::And(x, y) = gate {
-                let (x, _) = wire_shares_and_labels[*x].clone();
-                let (y, _) = wire_shares_and_labels[*y].clone();
-                let (gamma, _) = wire_shares_and_labels[w].clone();
+                let x = shares[*x].clone();
+                let y = shares[*y].clone();
+                let gamma = shares[w].clone();
                 let Share(s_x, mac_s_x_key_r_x) = x;
                 let Share(s_y, mac_s_y_key_r_y) = y;
                 let Share(s_gamma, mac_s_gamma_key_r_gamma) = gamma;
@@ -345,98 +350,91 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     // input processing:
 
     let mut wire_shares_for_others: Vec<Vec<Option<(bool, Mac)>>> =
-        vec![vec![None; wire_shares_and_labels.len()]; max_i];
+        vec![vec![None; num_gates]; p_max];
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(i) = gate {
-            if p_i != *i {
-                let (Share(bit, Auth(macs_and_keys)), _) = wire_shares_and_labels[w].clone();
-                let (mac, _) = macs_and_keys[*i].unwrap();
+            let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
+            if let Some((mac, _)) = macs_and_keys[*i] {
                 wire_shares_for_others[*i][w] = Some((bit, mac));
             }
         }
     }
-    for i in (0..max_i).filter(|i| *i != p_i) {
+    for p in (0..p_max).filter(|p| *p != p_own) {
         parties
-            .send_to(i, "wire shares", &wire_shares_for_others[i])
+            .send_to(p, "wire shares", &wire_shares_for_others[p])
             .await?;
     }
 
     let mut wire_shares_from_others: Vec<Vec<Option<(bool, Mac)>>> =
-        vec![vec![None; wire_shares_and_labels.len()]; max_i];
-    for i in (0..max_i).filter(|i| *i != p_i) {
-        wire_shares_from_others[i] = parties
-            .recv_vec_from(i, "wire shares", wire_shares_and_labels.len())
-            .await?;
+        vec![vec![None; num_gates]; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        wire_shares_from_others[p] = parties.recv_vec_from(p, "wire shares", num_gates).await?;
     }
 
     let mut inputs = inputs.iter();
-    let mut masked_inputs: Vec<Option<bool>> = vec![None; wire_shares_and_labels.len()];
+    let mut masked_inputs: Vec<Option<bool>> = vec![None; num_gates];
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(p_input) = gate {
-            if p_i == *p_input {
+            if p_own == *p_input {
                 let Some(input) = inputs.next() else {
                     return Err(MpcError::WireWithoutInput(w).into());
                 };
-                let (Share(own_share, Auth(own_macs_and_keys)), _) =
-                    wire_shares_and_labels[w].clone();
-                masked_inputs[w] = Some(*input ^ own_share);
-                for i in (0..max_i).filter(|i| *i != p_i) {
-                    let (_, key) = own_macs_and_keys[i].unwrap();
-                    let (other_share, mac) = wire_shares_from_others[i][w].unwrap();
-                    if mac != key ^ (other_share & delta) {
-                        return Err(MpcError::InvalidInputMacOnWire(w).into());
-                    } else {
-                        *masked_inputs[w].as_mut().unwrap() ^= other_share;
+                let Share(own_share, Auth(own_macs_and_keys)) = shares[w].clone();
+                let mut masked_input = *input ^ own_share;
+                for p in 0..p_max {
+                    if let Some((_, key)) = own_macs_and_keys.get(p).copied().flatten() {
+                        let Some(other_shares) = wire_shares_from_others.get(p) else {
+                            return Err(MpcError::InvalidInputMacOnWire(w).into());
+                        };
+                        let Some((other_share, mac)) = other_shares.get(w).copied().flatten()
+                        else {
+                            return Err(MpcError::InvalidInputMacOnWire(w).into());
+                        };
+                        if mac != key ^ (other_share & delta) {
+                            return Err(MpcError::InvalidInputMacOnWire(w).into());
+                        } else {
+                            masked_input ^= other_share;
+                        }
                     }
                 }
+                masked_inputs[w] = Some(masked_input)
             }
         }
     }
-    for i in (0..max_i).filter(|i| *i != p_i) {
-        parties.send_to(i, "masked inputs", &masked_inputs).await?;
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        parties.send_to(p, "masked inputs", &masked_inputs).await?;
     }
-    for i in (0..max_i).filter(|i| *i != p_i) {
-        let masked_inputs_from_other_party: Vec<Option<bool>> = parties
-            .recv_vec_from(i, "masked inputs", wire_shares_and_labels.len())
-            .await?;
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        let masked_inputs_from_other_party: Vec<Option<bool>> =
+            parties.recv_vec_from(p, "masked inputs", num_gates).await?;
         for (w, mask) in masked_inputs_from_other_party.iter().enumerate() {
             if let Some(mask) = mask {
                 if masked_inputs[w].is_some() {
-                    panic!("Each input mask should only come from one single party!");
+                    return Err(MpcError::ConflictingInputMask(w).into());
                 }
                 masked_inputs[w] = Some(*mask);
             }
         }
     }
 
-    let mut input_labels: Vec<Option<Vec<Label>>> = vec![None; wire_shares_and_labels.len()];
+    let mut input_labels: Vec<Option<Vec<Label>>> = vec![None; num_gates];
     if let Role::PartyContrib = role {
         let labels_of_other_inputs: Vec<Option<Label>> = masked_inputs
             .iter()
             .enumerate()
-            .map(|(w, input)| {
-                input.map(|input| {
-                    let (_, l0) = wire_shares_and_labels[w];
-                    if input {
-                        l0 ^ delta
-                    } else {
-                        l0
-                    }
-                })
-            })
+            .map(|(w, input)| input.map(|b| labels[w] ^ (b & delta)))
             .collect();
         parties
-            .send_to(eval_i, "evaluator labels", &labels_of_other_inputs)
+            .send_to(p_eval, "labels", &labels_of_other_inputs)
             .await?;
     } else {
-        for i in (0..max_i).filter(|i| *i != p_i) {
-            let labels_of_own_inputs: Vec<Option<Label>> = parties
-                .recv_vec_from(i, "{p_i}: evaluator labels", wire_shares_and_labels.len())
-                .await?;
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            let labels_of_own_inputs: Vec<Option<Label>> =
+                parties.recv_vec_from(p, "labels", num_gates).await?;
             for (w, label) in labels_of_own_inputs.iter().enumerate() {
                 if let Some(label) = label {
-                    let labels = input_labels[w].get_or_insert(vec![Label(0); max_i]);
-                    labels[i] = *label;
+                    let labels = input_labels[w].get_or_insert(vec![Label(0); p_max]);
+                    labels[p] = *label;
                 }
             }
         }
@@ -444,19 +442,24 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     // circuit evaluation:
 
-    let mut values: Vec<bool> = Vec::with_capacity(num_gates);
+    let mut values: Vec<bool> = vec![];
     if let Role::PartyContrib = role {
         // nothing to do for party A
     } else {
-        let mut labels: Vec<Vec<Label>> = Vec::with_capacity(num_gates);
+        let mut labels: Vec<Vec<Label>> = vec![];
         for (w, gate) in circuit.wires().iter().enumerate() {
             let (input, label) = match gate {
                 Wire::Input(_) => {
-                    let input =
-                        masked_inputs[w].unwrap_or_else(|| panic!("No value for input gate {w}"));
-                    let label = input_labels[w]
-                        .as_ref()
-                        .unwrap_or_else(|| panic!("No label for input gate {w}"));
+                    let input = masked_inputs
+                        .get(w)
+                        .copied()
+                        .flatten()
+                        .ok_or(MpcError::WireWithoutValue(w))?;
+                    let label = input_labels
+                        .get(w)
+                        .cloned()
+                        .flatten()
+                        .ok_or(MpcError::WireWithoutLabel(w))?;
                     (input, label.clone())
                 }
                 Wire::Not(x) => {
@@ -481,30 +484,37 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                         return Err(MpcError::MissingShareForWire(w).into());
                     };
 
-                    let mut label = vec![Label(0); max_i];
-                    let mut macs = vec![vec![]; max_i];
+                    let mut label = vec![Label(0); p_max];
+                    let mut macs = vec![vec![]; p_max];
                     let Share(mut s, mac_s_key_r) = table_shares[i].clone();
-                    macs[eval_i] = mac_s_key_r.macs();
+                    macs[p_eval] = mac_s_key_r.macs();
                     let Auth(mac_s_key_r) = mac_s_key_r;
-                    for p in (0..max_i).filter(|i| *i != eval_i) {
+                    for (p, mac_s_key_r) in mac_s_key_r.iter().enumerate() {
+                        let Some((_, key_r)) = mac_s_key_r else {
+                            continue;
+                        };
                         let Some(GarbledGate(garbled_gate)) = &garbled_gates[p][w] else {
                             return Err(MpcError::MissingGarbledGate(w).into());
                         };
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
                         let garbled_row = garbled_gate[i].clone();
                         let (r, mac_r, label_share) = decrypt(&garbling_key, &garbled_row)?;
-                        let (_, key_r) = mac_s_key_r[p].unwrap();
-                        if mac_r[eval_i].unwrap() != key_r ^ (r & delta) {
+                        let Some(mac_r_for_eval) = mac_r.get(p_eval).copied().flatten() else {
+                            return Err(MpcError::InvalidInputMacOnWire(w).into());
+                        };
+                        if mac_r_for_eval != *key_r ^ (r & delta) {
                             return Err(MpcError::InvalidInputMacOnWire(w).into());
                         }
                         s ^= r;
                         label[p] = label_share;
                         macs[p] = mac_r;
                     }
-                    for p in (0..max_i).filter(|i| *i != eval_i) {
-                        for party in (0..max_i).filter(|i| *i != p) {
-                            if let Some(macs) = macs.get(party) {
-                                label[p] = label[p] ^ macs[p].unwrap()
+                    for p_i in (0..p_max).filter(|p_i| *p_i != p_eval) {
+                        for p_j in (0..p_max).filter(|p_j| *p_j != p_i) {
+                            if let Some(macs) = macs.get(p_j) {
+                                if let Some(mac) = macs.get(p_i).copied().flatten() {
+                                    label[p_i] = label[p_i] ^ mac
+                                }
                             }
                         }
                     }
@@ -521,44 +531,48 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     if let Role::PartyContrib = role {
         let mut outputs = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
-            let (Share(bit, Auth(macs_and_keys)), _) = wire_shares_and_labels[w].clone();
-            let (mac, _) = macs_and_keys[eval_i].unwrap();
-            outputs[w] = Some((bit, mac));
+            let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
+            if let Some((mac, _)) = macs_and_keys.get(p_eval).copied().flatten() {
+                outputs[w] = Some((bit, mac));
+            }
         }
         parties
-            .send_to(eval_i, "output wire shares", &outputs)
+            .send_to(p_eval, "output wire shares", &outputs)
             .await?;
         Ok(vec![])
     } else {
-        let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; max_i];
-        for i in (0..max_i).filter(|i| *i != p_i) {
-            output_wire_shares[i] = parties
-                .recv_vec_from(i, "output wire shares", values.len())
+        let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; p_max];
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            output_wire_shares[p] = parties
+                .recv_vec_from(p, "output wire shares", values.len())
                 .await?;
         }
-        let mut output_wires: Vec<Option<bool>> = vec![None; wire_shares_and_labels.len()];
+        let mut output_wires: Vec<Option<bool>> = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
             let input = values[w];
-            let (Share(s, _), _) = &wire_shares_and_labels[w];
+            let Share(s, _) = &shares[w];
             output_wires[w] = Some(input ^ s);
         }
-        for i in (0..max_i).filter(|i| *i != p_i) {
-            for (w, output_wire) in output_wire_shares[i].iter().enumerate() {
-                let (Share(_, Auth(mac_s_key_r)), _) = &wire_shares_and_labels[w];
-                let (_, key_r) = mac_s_key_r.get(i).copied().unwrap().unwrap();
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            for (w, output_wire) in output_wire_shares[p].iter().enumerate() {
+                let Share(_, Auth(mac_s_key_r)) = &shares[w];
+                let Some((_, key_r)) = mac_s_key_r.get(p).copied().flatten() else {
+                    return Err(MpcError::InvalidOutputMacOnWire(w).into());
+                };
                 if let Some((r, mac_r)) = output_wire {
                     if *mac_r != key_r ^ (*r & delta) {
                         return Err(MpcError::InvalidOutputMacOnWire(w).into());
-                    } else {
-                        let o = output_wires[w].unwrap();
+                    } else if let Some(o) = output_wires.get(w).copied().flatten() {
                         output_wires[w] = Some(o ^ r);
-                    }
+                    };
                 }
             }
         }
         let mut outputs = vec![];
         for w in circuit.output_gates.iter() {
-            outputs.push(output_wires[*w].unwrap());
+            if let Some(o) = output_wires.get(*w).copied().flatten() {
+                outputs.push(o);
+            }
         }
         Ok(outputs)
     }
