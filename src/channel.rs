@@ -49,14 +49,11 @@ pub trait Channel {
         &mut self,
         party: usize,
     ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
-
-    /// Returns the number of participants.
-    fn participants(&self) -> usize;
 }
 
 /// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
 #[derive(Debug)]
-pub struct MsgChannel<C: Channel>(C);
+pub struct MsgChannel<C: Channel>(pub C);
 
 impl<C: Channel> MsgChannel<C> {
     /// Serializes and sends an MPC message to the other party.
@@ -108,10 +105,6 @@ impl<C: Channel> MsgChannel<C> {
                 reason: ErrorKind::InvalidLength,
             })
         }
-    }
-
-    pub(crate) fn participants(&self) -> usize {
-        self.0.participants()
     }
 }
 
@@ -192,9 +185,5 @@ impl Channel for SimpleChannel {
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),
         }
-    }
-
-    fn participants(&self) -> usize {
-        self.s.len()
     }
 }
