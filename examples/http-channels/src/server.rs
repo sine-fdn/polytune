@@ -1,42 +1,28 @@
-use anyhow::Result;
+use std::result::Result;
 use axum::{
     body::Bytes,
     extract::{Path, State},
-    http::{Request, StatusCode},
-    response::Response,
+    http::StatusCode,
     routing::{get, post, put},
     Json, Router,
 };
-use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, str::FromStr, sync::Arc};
 use std::{collections::VecDeque, net::SocketAddr};
 use tokio::sync::Mutex;
-use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::Span;
 
 pub(crate) async fn serve() {
     tracing_subscriber::fmt::init();
 
     let sessions = Arc::new(Mutex::new(HashMap::<String, Session>::new()));
 
-    let log_layer = TraceLayer::new_for_http()
-        .on_request(|r: &Request<_>, _: &Span| tracing::info!("{} {}", r.method(), r.uri().path()))
-        .on_response(
-            |r: &Response<_>, latency: Duration, _: &Span| match r.status().as_u16() {
-                400..=499 => tracing::warn!("{} (in {:?})", r.status(), latency),
-                500..=599 => tracing::error!("{} (in {:?})", r.status(), latency),
-                _ => tracing::info!("{} (in {:?})", r.status(), latency),
-            },
-        );
-
     let app = Router::new()
         .route("/join/:session/:party", put(join))
         .route("/participants/:session", get(participants))
         .route("/send/:session/:from/:to", post(send))
         .route("/recv/:session/:from/:to", post(recv))
-        .route("/clear/:session/:from", post(clear))
         .with_state(sessions)
-        .layer(ServiceBuilder::new().layer(log_layer));
+        .layer(TraceLayer::new_for_http());
 
     let addr = if let Ok(socket_addr) = env::var("SOCKET_ADDRESS") {
         SocketAddr::from_str(&socket_addr)
@@ -113,22 +99,4 @@ async fn recv(
         return Err(StatusCode::BAD_REQUEST);
     };
     Ok(msg)
-}
-
-async fn clear(
-    State(sessions): State<Sessions>,
-    Path((session_id, from)): Path<(String, u32)>,
-) -> Result<(), StatusCode> {
-    let mut sessions = sessions.lock().await;
-    let Some(session) = sessions.get_mut(&session_id) else {
-        return Ok(());
-    };
-    let Some(msgs) = session.msgs.get_mut(&from) else {
-        return Ok(());
-    };
-    msgs.clear();
-    if session.msgs.values().all(|v| v.is_empty()) {
-        sessions.remove(&session_id);
-    }
-    Ok(())
 }

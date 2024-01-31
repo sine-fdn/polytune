@@ -69,29 +69,21 @@ async fn main() {
             let mut fpre_channels = vec![];
             for p in 0..parties {
                 let session = format!("{session}-fpre-{p}");
-                let channel = PollingHttpChannel {
-                    url: url.clone(),
-                    session,
-                    client: reqwest::Client::new(),
-                    party_index: 0,
-                };
+                let channel = PollingHttpChannel::new(&url, &session, 0);
                 channel.join().await.unwrap();
                 fpre_channels.push(MsgChannel(channel))
             }
             loop {
-                let mut active_participants = 0;
+                let mut joined = 0;
                 for channel in fpre_channels.iter_mut() {
                     if channel.0.participants().await.unwrap() == 2 {
-                        active_participants += 1;
+                        joined += 1;
                     }
                 }
-                if active_participants == parties {
+                if joined == parties {
                     break;
                 } else {
-                    println!(
-                        "Waiting for {} participants to join",
-                        parties - active_participants
-                    );
+                    println!("Waiting for {} parties to join", parties - joined);
                     sleep(Duration::from_secs(1)).await;
                 }
             }
@@ -105,37 +97,22 @@ async fn main() {
             input,
         } => {
             let prg = compile("pub fn main(x: u32, y: u32, z: u32) -> u32 { x + y + z }").unwrap();
-            let input = prg
-                .parse_arg(party, &format!("{input}u32"))
-                .unwrap()
-                .as_bits();
+            let input = prg.parse_arg(party, &input).unwrap().as_bits();
             let p_eval = 0;
             let role = if party == p_eval {
                 Role::PartyEval
             } else {
                 Role::PartyContrib
             };
-            let party_channel = PollingHttpChannel {
-                url: url.clone(),
-                session: session.clone(),
-                client: reqwest::Client::new(),
-                party_index: party,
-            };
+            let party_channel = PollingHttpChannel::new(&url, &session, party);
             party_channel.join().await.unwrap();
-            let fpre_channel = PollingHttpChannel {
-                url,
-                session: format!("{session}-fpre-{party}"),
-                client: reqwest::Client::new(),
-                party_index: 1,
-            };
+            let fpre_channel = PollingHttpChannel::new(&url, &format!("{session}-fpre-{party}"), 1);
             fpre_channel.join().await.unwrap();
             loop {
-                let active_participants = party_channel.participants().await.unwrap();
-                if active_participants < prg.circuit.input_gates.len() {
-                    println!(
-                        "Waiting for {} other participants to join...",
-                        prg.circuit.input_gates.len() - active_participants
-                    );
+                let parties = prg.circuit.input_gates.len();
+                let joined = party_channel.participants().await.unwrap();
+                if joined < parties {
+                    println!("Waiting for {} parties to join...", parties - joined);
                     sleep(Duration::from_secs(1)).await;
                 } else {
                     break;
