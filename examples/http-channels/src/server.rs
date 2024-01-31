@@ -1,4 +1,3 @@
-use std::result::Result;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -6,6 +5,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
+use std::result::Result;
 use std::{collections::HashMap, env, str::FromStr, sync::Arc};
 use std::{collections::VecDeque, net::SocketAddr};
 use tokio::sync::Mutex;
@@ -24,9 +24,8 @@ pub(crate) async fn serve() {
         .with_state(sessions)
         .layer(TraceLayer::new_for_http());
 
-    let addr = if let Ok(socket_addr) = env::var("SOCKET_ADDRESS") {
-        SocketAddr::from_str(&socket_addr)
-            .unwrap_or_else(|_| panic!("Invalid socket address: {socket_addr}"))
+    let addr = if let Ok(addr) = env::var("SOCKET_ADDRESS") {
+        SocketAddr::from_str(&addr).unwrap_or_else(|_| panic!("Invalid address: {addr}"))
     } else {
         SocketAddr::from(([127, 0, 0, 1], 8000))
     };
@@ -35,6 +34,7 @@ pub(crate) async fn serve() {
     axum::serve(listener, app).await.unwrap();
 }
 
+#[derive(Debug, Default)]
 struct Session {
     msgs: HashMap<u32, HashMap<u32, VecDeque<Vec<u8>>>>,
 }
@@ -46,9 +46,7 @@ async fn join(
     Path((session_id, party)): Path<(String, u32)>,
 ) -> Result<(), StatusCode> {
     let mut sessions = sessions.lock().await;
-    let session = sessions.entry(session_id).or_insert(Session {
-        msgs: HashMap::new(),
-    });
+    let session = sessions.entry(session_id).or_default();
     session.msgs.entry(party).or_default();
     Ok(())
 }
@@ -58,10 +56,8 @@ async fn participants(
     Path(session_id): Path<String>,
 ) -> Result<Json<Vec<u32>>, StatusCode> {
     let mut sessions = sessions.lock().await;
-    let session = sessions.entry(session_id).or_insert(Session {
-        msgs: HashMap::new(),
-    });
-    let participants: Vec<u32> = session.msgs.keys().copied().collect();
+    let s = sessions.entry(session_id).or_default();
+    let participants: Vec<u32> = s.msgs.keys().copied().collect();
     Ok(Json(participants))
 }
 
@@ -71,10 +67,8 @@ async fn send(
     body: Bytes,
 ) -> Result<(), StatusCode> {
     let mut sessions = sessions.lock().await;
-    let session = sessions.entry(session_id).or_insert(Session {
-        msgs: HashMap::new(),
-    });
-    let msgs = session.msgs.entry(from).or_default().entry(to).or_default();
+    let s = sessions.entry(session_id).or_default();
+    let msgs = s.msgs.entry(from).or_default().entry(to).or_default();
     msgs.push_back(body.to_vec());
     Ok(())
 }
@@ -84,15 +78,10 @@ async fn recv(
     Path((session_id, from, to)): Path<(String, u32, u32)>,
 ) -> Result<Vec<u8>, StatusCode> {
     let mut sessions = sessions.lock().await;
-    let Some(session) = sessions.get_mut(&session_id) else {
+    let Some(s) = sessions.get_mut(&session_id) else {
         return Err(StatusCode::BAD_REQUEST);
     };
-    let Some(msgs) = session
-        .msgs
-        .get_mut(&from)
-        .map(|msgs| msgs.get_mut(&to))
-        .flatten()
-    else {
+    let Some(msgs) = s.msgs.get_mut(&from).and_then(|msgs| msgs.get_mut(&to)) else {
         return Err(StatusCode::BAD_REQUEST);
     };
     let Some(msg) = msgs.pop_front() else {

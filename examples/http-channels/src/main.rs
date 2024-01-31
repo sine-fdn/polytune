@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::PathBuf, process::exit, time::Duration};
 
 use clap::{Parser, Subcommand};
 use http_channel::PollingHttpChannel;
@@ -8,7 +8,7 @@ use parlay::{
     garble_lang::compile,
     protocol::{mpc, Role},
 };
-use tokio::time::sleep;
+use tokio::{fs, time::sleep};
 
 mod http_channel;
 mod server;
@@ -47,8 +47,11 @@ enum Commands {
         /// A name that uniquely identifies the MPC session on the server.
         #[arg(short, long)]
         session: String,
+        #[arg(long)]
+        /// The path to the Garble program to execute.
+        program: PathBuf,
         /// The index of the party (0 for the first participant, 1 for the second, etc).
-        #[arg(short, long)]
+        #[arg(long)]
         party: usize,
         /// The party's input as a Garble literal, e.g. "123u32".
         #[arg(short, long)]
@@ -93,10 +96,15 @@ async fn main() {
         Commands::Party {
             url,
             session,
+            program,
             party,
             input,
         } => {
-            let prg = compile("pub fn main(x: u32, y: u32, z: u32) -> u32 { x + y + z }").unwrap();
+            let Ok(prg) = fs::read_to_string(&program).await else {
+                eprintln!("Could not find '{}'", program.display());
+                exit(-1);
+            };
+            let prg = compile(&prg).unwrap();
             let input = prg.parse_arg(party, &input).unwrap().as_bits();
             let p_eval = 0;
             let role = if party == p_eval {
