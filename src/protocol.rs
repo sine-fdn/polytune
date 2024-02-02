@@ -213,7 +213,8 @@ pub fn simulate_mpc(
                 }
                 for i in computation {
                     let bool_vec_res = i.await.unwrap();
-                    if !bool_vec_res.is_empty() { // true for output parties
+                    if !bool_vec_res.is_empty() {
+                        // true for output parties
                         if !output.is_empty() {
                             if output != bool_vec_res {
                                 eprintln!(
@@ -598,14 +599,14 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 .send_to(*output_party, "output wire shares", &outputs)
                 .await?; // all parties send to output parties and evaluator (except itself)
         }
-    } 
+    }
     let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; p_max];
     if output_parties.contains(&p_own) {
         for p in (0..p_max).filter(|p| *p != p_own) {
             output_wire_shares[p] = parties
                 .recv_vec_from(p, "output wire shares", num_gates)
                 .await?; // output parties receive shares from all parties
-        } 
+        }
     }
     let mut wires_and_labels: Vec<Option<(bool, Label)>> = vec![None; num_gates];
     if let Role::PartyEval = role {
@@ -617,13 +618,13 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 parties
                     .send_to(*output_party, "lambda", &wires_and_labels)
                     .await?; // sending (lambda_w XOR zw) to output parties
-            } 
-        } 
+            }
+        }
     } else if let Role::PartyContribOutput = role {
         wires_and_labels = parties.recv_vec_from(p_eval, "lambda", num_gates).await?; //receiving of (lambda_w XOR zw) from evaluator
         for w in circuit.output_gates.iter().copied() {
-            if wires_and_labels[w].unwrap().0 && wires_and_labels[w].unwrap().1 != labels[w] ^ delta
-                || !wires_and_labels[w].unwrap().0 && wires_and_labels[w].unwrap().1 != labels[w]
+            if !(wires_and_labels[w] == Some((true, labels[w] ^ delta))
+                || wires_and_labels[w] == Some((false, labels[w])))
             {
                 return Err(MpcError::InvalidOutputWireLabel(w).into());
             }
@@ -633,7 +634,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     if output_parties.contains(&p_own) {
         let mut output_wires: Vec<Option<bool>> = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
-            let input: bool = wires_and_labels[w].unwrap().0;
+            let Some((input, _)) = wires_and_labels.get(w).copied().flatten() else {
+                return Err(MpcError::MissingShareForWire(w).into()); // error type right?
+            };
             let Share(bit, _) = &shares[w];
             output_wires[w] = Some(input ^ bit);
         }
