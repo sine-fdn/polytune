@@ -154,7 +154,7 @@ pub fn simulate_mpc(
             return Ok(vec![]);
         };
 
-        let mut eval_output: Vec<bool> = Vec::new();
+        let mut output: Vec<bool> = Vec::new();
         let mut computation: Vec<tokio::task::JoinHandle<Vec<bool>>> =
             Vec::with_capacity(n_parties);
 
@@ -208,19 +208,27 @@ pub fn simulate_mpc(
                 eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
             }
             Ok(res) => {
-                eval_output = res;
+                if !res.is_empty() {
+                    output = res;
+                }
                 for i in computation {
-                    let bool_vec_res = i.await.unwrap(); //Consider ? here
-                    if !bool_vec_res.is_empty() && bool_vec_res != eval_output {
-                        eprintln!(
-                            "{:?} The result does not match the one from the evaluator! {:?}",
-                            bool_vec_res, eval_output
-                        );
+                    let bool_vec_res = i.await.unwrap();
+                    if !bool_vec_res.is_empty() { // true for output parties
+                        if !output.is_empty() {
+                            if output != bool_vec_res {
+                                eprintln!(
+                                    "{:?} The result does not match for all output parties! {:?}",
+                                    bool_vec_res, output
+                                );
+                            }
+                        } else {
+                            output = bool_vec_res;
+                        }
                     }
                 }
             }
         }
-        Ok(eval_output)
+        Ok(output)
     })
 }
 
@@ -579,7 +587,6 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut outputs: Vec<Option<(bool, Mac)>> = vec![None; num_gates];
     for output_party in &output_parties {
-        // send to output parties and evaluator (except itself)
         if *output_party != p_own {
             for w in circuit.output_gates.iter().copied() {
                 let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
@@ -589,16 +596,16 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             }
             parties
                 .send_to(*output_party, "output wire shares", &outputs)
-                .await?;
+                .await?; // all parties send to output parties and evaluator (except itself)
         }
-    } // send to output parties and evaluator (except itself)
+    } 
     let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; p_max];
     if output_parties.contains(&p_own) {
         for p in (0..p_max).filter(|p| *p != p_own) {
             output_wire_shares[p] = parties
-                .recv_vec_from(p, "output wire shares", num_gates) //for PartyEval the length changed from values.len() to num_gates, which should be same
-                .await?;
-        } // receive from all contributing parties
+                .recv_vec_from(p, "output wire shares", num_gates)
+                .await?; // output parties receive shares from all parties
+        } 
     }
     let mut wires_and_labels: Vec<Option<(bool, Label)>> = vec![None; num_gates];
     if let Role::PartyEval = role {
@@ -609,9 +616,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
                 }
                 parties
                     .send_to(*output_party, "lambda", &wires_and_labels)
-                    .await?;
-            }
-        } // sending (lambda_w XOR zw) to output parties
+                    .await?; // sending (lambda_w XOR zw) to output parties
+            } 
+        } 
     } else if let Role::PartyContribOutput = role {
         wires_and_labels = parties.recv_vec_from(p_eval, "lambda", num_gates).await?; //receiving of (lambda_w XOR zw) from evaluator
         for w in circuit.output_gates.iter().copied() {

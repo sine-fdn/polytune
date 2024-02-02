@@ -6,7 +6,7 @@ use parlay::protocol::{simulate_mpc, Error};
 
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {
-    let output_parties: Vec<usize> = vec![0, 1];
+    let output_parties: Vec<usize> = vec![1];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -26,7 +26,7 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
 
 #[test]
 fn eval_xor_circuits_3pc() -> Result<(), Error> {
-    let output_parties: Vec<usize> = vec![0, 1, 2];
+    let output_parties: Vec<usize> = vec![1, 2];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -46,7 +46,7 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_not_circuits_2pc() -> Result<(), Error> {
-    let output_parties: Vec<usize> = vec![0, 1];
+    let output_parties: Vec<usize> = vec![1];
     for x in [true, false] {
         for y in [true, false] {
             let circuit = Circuit {
