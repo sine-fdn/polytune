@@ -6,6 +6,7 @@ use parlay::protocol::{simulate_mpc, Error};
 
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -15,7 +16,7 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
+                let output = simulate_mpc(&circuit, &[&[x, z], &[y]], output_parties.clone())?;
                 assert_eq!(output, vec![x ^ y ^ z]);
             }
         }
@@ -25,6 +26,7 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
 
 #[test]
 fn eval_xor_circuits_3pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -34,7 +36,7 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], output_parties.clone())?;
                 assert_eq!(output, vec![x ^ y ^ z]);
             }
         }
@@ -44,6 +46,7 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_not_circuits_2pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1];
     for x in [true, false] {
         for y in [true, false] {
             let circuit = Circuit {
@@ -52,7 +55,7 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
                 output_gates: vec![2, 3, 4, 5],
             };
 
-            let output = simulate_mpc(&circuit, &[&[x], &[y]])?;
+            let output = simulate_mpc(&circuit, &[&[x], &[y]], output_parties.clone())?;
             assert_eq!(output, vec![!x, !y, x, y]);
         }
     }
@@ -61,6 +64,7 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
 
 #[test]
 fn eval_not_circuits_3pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -77,7 +81,7 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
                     output_gates: vec![3, 4, 5, 6, 7, 8],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], output_parties.clone())?;
                 assert_eq!(output, vec![!x, !y, !z, x, y, z]);
             }
         }
@@ -87,6 +91,7 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_and_circuits_2pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -96,7 +101,7 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x, z], &[y]])?;
+                let output = simulate_mpc(&circuit, &[&[x, z], &[y]], output_parties.clone())?;
                 assert_eq!(output, vec![x & y & z]);
             }
         }
@@ -106,6 +111,7 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
 
 #[test]
 fn eval_and_circuits_3pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
             for z in [true, false] {
@@ -115,7 +121,7 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]])?;
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], output_parties.clone())?;
                 assert_eq!(output, vec![x & y & z]);
             }
         }
@@ -125,6 +131,7 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_garble_prg_3pc() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1, 2];
     let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
     for x in 0..3 {
         for y in 0..3 {
@@ -134,7 +141,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
                 let x = prg.parse_arg(0, &format!("{x}u8")).unwrap().as_bits();
                 let y = prg.parse_arg(1, &format!("{y}u8")).unwrap().as_bits();
                 let z = prg.parse_arg(2, &format!("{z}u8")).unwrap().as_bits();
-                let output = simulate_mpc(&prg.circuit, &[&x, &y, &z])?;
+                let output = simulate_mpc(&prg.circuit, &[&x, &y, &z], output_parties.clone())?;
                 let result = prg.parse_output(&output).unwrap();
                 println!("{calculation} = {result}");
                 assert_eq!(format!("{result}"), format!("{expected}u8"));
@@ -146,6 +153,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
 
 #[test]
 fn eval_large_and_circuit() -> Result<(), Error> {
+    let output_parties: Vec<usize> = vec![0, 1];
     let n = 100;
     let mut in_a = vec![];
     let mut in_b = vec![];
@@ -167,7 +175,7 @@ fn eval_large_and_circuit() -> Result<(), Error> {
         output_gates,
     };
 
-    let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b])?;
+    let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], output_parties)?;
     let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
     assert_eq!(output_smpc, vec![true]);
     assert_eq!(output_smpc, output_direct);
@@ -179,6 +187,7 @@ fn eval_large_and_circuit() -> Result<(), Error> {
 fn eval_mixed_circuits() -> Result<(), Error> {
     let circuits = gen_circuits_up_to(5);
     let mut circuits_with_inputs = Vec::new();
+    let output_parties: Vec<usize> = vec![0, 1];
     for circuit in circuits {
         let in_a = circuit.input_gates[0];
         let in_b = circuit.input_gates[1];
@@ -220,7 +229,7 @@ fn eval_mixed_circuits() -> Result<(), Error> {
     for (w, (circuit, in_a, in_b)) in circuits_with_inputs.into_iter().enumerate() {
         if w % eval_only_every_n == 0 {
             total_tests += 1;
-            let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b])?;
+            let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], output_parties.clone())?;
             let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
             if output_smpc != output_direct {
                 println!("Circuit: {:?}", circuit);
