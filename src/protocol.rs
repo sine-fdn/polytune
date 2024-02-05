@@ -80,6 +80,8 @@ pub enum Error {
         /// The number of input bits provided by the user.
         actual: usize,
     },
+    /// The output parties list is invalid (e.g., contains too large indeces or no output party exists).
+    WrongOutputParties,
 }
 
 impl From<channel::Error> for Error {
@@ -142,6 +144,14 @@ pub fn simulate_mpc(
     let mut counter: usize = 1; //for PartyContribOutput parties, starting from 1 as we do not want party 0 to be PartyContribOutput, it should be PartyEval
     let tokio = Runtime::new().expect("Could not start tokio runtime");
     let parties = SimpleChannel::channels(n_parties);
+    if output_parties.is_empty() {
+        return Err(Error::WrongOutputParties);
+    }
+    for output_party in &output_parties {
+        if *output_party >= n_parties {
+            return Err(Error::WrongOutputParties);
+        }
+    }
     tokio.block_on(async {
         let fpre_channels = f_pre(inputs.len()).await;
 
