@@ -2,12 +2,7 @@ use std::{path::PathBuf, process::exit, time::Duration};
 
 use clap::{Parser, Subcommand};
 use http_channel::PollingHttpChannel;
-use parlay::{
-    channel::MsgChannel,
-    fpre::fpre_channel,
-    garble_lang::compile,
-    protocol::{mpc, Role},
-};
+use parlay::{channel::MsgChannel, fpre::fpre_channel, garble_lang::compile, protocol::mpc};
 use tokio::{fs, time::sleep};
 
 mod http_channel;
@@ -107,17 +102,12 @@ async fn main() {
             let prg = compile(&prg).unwrap();
             let input = prg.parse_arg(party, &input).unwrap().as_bits();
             let p_eval = 0;
-            let role = if party == p_eval {
-                Role::PartyEval
-            } else {
-                Role::PartyContrib
-            };
             let party_channel = PollingHttpChannel::new(&url, &session, party);
             party_channel.join().await.unwrap();
             let fpre_channel = PollingHttpChannel::new(&url, &format!("{session}-fpre-{party}"), 1);
             fpre_channel.join().await.unwrap();
+            let parties = prg.circuit.input_gates.len();
             loop {
-                let parties = prg.circuit.input_gates.len();
                 let joined = party_channel.participants().await.unwrap();
                 if joined < parties {
                     println!("Waiting for {} parties to join...", parties - joined);
@@ -126,11 +116,20 @@ async fn main() {
                     break;
                 }
             }
+            let output_parties: Vec<_> = (0..parties).collect();
             let parties = MsgChannel(party_channel);
             let fpre = MsgChannel(fpre_channel);
-            let output = mpc(&prg.circuit, &input, fpre, parties, p_eval, party, role)
-                .await
-                .unwrap();
+            let output = mpc(
+                &prg.circuit,
+                &input,
+                fpre,
+                parties,
+                p_eval,
+                party,
+                &output_parties,
+            )
+            .await
+            .unwrap();
             if !output.is_empty() {
                 let result = prg.parse_output(&output).unwrap();
                 println!("\nThe result is: {result}");
