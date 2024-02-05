@@ -35,11 +35,16 @@ pub(crate) async fn f_pre(parties: usize) -> Vec<MsgChannel<SimpleChannel>> {
     party_channels
 }
 
+/// Errors that can occur while executing FPre as a trusted dealer.
 #[derive(Debug)]
-enum Error {
+pub enum Error {
+    /// One of the parties tried to cheat.
     CheatingDetected,
+    /// The parties expect a different number of random shares.
     RandomSharesMismatch(u32, u32),
+    /// The parties expect a different number of AND shares.
     AndSharesMismatch(usize, usize),
+    /// An error occurred while trying to communicate over the channel.
     Channel(channel::Error),
 }
 
@@ -49,7 +54,8 @@ impl From<channel::Error> for Error {
     }
 }
 
-async fn fpre_channel<C: Channel>(
+/// Runs FPre as a trusted dealer for one channel, communicating with one other party.
+pub async fn fpre_channel<C: Channel>(
     other_party: usize,
     fpre_channels: &mut Vec<MsgChannel<C>>,
 ) -> Result<(), Error> {

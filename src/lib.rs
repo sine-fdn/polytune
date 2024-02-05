@@ -4,8 +4,10 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub use garble_lang;
+
 pub mod channel;
+pub mod fpre;
 pub mod protocol;
 
-mod fpre;
 mod garble;

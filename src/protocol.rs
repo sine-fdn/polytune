@@ -243,7 +243,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     }
 
     let fpre_party = 0;
-    let p_max = parties.participants();
+    let p_max = circuit.input_gates.len();
     let is_contrib = p_own != p_eval;
 
     for output_party in p_out {
