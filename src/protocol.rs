@@ -137,7 +137,7 @@ impl From<MpcError> for Error {
 pub fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
-    output_parties: Vec<usize>,
+    output_parties: &[usize],
 ) -> Result<Vec<bool>, Error> {
     let n_parties = inputs.len();
     let p_eval = 0;
@@ -147,7 +147,7 @@ pub fn simulate_mpc(
     if output_parties.is_empty() {
         return Err(Error::WrongOutputParties);
     }
-    for output_party in &output_parties {
+    for output_party in output_parties {
         if *output_party >= n_parties {
             return Err(Error::WrongOutputParties);
         }
@@ -168,7 +168,7 @@ pub fn simulate_mpc(
         for (p_own, ((fpre_channel, party_channel), inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
-            let output_parties = output_parties.clone();
+            let output_parties = output_parties.to_vec();
             computation.spawn(async move {
                 let result: Result<Vec<bool>, Error> = mpc(
                     &circuit,
@@ -177,12 +177,7 @@ pub fn simulate_mpc(
                     party_channel,
                     p_eval,
                     p_own,
-                    if output_parties.contains(&counter) {
-                        Role::PartyContribOutput
-                    } else {
-                        Role::PartyContrib
-                    },
-                    output_parties,
+                    &output_parties,
                 )
                 .await;
                 let mut res_party: Vec<bool> = Vec::new();
@@ -206,7 +201,6 @@ pub fn simulate_mpc(
             party_channel,
             p_eval,
             p_eval,
-            Role::PartyEval,
             output_parties,
         )
         .await;
@@ -232,19 +226,7 @@ pub fn simulate_mpc(
     })
 }
 
-/// The role played by a particular party in the protocol execution.
-#[derive(Debug, Clone, Copy)]
-pub enum Role {
-    /// The party contributes inputs but does not evaluate the circuit.
-    PartyContrib,
-    /// The party contributes inputs, does not evaluate the circuit but receives output.
-    PartyContribOutput,
-    /// The party contributes inputs and evaluates the circuit (and therefore receives output).
-    PartyEval,
-}
-
 /// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
-#[allow(clippy::too_many_arguments)]
 pub async fn mpc<Fpre: Channel, Party: Channel>(
     circuit: &Circuit,
     inputs: &[bool],
@@ -252,8 +234,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     mut parties: MsgChannel<Party>,
     p_eval: usize,
     p_own: usize,
-    role: Role,
-    output_parties: Vec<usize>,
+    p_out: &[usize],
 ) -> Result<Vec<bool>, Error> {
     circuit.validate()?;
     let Some(expected_inputs) = circuit.input_gates.get(p_own) else {
@@ -268,6 +249,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let fpre_party = 0;
     let p_max = parties.participants();
+    let is_contrib = p_own != p_eval;
 
     // fn-independent preprocessing:
 
@@ -292,14 +274,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             let Some(share) = random_shares.next() else {
                 return Err(MpcError::MissingShareForWire(w).into());
             };
-            let label = match role {
-                Role::PartyContrib => Label(random()),
-                Role::PartyContribOutput => Label(random()),
-                // the labels are calculated later by the evaluator, so we just use 0 for now:
-                Role::PartyEval => Label(0),
-            };
             shares[w] = share;
-            labels[w] = label;
+            if is_contrib {
+                labels[w] = Label(random());
+            }
         }
     }
 
@@ -327,7 +305,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let mut auth_bits = auth_bits.into_iter();
     let mut table_shares = vec![None; num_gates];
     let mut garbled_gates: Vec<Vec<Option<GarbledGate>>> = vec![vec![None; num_gates]; p_max];
-    if let Role::PartyContrib | Role::PartyContribOutput = role {
+    if is_contrib {
         let mut preprocessed_gates = vec![None; num_gates];
         for (w, gate) in circuit.wires().iter().enumerate() {
             if let Wire::And(x, y) = gate {
@@ -475,7 +453,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     }
 
     let mut input_labels: Vec<Option<Vec<Label>>> = vec![None; num_gates];
-    if let Role::PartyContrib | Role::PartyContribOutput = role {
+    if is_contrib {
         let labels_of_other_inputs: Vec<Option<Label>> = masked_inputs
             .iter()
             .enumerate()
@@ -501,8 +479,8 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut values: Vec<bool> = vec![];
     let mut labels_eval: Vec<Vec<Label>> = vec![];
-    if let Role::PartyContrib | Role::PartyContribOutput = role {
-        // nothing to do for party A
+    if is_contrib {
+        // nothing to do for the contributors
     } else {
         for (w, gate) in circuit.wires().iter().enumerate() {
             let (input, label) = match gate {
@@ -586,21 +564,19 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     // output determination:
 
     let mut outputs: Vec<Option<(bool, Mac)>> = vec![None; num_gates];
-    for output_party in &output_parties {
-        if *output_party != p_own {
-            for w in circuit.output_gates.iter().copied() {
-                let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
-                if let Some((mac, _)) = macs_and_keys.get(*output_party).copied().flatten() {
-                    outputs[w] = Some((bit, mac));
-                }
+    for p_out in p_out.iter().copied().filter(|p| *p != p_own) {
+        for w in circuit.output_gates.iter().copied() {
+            let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
+            if let Some((mac, _)) = macs_and_keys.get(p_out).copied().flatten() {
+                outputs[w] = Some((bit, mac));
             }
-            parties
-                .send_to(*output_party, "output wire shares", &outputs)
-                .await?; // all parties send to output parties and evaluator (except itself)
         }
+        parties
+            .send_to(p_out, "output wire shares", &outputs)
+            .await?; // all parties send to output parties and evaluator (except itself)
     }
     let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; p_max];
-    if output_parties.contains(&p_own) {
+    if p_out.contains(&p_own) {
         for p in (0..p_max).filter(|p| *p != p_own) {
             output_wire_shares[p] = parties
                 .recv_vec_from(p, "output wire shares", num_gates)
@@ -608,18 +584,14 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         }
     }
     let mut wires_and_labels: Vec<Option<(bool, Label)>> = vec![None; num_gates];
-    if let Role::PartyEval = role {
-        for output_party in &output_parties {
-            if *output_party != p_own {
-                for w in circuit.output_gates.iter().copied() {
-                    wires_and_labels[w] = Some((values[w], labels_eval[w][*output_party]));
-                }
-                parties
-                    .send_to(*output_party, "lambda", &wires_and_labels)
-                    .await?; // sending (lambda_w XOR zw) to output parties
+    if !is_contrib {
+        for p_out in p_out.iter().copied().filter(|p| *p != p_own) {
+            for w in circuit.output_gates.iter().copied() {
+                wires_and_labels[w] = Some((values[w], labels_eval[w][p_out]));
             }
+            parties.send_to(p_out, "lambda", &wires_and_labels).await?; // sending (lambda_w XOR zw) to output parties
         }
-    } else if let Role::PartyContribOutput = role {
+    } else if p_out.contains(&p_own) {
         wires_and_labels = parties.recv_vec_from(p_eval, "lambda", num_gates).await?; //receiving of (lambda_w XOR zw) from evaluator
         for w in circuit.output_gates.iter().copied() {
             if !(wires_and_labels[w] == Some((true, labels[w] ^ delta))
@@ -630,7 +602,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         }
     }
     let mut outputs: Vec<bool> = vec![];
-    if output_parties.contains(&p_own) {
+    if p_out.contains(&p_own) {
         let mut output_wires: Vec<Option<bool>> = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
             let Some((input, _)) = wires_and_labels.get(w).copied().flatten() else {
