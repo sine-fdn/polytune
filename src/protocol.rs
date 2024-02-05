@@ -4,7 +4,7 @@ use std::ops::BitXor;
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::random;
 use serde::{Deserialize, Serialize};
-use tokio::{runtime::Runtime, task};
+use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
@@ -165,14 +165,13 @@ pub fn simulate_mpc(
         };
 
         let mut output: Vec<bool> = Vec::new();
-        let mut computation: Vec<tokio::task::JoinHandle<Vec<bool>>> =
-            Vec::with_capacity(n_parties);
+        let mut computation: JoinSet<Vec<bool>> = JoinSet::new();
 
         for (p_own, ((fpre_channel, party_channel), inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
             let output_parties = output_parties.clone();
-            computation.push(task::spawn(async move {
+            computation.spawn(async move {
                 let result: Result<Vec<bool>, Error> = mpc(
                     &circuit,
                     &inputs,
@@ -198,7 +197,7 @@ pub fn simulate_mpc(
                     }
                 }
                 res_party
-            }));
+            });
             counter += 1;
         }
         let (_, ((fpre_channel, party_channel), inputs)) = evaluator;
@@ -216,30 +215,22 @@ pub fn simulate_mpc(
         match eval_result {
             Err(e) => {
                 eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+                Ok(vec![])
             }
             Ok(res) => {
-                if !res.is_empty() {
-                    output = res;
-                }
-                for i in computation {
-                    let bool_vec_res = i.await.unwrap();
-                    if !bool_vec_res.is_empty() {
-                        // true for output parties
-                        if !output.is_empty() {
-                            if output != bool_vec_res {
-                                eprintln!(
-                                    "{:?} The result does not match for all output parties! {:?}",
-                                    bool_vec_res, output
-                                );
-                            }
-                        } else {
-                            output = bool_vec_res;
-                        }
+                let mut outputs = vec![res];
+                while let Some(output) = computation.join_next().await {
+                    if let Ok(output) = output {
+                        outputs.push(output);
                     }
                 }
+                outputs.retain(|o| !o.is_empty());
+                if !outputs.windows(2).all(|w| w[0] == w[1]) {
+                    eprintln!("The result does not match for all output parties: {outputs:?}");
+                }
+                Ok(outputs.pop().unwrap_or_default())
             }
         }
-        Ok(output)
     })
 }
 
