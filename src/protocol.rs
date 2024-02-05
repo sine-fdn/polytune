@@ -80,8 +80,10 @@ pub enum Error {
         /// The number of input bits provided by the user.
         actual: usize,
     },
-    /// The output parties list is invalid (e.g., contains too large indeces or no output party exists).
-    WrongOutputParties,
+    /// The output parties list is empty.
+    MissingOutputParties,
+    /// The output parties list contains an invalid index.
+    InvalidOutputParty(usize),
 }
 
 impl From<channel::Error> for Error {
@@ -141,15 +143,11 @@ pub fn simulate_mpc(
 ) -> Result<Vec<bool>, Error> {
     let n_parties = inputs.len();
     let p_eval = 0;
-    let mut counter: usize = 1; //for PartyContribOutput parties, starting from 1 as we do not want party 0 to be PartyContribOutput, it should be PartyEval
     let tokio = Runtime::new().expect("Could not start tokio runtime");
     let parties = SimpleChannel::channels(n_parties);
-    if output_parties.is_empty() {
-        return Err(Error::WrongOutputParties);
-    }
     for output_party in output_parties {
         if *output_party >= n_parties {
-            return Err(Error::WrongOutputParties);
+            return Err(Error::InvalidOutputParty(*output_party));
         }
     }
     tokio.block_on(async {
@@ -191,7 +189,6 @@ pub fn simulate_mpc(
                 }
                 res_party
             });
-            counter += 1;
         }
         let (_, ((fpre_channel, party_channel), inputs)) = evaluator;
         let eval_result = mpc(
@@ -245,6 +242,9 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             expected: *expected_inputs,
             actual: inputs.len(),
         });
+    }
+    if p_out.is_empty() {
+        return Err(Error::MissingOutputParties);
     }
 
     let fpre_party = 0;
@@ -573,14 +573,14 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         }
         parties
             .send_to(p_out, "output wire shares", &outputs)
-            .await?; // all parties send to output parties and evaluator (except itself)
+            .await?;
     }
     let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; p_max];
     if p_out.contains(&p_own) {
         for p in (0..p_max).filter(|p| *p != p_own) {
             output_wire_shares[p] = parties
                 .recv_vec_from(p, "output wire shares", num_gates)
-                .await?; // output parties receive shares from all parties
+                .await?;
         }
     }
     let mut wires_and_labels: Vec<Option<(bool, Label)>> = vec![None; num_gates];
@@ -589,10 +589,10 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
             for w in circuit.output_gates.iter().copied() {
                 wires_and_labels[w] = Some((values[w], labels_eval[w][p_out]));
             }
-            parties.send_to(p_out, "lambda", &wires_and_labels).await?; // sending (lambda_w XOR zw) to output parties
+            parties.send_to(p_out, "lambda", &wires_and_labels).await?; 
         }
     } else if p_out.contains(&p_own) {
-        wires_and_labels = parties.recv_vec_from(p_eval, "lambda", num_gates).await?; //receiving of (lambda_w XOR zw) from evaluator
+        wires_and_labels = parties.recv_vec_from(p_eval, "lambda", num_gates).await?;
         for w in circuit.output_gates.iter().copied() {
             if !(wires_and_labels[w] == Some((true, labels[w] ^ delta))
                 || wires_and_labels[w] == Some((false, labels[w])))
@@ -606,7 +606,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
         let mut output_wires: Vec<Option<bool>> = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
             let Some((input, _)) = wires_and_labels.get(w).copied().flatten() else {
-                return Err(MpcError::MissingShareForWire(w).into()); // error type right?
+                return Err(MpcError::MissingShareForWire(w).into());
             };
             let Share(bit, _) = &shares[w];
             output_wires[w] = Some(input ^ bit);
