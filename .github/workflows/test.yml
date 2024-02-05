@@ -15,3 +15,5 @@ jobs:
     - run: cargo build --verbose
     - run: cargo test --verbose
     - run: cargo clippy -- -Dwarnings
+    - run: bash ./simulate.sh
+      working-directory: ./examples/http-channels

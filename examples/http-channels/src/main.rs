@@ -132,7 +132,7 @@ async fn main() {
             .unwrap();
             if !output.is_empty() {
                 let result = prg.parse_output(&output).unwrap();
-                println!("\nThe result is: {result}");
+                println!("\nThe result is {result}");
             }
         }
     }
