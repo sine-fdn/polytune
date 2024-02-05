@@ -145,11 +145,6 @@ pub fn simulate_mpc(
     let p_eval = 0;
     let tokio = Runtime::new().expect("Could not start tokio runtime");
     let parties = SimpleChannel::channels(n_parties);
-    for output_party in output_parties {
-        if *output_party >= n_parties {
-            return Err(Error::InvalidOutputParty(*output_party));
-        }
-    }
     tokio.block_on(async {
         let fpre_channels = f_pre(inputs.len()).await;
 
@@ -250,6 +245,12 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
     let fpre_party = 0;
     let p_max = parties.participants();
     let is_contrib = p_own != p_eval;
+
+    for output_party in p_out {
+        if *output_party >= p_max {
+            return Err(Error::InvalidOutputParty(*output_party));
+        }
+    }
 
     // fn-independent preprocessing:
 
@@ -479,9 +480,7 @@ pub async fn mpc<Fpre: Channel, Party: Channel>(
 
     let mut values: Vec<bool> = vec![];
     let mut labels_eval: Vec<Vec<Label>> = vec![];
-    if is_contrib {
-        // nothing to do for the contributors
-    } else {
+    if !is_contrib {
         for (w, gate) in circuit.wires().iter().enumerate() {
             let (input, label) = match gate {
                 Wire::Input(_) => {
