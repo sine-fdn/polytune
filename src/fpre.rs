@@ -1,39 +1,11 @@
-//! An implementation of the FPre ideal functionality from the paper
-//! [Authenticated Garbling and Efficient Maliciously Secure Two-Party Computation](https://acmccs.github.io/papers/p21-wangA.pdf)
-//! as a third party that communicates with two parties over channels.
+//! The FPre preprocessor as a (semi-)trusted party, providing correlated randomness.
 
 use std::ops::{BitAnd, BitXor};
 
 use rand::random;
 use serde::{Deserialize, Serialize};
-use tokio::task;
 
-use crate::channel::{self, Channel, MsgChannel, SimpleChannel};
-
-/// Implements FPre as a trusted dealer.
-///
-/// Returns communication channels for N parties that can send/receive messages to/from FPre.
-pub(crate) async fn f_pre(parties: usize) -> Vec<MsgChannel<SimpleChannel>> {
-    let mut party_channels = vec![];
-    let mut fpre_channels = vec![];
-    for _ in 0..parties {
-        let mut channels = SimpleChannel::channels(2).into_iter();
-        fpre_channels.push(channels.next().unwrap());
-        party_channels.push(channels.next().unwrap());
-    }
-    task::spawn(async move {
-        let other_party = 1;
-        if let Err(e) = fpre_channel(other_party, &mut fpre_channels).await {
-            for fpre in fpre_channels.iter_mut() {
-                if let Err(e) = fpre.send_to(other_party, "error", &format!("{e:?}")).await {
-                    eprintln!("{e:?}");
-                }
-            }
-            eprintln!("{e:?}");
-        }
-    });
-    party_channels
-}
+use crate::channel::{self, Channel, MsgChannel};
 
 /// Errors that can occur while executing FPre as a trusted dealer.
 #[derive(Debug)]
@@ -54,46 +26,48 @@ impl From<channel::Error> for Error {
     }
 }
 
-/// Runs FPre as a trusted dealer for one channel, communicating with one other party.
-pub async fn fpre_channel<C: Channel>(
-    other_party: usize,
-    fpre_channels: &mut Vec<MsgChannel<C>>,
-) -> Result<(), Error> {
-    for fpre in fpre_channels.iter_mut() {
-        fpre.recv_from(other_party, "delta (fpre)").await?;
+/// Runs FPre as a trusted dealer, communicating with all other parties.
+pub async fn fpre(channel: impl Channel, parties: usize) -> Result<(), Error> {
+    let mut channel = MsgChannel(channel);
+    for p in 0..parties {
+        channel.recv_from(p, "delta (fpre)").await?;
     }
     let mut deltas = vec![];
-    for fpre in fpre_channels.iter_mut() {
+    for p in 0..parties {
         let delta = Delta(random());
-        fpre.send_to(other_party, "delta (fpre)", &delta).await?;
+        channel.send_to(p, "delta (fpre)", &delta).await?;
         deltas.push(delta);
     }
 
     let mut num_shares = 0;
-    for fpre in fpre_channels.iter_mut() {
-        let r: u32 = fpre.recv_from(other_party, "random shares (fpre)").await?;
+    for p in 0..parties {
+        let r: u32 = channel.recv_from(p, "random shares (fpre)").await?;
         if num_shares > 0 && num_shares != r {
-            return Err(Error::RandomSharesMismatch(num_shares, r));
+            let e = Error::RandomSharesMismatch(num_shares, r);
+            for p in 0..parties {
+                channel.send_to(p, "error", &format!("{e:?}")).await?;
+            }
+            return Err(e);
         }
         num_shares = r;
     }
     let num_shares = num_shares as usize;
-    let mut random_shares = vec![vec![]; fpre_channels.len()];
+    let mut random_shares = vec![vec![]; parties];
     for _ in 0..num_shares {
         let mut bits = vec![];
         let mut keys = vec![];
-        for i in 0..fpre_channels.len() {
+        for i in 0..parties {
             bits.push(random());
-            keys.push(vec![Key(0); fpre_channels.len()]);
-            for j in 0..fpre_channels.len() {
+            keys.push(vec![Key(0); parties]);
+            for j in 0..parties {
                 if i != j {
                     keys[i][j] = Key(random());
                 }
             }
         }
-        for i in 0..fpre_channels.len() {
-            let mut mac_and_key = vec![None; fpre_channels.len()];
-            for j in 0..fpre_channels.len() {
+        for i in 0..parties {
+            let mut mac_and_key = vec![None; parties];
+            for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
                     let key = keys[i][j];
@@ -103,19 +77,21 @@ pub async fn fpre_channel<C: Channel>(
             random_shares[i].push(Share(bits[i], Auth(mac_and_key)));
         }
     }
-    for (fpre, random_shares) in fpre_channels.iter_mut().zip(random_shares.into_iter()) {
-        fpre.send_to(other_party, "random shares (fpre)", &random_shares)
-            .await?;
+    for (p, shares) in random_shares.into_iter().enumerate() {
+        channel.send_to(p, "random shares (fpre)", &shares).await?;
     }
 
     let mut num_shares = None;
     let mut shares = vec![];
-    for fpre in fpre_channels.iter_mut() {
-        let and_shares: Vec<(Share, Share)> =
-            fpre.recv_from(other_party, "AND shares (fpre)").await?;
+    for p in 0..parties {
+        let and_shares: Vec<(Share, Share)> = channel.recv_from(p, "AND shares (fpre)").await?;
         if let Some(num_shares) = num_shares {
             if num_shares != and_shares.len() {
-                return Err(Error::AndSharesMismatch(num_shares, and_shares.len()));
+                let e = Error::AndSharesMismatch(num_shares, and_shares.len());
+                for p in 0..parties {
+                    channel.send_to(p, "error", &format!("{e:?}")).await?;
+                }
+                return Err(e);
             }
         } else {
             for _ in 0..and_shares.len() {
@@ -146,9 +122,13 @@ pub async fn fpre_channel<C: Channel>(
         }
     }
     if has_cheated {
-        return Err(Error::CheatingDetected);
+        let e = Error::CheatingDetected;
+        for p in 0..parties {
+            channel.send_to(p, "error", &format!("{e:?}")).await?;
+        }
+        return Err(e);
     }
-    let mut and_shares = vec![vec![]; fpre_channels.len()];
+    let mut and_shares = vec![vec![]; parties];
     for share in shares {
         let mut a = false;
         let mut b = false;
@@ -158,26 +138,26 @@ pub async fn fpre_channel<C: Channel>(
         }
         let c = a & b;
         let mut current_share = false;
-        let mut bits = vec![false; fpre_channels.len()];
+        let mut bits = vec![false; parties];
         let mut keys = vec![];
-        for i in 0..fpre_channels.len() {
-            bits[i] = if i == fpre_channels.len() - 1 {
+        for i in 0..parties {
+            bits[i] = if i == parties - 1 {
                 current_share != c
             } else {
                 let share: bool = random();
                 current_share ^= share;
                 share
             };
-            keys.push(vec![Key(0); fpre_channels.len()]);
-            for j in 0..fpre_channels.len() {
+            keys.push(vec![Key(0); parties]);
+            for j in 0..parties {
                 if i != j {
                     keys[i][j] = Key(random());
                 }
             }
         }
-        for i in 0..fpre_channels.len() {
-            let mut mac_and_key = vec![None; fpre_channels.len()];
-            for j in 0..fpre_channels.len() {
+        for i in 0..parties {
+            let mut mac_and_key = vec![None; parties];
+            for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
                     let key = keys[i][j];
@@ -187,9 +167,8 @@ pub async fn fpre_channel<C: Channel>(
             and_shares[i].push(Share(bits[i], Auth(mac_and_key)));
         }
     }
-    for (fpre, and_shares) in fpre_channels.iter_mut().zip(and_shares.into_iter()) {
-        fpre.send_to(other_party, "AND shares (fpre)", &and_shares)
-            .await?;
+    for (p, and_shares) in and_shares.into_iter().enumerate() {
+        channel.send_to(p, "AND shares (fpre)", &and_shares).await?;
     }
     Ok(())
 }
@@ -330,16 +309,18 @@ impl Auth {
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::Error,
-        fpre::{f_pre, Auth, Delta, Share},
+        channel::{Error, MsgChannel, SimpleChannel},
+        fpre::{fpre, Auth, Delta, Share},
     };
 
     #[tokio::test]
     async fn xor_homomorphic_mac() -> Result<(), Error> {
-        let fpre_party = 0;
-        let mut channels = f_pre(2).await.into_iter();
-        let mut a = channels.next().unwrap();
-        let mut b = channels.next().unwrap();
+        let parties = 2;
+        let mut channels = SimpleChannel::channels(parties + 1);
+        tokio::spawn(fpre(channels.pop().unwrap(), parties));
+        let fpre_party = parties;
+        let mut b = MsgChannel(channels.pop().unwrap());
+        let mut a = MsgChannel(channels.pop().unwrap());
 
         // init:
         a.send_to(fpre_party, "delta", &()).await?;
@@ -390,10 +371,12 @@ mod tests {
     #[tokio::test]
     async fn authenticated_and_shares() -> Result<(), Error> {
         for i in 0..3 {
-            let fpre_party = 0;
-            let mut channels = f_pre(2).await.into_iter();
-            let mut a = channels.next().unwrap();
-            let mut b = channels.next().unwrap();
+            let parties = 2;
+            let mut channels = SimpleChannel::channels(parties + 1);
+            tokio::spawn(fpre(channels.pop().unwrap(), parties));
+            let fpre_party = parties;
+            let mut b = MsgChannel(channels.pop().unwrap());
+            let mut a = MsgChannel(channels.pop().unwrap());
 
             // init:
             a.send_to(fpre_party, "delta", &()).await?;

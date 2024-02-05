@@ -53,7 +53,7 @@ pub trait Channel {
 
 /// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
 #[derive(Debug)]
-pub struct MsgChannel<C: Channel>(pub C);
+pub(crate) struct MsgChannel<C: Channel>(pub C);
 
 impl<C: Channel> MsgChannel<C> {
     /// Serializes and sends an MPC message to the other party.
@@ -117,7 +117,7 @@ pub struct SimpleChannel {
 
 impl SimpleChannel {
     /// Creates channels for N parties to communicate with each other.
-    pub fn channels(parties: usize) -> Vec<MsgChannel<Self>> {
+    pub fn channels(parties: usize) -> Vec<Self> {
         let buffer_capacity = 1024;
         let mut channels = vec![];
         for _ in 0..parties {
@@ -127,7 +127,7 @@ impl SimpleChannel {
                 s.push(None);
                 r.push(None);
             }
-            channels.push(MsgChannel(SimpleChannel { s, r }));
+            channels.push(SimpleChannel { s, r });
         }
         for a in 0..parties {
             for b in 0..parties {
@@ -136,10 +136,10 @@ impl SimpleChannel {
                 }
                 let (send_a_to_b, recv_a_to_b) = channel(buffer_capacity);
                 let (send_b_to_a, recv_b_to_a) = channel(buffer_capacity);
-                channels[a].0.s[b] = Some(send_a_to_b);
-                channels[b].0.s[a] = Some(send_b_to_a);
-                channels[a].0.r[b] = Some(recv_b_to_a);
-                channels[b].0.r[a] = Some(recv_a_to_b);
+                channels[a].s[b] = Some(send_a_to_b);
+                channels[b].s[a] = Some(send_b_to_a);
+                channels[a].r[b] = Some(recv_b_to_a);
+                channels[b].r[a] = Some(recv_a_to_b);
             }
         }
         channels
