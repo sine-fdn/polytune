@@ -164,9 +164,7 @@ pub fn simulate_mpc(
             return Ok(vec![]);
         };
 
-        let mut output: Vec<bool> = Vec::new();
         let mut computation: JoinSet<Vec<bool>> = JoinSet::new();
-
         for (p_own, ((fpre_channel, party_channel), inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
