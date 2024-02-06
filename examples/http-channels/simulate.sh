@@ -1,6 +1,6 @@
 #!/bin/bash
 errorhandler () {
-    kill $(jobs -p) 2>/dev/null
+    kill $(jobs -p) 2>/dev/null;
 }
 trap errorhandler ERR EXIT
 cargo build
