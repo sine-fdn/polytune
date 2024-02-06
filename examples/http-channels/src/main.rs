@@ -8,6 +8,7 @@ use parlay::{
     protocol::{mpc, Preprocessor},
 };
 use tokio::{fs, time::sleep};
+use tracing::debug;
 
 mod http_channel;
 mod server;
@@ -77,7 +78,7 @@ async fn main() {
                 if joined == parties + 1 {
                     break;
                 } else {
-                    println!("Waiting for {} parties to join...", parties + 1 - joined);
+                    debug!("Waiting for {} parties to join...", parties + 1 - joined);
                     sleep(Duration::from_secs(1)).await;
                 }
             }
@@ -103,7 +104,7 @@ async fn main() {
             loop {
                 let joined = channel.participants().await.unwrap();
                 if joined < parties + 1 {
-                    println!("Waiting for {} parties to join...", parties + 1 - joined);
+                    debug!("Waiting for {} parties to join...", parties + 1 - joined);
                     sleep(Duration::from_secs(1)).await;
                 } else {
                     break;
