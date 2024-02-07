@@ -16,7 +16,7 @@ use url::Url;
 
 mod iroh_channel;
 
-/// A cli for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
 #[command(name = "parlay")]
 struct Cli {
