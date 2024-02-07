@@ -46,8 +46,8 @@ enum Commands {
         /// A name that uniquely identifies the MPC session on the server.
         #[arg(short, long)]
         session: String,
-        #[arg(long)]
         /// The path to the Garble program to execute.
+        #[arg(long)]
         program: PathBuf,
         /// The index of the party (0 for the first participant, 1 for the second, etc).
         #[arg(long)]
