@@ -58,7 +58,7 @@ enum Commands {
 }
 
 const ALPN: &[u8] = b"parlay/p2p/iroh";
-const MAX_MSG_BYTES: usize = 1024_000;
+const MAX_MSG_BYTES: usize = 1_024_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct JoinMessage {
