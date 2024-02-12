@@ -48,18 +48,18 @@ pub(crate) fn encrypt(
         u128::from_le_bytes(hassh.try_into().map_err(|_| Error::EncryptionFailed)?);
     let mut result: Vec<Vec<u8>> = vec![];
     result.push((ciphertext ^ triple.0 as u128).to_le_bytes().to_vec());
-    for i in 1..party_num {
-        result.push(xor(&hash[i], triple.1[i - 1].unwrap().0)?);
+    for (i, h) in hash.iter().enumerate().take(party_num).skip(1) {
+        result.push(xor(h, triple.1[i - 1].unwrap().0)?);
     }
     result.push(xor(&hash[party_num], triple.2.0)?);
     Ok(result)
 }
 
-fn xor_dec(hash: &[u8], bytes: &Vec<u8>) -> Result<u128, Error>{
+fn xor_dec(hash: &[u8], bytes: &[u8]) -> Result<u128, Error>{
     let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::EncryptionFailed)?);
     let ciphertext = u128::from_le_bytes(
         bytes
-            .clone()
+            .to_owned()
             .try_into()
             .map_err(|_| Error::EncryptionFailed)?,
     );
