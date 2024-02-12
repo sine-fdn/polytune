@@ -1,9 +1,7 @@
 //! The cryptographic building blocks used to garble (= encrypt/decrypt) gate tables.
 
-use chacha20poly1305::{
-    aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Key, Nonce,
-};
+use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::Aes128;
 
 use crate::{fpre::Mac, protocol::Label};
 
@@ -33,50 +31,102 @@ impl GarblingKey {
     }
 }
 
+fn xor(hash: &[u8], value: u128) -> Result<Vec<u8>, Error> {
+    let mut ciphertext = u128::from_le_bytes(hash.try_into().map_err(|_| Error::EncryptionFailed)?);
+    ciphertext ^= value;
+    Ok(ciphertext.to_le_bytes().to_vec())
+}
+
 pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
     triple: (bool, Vec<Option<Mac>>, Label),
-) -> Result<Vec<u8>, Error> {
-    let (key, nonce) = hash(garbling_key);
-    let cipher = ChaCha20Poly1305::new(&key);
-    let bytes = bincode::serialize(&triple).map_err(|e| Error::Serde(format!("{e:?}")))?;
-    let ciphertext = cipher
-        .encrypt(&nonce, bytes.as_ref())
-        .map_err(|_| Error::EncryptionFailed)?;
-    Ok(ciphertext)
+    party_num: usize,
+) -> Result<Vec<Vec<u8>>, Error> {
+    let hash = hash_aes(garbling_key, party_num)?;
+    let hassh: &[u8] = &hash[0];
+    let ciphertext =
+        u128::from_le_bytes(hassh.try_into().map_err(|_| Error::EncryptionFailed)?);
+    let mut result: Vec<Vec<u8>> = vec![];
+    result.push((ciphertext ^ triple.0 as u128).to_le_bytes().to_vec());
+    for i in 1..party_num {
+        result.push(xor(&hash[i], triple.1[i - 1].unwrap().0)?);
+    }
+    result.push(xor(&hash[party_num], triple.2.0)?);
+    Ok(result)
+}
+
+fn xor_dec(hash: &[u8], bytes: &Vec<u8>) -> Result<u128, Error>{
+    let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::EncryptionFailed)?);
+    let ciphertext = u128::from_le_bytes(
+        bytes
+            .clone()
+            .try_into()
+            .map_err(|_| Error::EncryptionFailed)?,
+    );
+    Ok(myhash ^ ciphertext)
 }
 
 pub(crate) fn decrypt(
     garbling_key: &GarblingKey,
-    bytes: &[u8],
+    bytes: Vec<Vec<u8>>,
+    party_num: usize,
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
-    let (key, nonce) = hash(garbling_key);
-    let cipher = ChaCha20Poly1305::new(&key);
-    let plaintext = cipher
-        .decrypt(&nonce, bytes)
-        .map_err(|_| Error::DecryptionFailed)?;
-    bincode::deserialize(&plaintext).map_err(|e| Error::Serde(format!("{e:?}")))
+    let mut triple: (bool, Vec<Option<Mac>>, Label) = (false, vec![], Label(0));
+    let hash = hash_aes(garbling_key, party_num)?;
+    let mut decrypted = xor_dec(&hash[0], &bytes[0])?;
+    if decrypted == 1 {
+        triple.0 = true;
+    } else if 0 != decrypted {
+        return Err(Error::DecryptionFailed);
+    }
+    let mut plaintext: Mac;
+    for i in 1..party_num {
+        decrypted = xor_dec(&hash[i], &bytes[i])?;
+        plaintext = bincode::deserialize(&(decrypted).to_le_bytes())
+            .map_err(|e| Error::Serde(format!("{e:?}")))?;
+        triple.1.push(Some(plaintext));
+    }
+    decrypted = xor_dec(&hash[party_num], &bytes[party_num])?;
+    triple.2 = bincode::deserialize(&(decrypted).to_le_bytes())
+        .map_err(|e| Error::Serde(format!("{e:?}")))?;
+    Ok(triple)
 }
 
-fn hash(
+fn hash_aes(
     GarblingKey {
         label_x,
         label_y,
         w,
         row,
     }: &GarblingKey,
-) -> (Key, Nonce) {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&label_x.0.to_le_bytes());
-    hasher.update(&label_y.0.to_le_bytes());
-    hasher.update(&w.to_le_bytes());
-    hasher.update(&[*row]);
-    let mut output_reader = hasher.finalize_xof();
-    let mut key: [u8; 32] = [0; 32];
-    output_reader.fill(&mut key);
-    let mut nonce: [u8; 12] = [0; 12];
-    output_reader.fill(&mut nonce);
-    (key.into(), nonce.into())
+    party_num: usize,
+) -> Result<Vec<Vec<u8>>, Error> {
+    let res = sigma(label_x) ^ sigma(&Label(sigma(label_y)));
+    let key = GenericArray::from([0u8; 16]); //TODO real key
+    let cipher = Aes128::new(&key);
+    let mut result: Vec<u128> = vec![];
+    let mut bytes_vec: Vec<Vec<u8>> = vec![];
+    let wok: u128 = *w as u128;
+    result.push(res);
+    let mut bytes = bincode::serialize(&res)
+        .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
+    bytes_vec.push(bytes);
+    for i in 1..party_num + 1 {
+        result.push(res ^ ((4 * wok + *row as u128) << 64) ^ (i as u128));
+        bytes = bincode::serialize(&result[i])
+            .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
+        let mut block = *GenericArray::from_slice(&bytes);
+        cipher.encrypt_block(&mut block);
+        bytes_vec.push(block.to_vec());
+    }
+    Ok(bytes_vec)
+}
+
+fn sigma(block: &Label) -> u128 {
+    let xl = block.0 >> 64;
+    let xr = block.0 << 64;
+    let xlxl = xl ^ xl << 64;
+    xlxl ^ xr
 }
 
 #[test]
@@ -89,12 +139,18 @@ fn encrypt_decrypt() {
         w: random(),
         row: random(),
     };
-    let triple = (
+    let triple: (bool, Vec<Option<Mac>>, Label) = (
         random(),
-        vec![Some(Mac(random())), None, Some(Mac(random()))],
+        vec![
+            Some(Mac(random())),
+            Some(Mac(random())),
+            Some(Mac(random())),
+        ],
         Label(random()),
     );
-    let encrypted = encrypt(&key, triple.clone()).unwrap();
-    let decrypted = decrypt(&key, &encrypted).unwrap();
+
+    let encrypted = encrypt(&key, triple.clone(), 4).unwrap();
+    let decrypted = decrypt(&key, encrypted, 4).unwrap();
+
     assert_eq!(triple, decrypted);
 }
