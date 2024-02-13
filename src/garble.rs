@@ -49,19 +49,25 @@ pub(crate) fn encrypt(
     let mut result: Vec<Vec<u8>> = vec![];
     result.push((ciphertext ^ triple.0 as u128).to_le_bytes().to_vec());
     for (i, h) in hash.iter().enumerate().take(party_num).skip(1) {
-        result.push(xor(h, triple.1[i - 1].unwrap().0)?);
+        let mac = triple.1[i - 1];
+        if mac.is_none(){
+            result.push(vec![]);
+        }
+        else{
+            result.push(xor(h, triple.1[i - 1].unwrap().0)?);
+        }
     }
     result.push(xor(&hash[party_num], triple.2.0)?);
     Ok(result)
 }
 
 fn xor_dec(hash: &[u8], bytes: &[u8]) -> Result<u128, Error>{
-    let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::EncryptionFailed)?);
+    let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::DecryptionFailed)?);
     let ciphertext = u128::from_le_bytes(
         bytes
             .to_owned()
             .try_into()
-            .map_err(|_| Error::EncryptionFailed)?,
+            .map_err(|_| Error::DecryptionFailed)?,
     );
     Ok(myhash ^ ciphertext)
 }
@@ -81,10 +87,14 @@ pub(crate) fn decrypt(
     }
     let mut plaintext: Mac;
     for i in 1..party_num {
-        decrypted = xor_dec(&hash[i], &bytes[i])?;
-        plaintext = bincode::deserialize(&(decrypted).to_le_bytes())
-            .map_err(|e| Error::Serde(format!("{e:?}")))?;
-        triple.1.push(Some(plaintext));
+        if bytes[i].is_empty(){
+            triple.1.push(None);
+        } else {
+            decrypted = xor_dec(&hash[i], &bytes[i])?;
+            plaintext = bincode::deserialize(&(decrypted).to_le_bytes())
+                .map_err(|e| Error::Serde(format!("{e:?}")))?;
+            triple.1.push(Some(plaintext));
+        }
     }
     decrypted = xor_dec(&hash[party_num], &bytes[party_num])?;
     triple.2 = bincode::deserialize(&(decrypted).to_le_bytes())
@@ -143,7 +153,7 @@ fn encrypt_decrypt() {
         random(),
         vec![
             Some(Mac(random())),
-            Some(Mac(random())),
+            None,
             Some(Mac(random())),
         ],
         Label(random()),
