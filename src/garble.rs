@@ -41,8 +41,9 @@ pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
     triple: (bool, Vec<Option<Mac>>, Label),
     party_num: usize,
+    cipher: Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
-    let hash = hash_aes(garbling_key, party_num)?;
+    let hash = hash_aes(garbling_key, party_num, cipher)?;
     let hassh: &[u8] = &hash[0];
     let ciphertext =
         u128::from_le_bytes(hassh.try_into().map_err(|_| Error::EncryptionFailed)?);
@@ -76,9 +77,10 @@ pub(crate) fn decrypt(
     garbling_key: &GarblingKey,
     bytes: Vec<Vec<u8>>,
     party_num: usize,
+    cipher: Aes128,
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
     let mut triple: (bool, Vec<Option<Mac>>, Label) = (false, vec![], Label(0));
-    let hash = hash_aes(garbling_key, party_num)?;
+    let hash = hash_aes(garbling_key, party_num, cipher)?;
     let mut decrypted = xor_dec(&hash[0], &bytes[0])?;
     if decrypted == 1 {
         triple.0 = true;
@@ -110,10 +112,10 @@ fn hash_aes(
         row,
     }: &GarblingKey,
     party_num: usize,
+    cipher: Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
     let res = sigma(label_x) ^ sigma(&Label(sigma(label_y)));
-    let key = GenericArray::from([0u8; 16]); //TODO real key
-    let cipher = Aes128::new(&key);
+    
     let mut result: Vec<u128> = vec![];
     let mut bytes_vec: Vec<Vec<u8>> = vec![];
     let wok: u128 = *w as u128;
@@ -142,6 +144,8 @@ fn sigma(block: &Label) -> u128 {
 #[test]
 fn encrypt_decrypt() {
     use rand::random;
+    let key_aes = GenericArray::from([0u8; 16]); //TODO real key
+    let cipher = Aes128::new(&key_aes);
 
     let key = GarblingKey {
         label_x: Label(random()),
@@ -159,8 +163,8 @@ fn encrypt_decrypt() {
         Label(random()),
     );
 
-    let encrypted = encrypt(&key, triple.clone(), 4).unwrap();
-    let decrypted = decrypt(&key, encrypted, 4).unwrap();
+    let encrypted = encrypt(&key, triple.clone(), 4, cipher.clone()).unwrap();
+    let decrypted = decrypt(&key, encrypted, 4, cipher.clone()).unwrap();
 
     assert_eq!(triple, decrypted);
 }
