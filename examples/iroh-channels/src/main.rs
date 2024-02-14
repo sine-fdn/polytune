@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, process::exit, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, process::exit, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -11,7 +11,7 @@ use parlay::{
 };
 use quinn::Connection;
 use serde::{Deserialize, Serialize};
-use tokio::{fs, sync::Mutex};
+use tokio::{fs, sync::Mutex, time::sleep};
 use url::Url;
 
 mod iroh_channel;
@@ -231,7 +231,9 @@ async fn main() -> Result<()> {
                     participants.lock().await[joined.party] = Some(conn);
                 }
             }
-            while participants.lock().await.iter().flatten().count() < parties - 1 {}
+            while participants.lock().await.iter().flatten().count() < parties - 1 {
+                sleep(Duration::from_millis(100)).await;
+            }
             println!("Connected to all parties, running MPC protocol now...");
             let mut conns: Vec<_> = participants.lock().await.clone();
             conns.push(Some(pre_conn));
