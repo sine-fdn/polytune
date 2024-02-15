@@ -356,11 +356,11 @@ pub async fn mpc(
                 let row2_label = label_gamma_0 ^ row2.xor_keys() ^ (row2.bit() & delta);
                 let row3_label = label_gamma_0 ^ row3.xor_keys() ^ (row3.bit() & delta);
 
-                let garbled0 = encrypt(&k0, (row0.bit(), row0.macs(), row0_label), p_max, cipher.clone())?;
-                let garbled1 = encrypt(&k1, (row1.bit(), row1.macs(), row1_label), p_max, cipher.clone())?;
-                let garbled2 = encrypt(&k2, (row2.bit(), row2.macs(), row2_label), p_max, cipher.clone())?;
-                let garbled3 = encrypt(&k3, (row3.bit(), row3.macs(), row3_label), p_max, cipher.clone())?;
-                
+                let garbled0 = encrypt(&k0, (row0.bit(), row0.macs(), row0_label), p_max, &cipher)?;
+                let garbled1 = encrypt(&k1, (row1.bit(), row1.macs(), row1_label), p_max, &cipher)?;
+                let garbled2 = encrypt(&k2, (row2.bit(), row2.macs(), row2_label), p_max, &cipher)?;
+                let garbled3 = encrypt(&k3, (row3.bit(), row3.macs(), row3_label), p_max, &cipher)?;
+
                 preprocessed_gates[w] = Some(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
             }
         }
@@ -544,7 +544,8 @@ pub async fn mpc(
                         };
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
                         let garbled_row = garbled_gate[i].clone();
-                        let (r, mac_r, label_share) = decrypt(&garbling_key, garbled_row, p_max, cipher.clone())?;
+                        let (r, mac_r, label_share) =
+                            decrypt(&garbling_key, garbled_row, p_max, &cipher)?;
                         let Some(mac_r_for_eval) = mac_r.get(p_eval).copied().flatten() else {
                             return Err(MpcError::InvalidInputMacOnWire(w).into());
                         };

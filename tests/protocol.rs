@@ -109,7 +109,7 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
     Ok(())
 }
 
-//#[test]
+#[test]
 fn eval_and_circuits_3pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
@@ -129,7 +129,7 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
     Ok(())
 }
 
-//#[test]
+#[test]
 fn eval_garble_prg_3pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![0, 1, 2];
     let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
