@@ -33,9 +33,12 @@ pub async fn fpre(channel: impl Channel, parties: usize) -> Result<(), Error> {
         channel.recv_from(p, "delta (fpre)").await?;
     }
     let mut deltas = vec![];
+    let aes_key: u128 = random();
     for p in 0..parties {
         let delta = Delta(random());
-        channel.send_to(p, "delta (fpre)", &delta).await?;
+        channel
+            .send_to(p, "delta (fpre)", &(delta, aes_key))
+            .await?;
         deltas.push(delta);
     }
 

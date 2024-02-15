@@ -260,13 +260,13 @@ pub async fn mpc(
     let mut channel = MsgChannel(channel);
     let Preprocessor::TrustedDealer(p_fpre) = p_fpre;
 
-    let key = GenericArray::from([0u8; 16]); //TODO real key
-    let cipher = Aes128::new(&key);
-
     // fn-independent preprocessing:
 
     channel.send_to(p_fpre, "delta", &()).await?;
-    let delta: Delta = channel.recv_from(p_fpre, "delta").await?;
+    let (delta, aes_key): (Delta, u128) = channel.recv_from(p_fpre, "delta").await?;
+    let bytes = aes_key.to_le_bytes();
+    let key_aes = GenericArray::from_slice(&bytes);
+    let cipher = Aes128::new(key_aes);
 
     let num_input_gates: usize = circuit.input_gates.iter().sum();
     let num_and_gates = circuit.and_gates();

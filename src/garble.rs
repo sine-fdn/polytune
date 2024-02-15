@@ -31,12 +31,6 @@ impl GarblingKey {
     }
 }
 
-fn xor(hash: &[u8], value: u128) -> Result<Vec<u8>, Error> {
-    let mut ciphertext = u128::from_le_bytes(hash.try_into().map_err(|_| Error::EncryptionFailed)?);
-    ciphertext ^= value;
-    Ok(ciphertext.to_le_bytes().to_vec())
-}
-
 pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
     triple: (bool, Vec<Option<Mac>>, Label),
@@ -44,31 +38,18 @@ pub(crate) fn encrypt(
     cipher: &Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
     let hash = hash_aes(garbling_key, party_num + 1, cipher)?;
-    let hassh: &[u8] = &hash[0];
-    let ciphertext = u128::from_le_bytes(hassh.try_into().map_err(|_| Error::EncryptionFailed)?);
     let mut result: Vec<Vec<u8>> = vec![];
-    result.push((ciphertext ^ triple.0 as u128).to_le_bytes().to_vec());
+    result.push(xor_enc(&hash[0], triple.0 as u128)?);
     for (i, h) in hash.iter().enumerate().take(party_num + 1).skip(1) {
         let mac = triple.1[i - 1];
         if mac.is_none() {
             result.push(vec![]);
         } else {
-            result.push(xor(h, triple.1[i - 1].unwrap().0)?);
+            result.push(xor_enc(h, triple.1[i - 1].unwrap().0)?);
         }
     }
-    result.push(xor(&hash[party_num + 1], triple.2 .0)?);
+    result.push(xor_enc(&hash[party_num + 1], triple.2 .0)?);
     Ok(result)
-}
-
-fn xor_dec(hash: &[u8], bytes: &[u8]) -> Result<u128, Error> {
-    let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::DecryptionFailed)?);
-    let ciphertext = u128::from_le_bytes(
-        bytes
-            .to_owned()
-            .try_into()
-            .map_err(|_| Error::DecryptionFailed)?,
-    );
-    Ok(myhash ^ ciphertext)
 }
 
 pub(crate) fn decrypt(
@@ -85,15 +66,15 @@ pub(crate) fn decrypt(
     } else if 0 != decrypted {
         return Err(Error::DecryptionFailed);
     }
-    let mut plaintext: Mac;
+    let mut mac: Mac;
     for i in 1..party_num + 1 {
         if bytes[i].is_empty() {
             triple.1.push(None);
         } else {
             decrypted = xor_dec(&hash[i], &bytes[i])?;
-            plaintext = bincode::deserialize(&(decrypted).to_le_bytes())
+            mac = bincode::deserialize(&(decrypted).to_le_bytes())
                 .map_err(|e| Error::Serde(format!("{e:?}")))?;
-            triple.1.push(Some(plaintext));
+            triple.1.push(Some(mac));
         }
     }
     decrypted = xor_dec(&hash[party_num + 1], &bytes[party_num + 1])?;
@@ -112,24 +93,20 @@ fn hash_aes(
     party_num: usize,
     cipher: &Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
-    let res = sigma(label_x) ^ sigma(&Label(sigma(label_y)));
-
-    let mut result: Vec<u128> = vec![];
-    let mut bytes_vec: Vec<Vec<u8>> = vec![];
-    let wok: u128 = *w as u128;
-    result.push(res);
+    let mut res = sigma(label_x) ^ sigma(&Label(sigma(label_y)));
+    let mut result: Vec<Vec<u8>> = vec![];
     let mut bytes = bincode::serialize(&res)
         .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
-    bytes_vec.push(bytes);
+    result.push(bytes);
     for i in 1..party_num + 1 {
-        result.push(res ^ ((4 * wok + *row as u128) << 64) ^ (i as u128));
-        bytes = bincode::serialize(&result[i])
+        res ^= ((4 * *w as u128 + *row as u128) << 64) ^ (i as u128);
+        bytes = bincode::serialize(&res)
             .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
         let mut block = *GenericArray::from_slice(&bytes);
         cipher.encrypt_block(&mut block);
-        bytes_vec.push(block.to_vec());
+        result.push(block.to_vec());
     }
-    Ok(bytes_vec)
+    Ok(result)
 }
 
 fn sigma(block: &Label) -> u128 {
@@ -139,11 +116,24 @@ fn sigma(block: &Label) -> u128 {
     xlxl ^ xr
 }
 
+fn xor_enc(hash: &[u8], value: u128) -> Result<Vec<u8>, Error> {
+    let mut ciphertext = u128::from_le_bytes(hash.try_into().map_err(|_| Error::EncryptionFailed)?);
+    ciphertext ^= value;
+    Ok(ciphertext.to_le_bytes().to_vec())
+}
+
+fn xor_dec(hash: &[u8], bytes: &[u8]) -> Result<u128, Error> {
+    let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::DecryptionFailed)?);
+    let ciphertext = u128::from_le_bytes(bytes.try_into().map_err(|_| Error::DecryptionFailed)?);
+    Ok(myhash ^ ciphertext)
+}
+
 #[test]
 fn encrypt_decrypt() {
-    use rand::random;
     use aes::cipher::KeyInit;
-    let key_aes = GenericArray::from([0u8; 16]); //TODO real key
+    use rand::random;
+    let array: [u8; 16] = rand::random();
+    let key_aes = GenericArray::from_slice(&array);
     let cipher = Aes128::new(&key_aes);
 
     let key = GarblingKey {
