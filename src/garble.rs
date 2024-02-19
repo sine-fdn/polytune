@@ -34,50 +34,49 @@ impl GarblingKey {
 pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
     triple: (bool, Vec<Option<Mac>>, Label),
-    party_num: usize,
+    n_parties: usize,
     cipher: &Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
-    let hash = hash_aes(garbling_key, party_num + 1, cipher)?;
+    let hash = hash_aes(garbling_key, n_parties + 1, cipher)?;
     let mut result: Vec<Vec<u8>> = vec![];
     result.push(xor_enc(&hash[0], triple.0 as u128)?);
-    for (i, h) in hash.iter().enumerate().take(party_num + 1).skip(1) {
-        let mac = triple.1[i - 1];
+    for (i, h) in hash.iter().skip(1).take(n_parties).enumerate() {
+        let mac = triple.1[i];
         if mac.is_none() {
             result.push(vec![]);
         } else {
-            result.push(xor_enc(h, triple.1[i - 1].unwrap().0)?);
+            result.push(xor_enc(h, triple.1[i].unwrap().0)?);
         }
     }
-    result.push(xor_enc(&hash[party_num + 1], triple.2 .0)?);
+    result.push(xor_enc(&hash[n_parties + 1], triple.2 .0)?);
     Ok(result)
 }
 
 pub(crate) fn decrypt(
     garbling_key: &GarblingKey,
     bytes: Vec<Vec<u8>>,
-    party_num: usize,
+    n_parties: usize,
     cipher: &Aes128,
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
     let mut triple: (bool, Vec<Option<Mac>>, Label) = (false, vec![], Label(0));
-    let hash = hash_aes(garbling_key, party_num + 1, cipher)?;
+    let hash = hash_aes(garbling_key, n_parties + 1, cipher)?;
     let mut decrypted = xor_dec(&hash[0], &bytes[0])?;
     if decrypted == 1 {
         triple.0 = true;
     } else if 0 != decrypted {
         return Err(Error::DecryptionFailed);
     }
-    let mut mac: Mac;
-    for i in 1..party_num + 1 {
+    for i in 1..n_parties + 1 {
         if bytes[i].is_empty() {
             triple.1.push(None);
         } else {
             decrypted = xor_dec(&hash[i], &bytes[i])?;
-            mac = bincode::deserialize(&(decrypted).to_le_bytes())
+            let mac = bincode::deserialize(&(decrypted).to_le_bytes())
                 .map_err(|e| Error::Serde(format!("{e:?}")))?;
             triple.1.push(Some(mac));
         }
     }
-    decrypted = xor_dec(&hash[party_num + 1], &bytes[party_num + 1])?;
+    decrypted = xor_dec(&hash[n_parties + 1], &bytes[n_parties + 1])?;
     triple.2 = bincode::deserialize(&(decrypted).to_le_bytes())
         .map_err(|e| Error::Serde(format!("{e:?}")))?;
     Ok(triple)
@@ -90,7 +89,7 @@ fn hash_aes(
         w,
         row,
     }: &GarblingKey,
-    party_num: usize,
+    n_parties: usize,
     cipher: &Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
     let mut res = sigma(label_x) ^ sigma(&Label(sigma(label_y)));
@@ -98,7 +97,7 @@ fn hash_aes(
     let mut bytes = bincode::serialize(&res)
         .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
     result.push(bytes);
-    for i in 1..party_num + 1 {
+    for i in 1..n_parties + 1 {
         res ^= ((4 * *w as u128 + *row as u128) << 64) ^ (i as u128);
         bytes = bincode::serialize(&res)
             .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
@@ -123,9 +122,9 @@ fn xor_enc(hash: &[u8], value: u128) -> Result<Vec<u8>, Error> {
 }
 
 fn xor_dec(hash: &[u8], bytes: &[u8]) -> Result<u128, Error> {
-    let myhash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::DecryptionFailed)?);
+    let hash = u128::from_le_bytes(hash.try_into().map_err(|_| Error::DecryptionFailed)?);
     let ciphertext = u128::from_le_bytes(bytes.try_into().map_err(|_| Error::DecryptionFailed)?);
-    Ok(myhash ^ ciphertext)
+    Ok(hash ^ ciphertext)
 }
 
 #[test]
@@ -133,8 +132,7 @@ fn encrypt_decrypt() {
     use aes::cipher::KeyInit;
     use rand::random;
     let array: [u8; 16] = rand::random();
-    let key_aes = GenericArray::from_slice(&array);
-    let cipher = Aes128::new(&key_aes);
+    let cipher = Aes128::new(&GenericArray::from_slice(&array));
 
     let key = GarblingKey {
         label_x: Label(random()),
@@ -144,7 +142,7 @@ fn encrypt_decrypt() {
     };
     let triple: (bool, Vec<Option<Mac>>, Label) = (
         random(),
-        vec![None, Some(Mac(random())), Some(Mac(random()))],
+        vec![Some(Mac(random())), None, Some(Mac(random()))],
         Label(random()),
     );
 

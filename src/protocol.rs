@@ -264,9 +264,7 @@ pub async fn mpc(
 
     channel.send_to(p_fpre, "delta", &()).await?;
     let (delta, aes_key): (Delta, u128) = channel.recv_from(p_fpre, "delta").await?;
-    let bytes = aes_key.to_le_bytes();
-    let key_aes = GenericArray::from_slice(&bytes);
-    let cipher = Aes128::new(key_aes);
+    let cipher = Aes128::new(GenericArray::from_slice(&aes_key.to_le_bytes()));
 
     let num_input_gates: usize = circuit.input_gates.iter().sum();
     let num_and_gates = circuit.and_gates();
