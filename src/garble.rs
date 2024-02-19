@@ -39,8 +39,8 @@ pub(crate) fn encrypt(
 ) -> Result<Vec<Vec<u8>>, Error> {
     let hash = hash_aes(garbling_key, n_parties + 1, cipher)?;
     let mut result: Vec<Vec<u8>> = vec![];
-    result.push(xor_enc(&hash[0], triple.0 as u128)?);
-    for (i, h) in hash.iter().skip(1).take(n_parties).enumerate() {
+    result.push(xor_enc(&hash.0, triple.0 as u128)?);
+    for (i, h) in hash.1.iter().take(n_parties).enumerate() {
         let mac = triple.1[i];
         if mac.is_none() {
             result.push(vec![]);
@@ -48,7 +48,7 @@ pub(crate) fn encrypt(
             result.push(xor_enc(h, triple.1[i].unwrap().0)?);
         }
     }
-    result.push(xor_enc(&hash[n_parties + 1], triple.2 .0)?);
+    result.push(xor_enc(&hash.1[n_parties], triple.2 .0)?);
     Ok(result)
 }
 
@@ -58,27 +58,31 @@ pub(crate) fn decrypt(
     n_parties: usize,
     cipher: &Aes128,
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
+    if bytes.len() != n_parties+2 {
+        return Err(Error::DecryptionFailed);
+    }
     let mut triple: (bool, Vec<Option<Mac>>, Label) = (false, vec![], Label(0));
     let hash = hash_aes(garbling_key, n_parties + 1, cipher)?;
-    let mut decrypted = xor_dec(&hash[0], &bytes[0])?;
+    let mut decrypted = xor_dec(&hash.0, &bytes[0])?;
     if decrypted == 1 {
         triple.0 = true;
     } else if 0 != decrypted {
         return Err(Error::DecryptionFailed);
     }
-    for i in 1..n_parties + 1 {
-        if bytes[i].is_empty() {
+    for i in 0..n_parties+1 {
+        if bytes[i+1].is_empty() {
             triple.1.push(None);
         } else {
-            decrypted = xor_dec(&hash[i], &bytes[i])?;
-            let mac = bincode::deserialize(&(decrypted).to_le_bytes())
+            decrypted = xor_dec(&hash.1[i], &bytes[i+1])?;
+            let res: u128 = bincode::deserialize(&(decrypted).to_le_bytes())
                 .map_err(|e| Error::Serde(format!("{e:?}")))?;
-            triple.1.push(Some(mac));
+            if i != n_parties {
+                triple.1.push(Some(Mac(res)));
+            } else {
+                triple.2 = Label(res);
+            }
         }
     }
-    decrypted = xor_dec(&hash[n_parties + 1], &bytes[n_parties + 1])?;
-    triple.2 = bincode::deserialize(&(decrypted).to_le_bytes())
-        .map_err(|e| Error::Serde(format!("{e:?}")))?;
     Ok(triple)
 }
 
@@ -91,21 +95,23 @@ fn hash_aes(
     }: &GarblingKey,
     n_parties: usize,
     cipher: &Aes128,
-) -> Result<Vec<Vec<u8>>, Error> {
+) -> Result<(Vec<u8>, Vec<Vec<u8>>), Error> {
     let mut res = sigma(label_x) ^ sigma(&Label(sigma(label_y)));
-    let mut result: Vec<Vec<u8>> = vec![];
-    let mut bytes = bincode::serialize(&res)
-        .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
-    result.push(bytes);
-    for i in 1..n_parties + 1 {
-        res ^= ((4 * *w as u128 + *row as u128) << 64) ^ (i as u128);
-        bytes = bincode::serialize(&res)
+    let mut hashes: Vec<Vec<u8>> = vec![];
+    let mut hashbit = vec![];
+    for i in 0..n_parties + 1 {
+        let hash = bincode::serialize(&res)
             .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
-        let mut block = *GenericArray::from_slice(&bytes);
-        cipher.encrypt_block(&mut block);
-        result.push(block.to_vec());
+        if i==0 {
+            hashbit = hash;
+        } else {
+            let mut block = *GenericArray::from_slice(&hash);
+            cipher.encrypt_block(&mut block);
+            hashes.push(block.to_vec());
+        }
+        res ^= ((4 * *w as u128 + *row as u128) << 64) ^ ((i+1) as u128);
     }
-    Ok(result)
+    Ok((hashbit, hashes))
 }
 
 fn sigma(block: &Label) -> u128 {
