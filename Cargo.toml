@@ -1,4 +1,8 @@
-workspace = { members = ["examples/http-channels", "examples/iroh-channels"] }
+workspace = { members = [
+    "examples/http-multi-server-channels",
+    "examples/http-single-server-channels",
+    "examples/iroh-p2p-channels",
+] }
 [package]
 name = "parlay"
 version = "0.1.0"
