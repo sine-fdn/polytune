@@ -33,22 +33,19 @@ impl GarblingKey {
 
 pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
-    triple: (bool, Vec<Option<Mac>>, Label),
+    (bit, macs, label): (bool, Vec<Option<Mac>>, Label),
     n_parties: usize,
     cipher: &Aes128,
 ) -> Result<Vec<Vec<u8>>, Error> {
-    let hash = hash_aes(garbling_key, n_parties + 1, cipher)?;
-    let mut result: Vec<Vec<u8>> = vec![];
-    result.push(xor_enc(&hash.0, triple.0 as u128)?);
-    for (i, h) in hash.1.iter().take(n_parties).enumerate() {
-        let mac = triple.1[i];
-        if mac.is_none() {
-            result.push(vec![]);
-        } else {
-            result.push(xor_enc(h, triple.1[i].unwrap().0)?);
+    let (hashbit, hashes) = hash_aes(garbling_key, n_parties + 1, cipher)?;
+    let mut result: Vec<Vec<u8>> = vec![xor_enc(&hashbit, bit as u128)?];
+    for (i, h) in hashes.iter().take(n_parties).enumerate() {
+        match macs[i] {
+            None => result.push(vec![]),
+            Some(mac) => result.push(xor_enc(h, mac.0)?),
         }
     }
-    result.push(xor_enc(&hash.1[n_parties], triple.2 .0)?);
+    result.push(xor_enc(&hashes[n_parties], label.0)?);
     Ok(result)
 }
 
