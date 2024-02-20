@@ -55,32 +55,32 @@ pub(crate) fn decrypt(
     n_parties: usize,
     cipher: &Aes128,
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
-    if bytes.len() != n_parties+2 {
+    if bytes.len() != n_parties + 2 {
         return Err(Error::DecryptionFailed);
     }
-    let mut triple: (bool, Vec<Option<Mac>>, Label) = (false, vec![], Label(0));
-    let hash = hash_aes(garbling_key, n_parties + 1, cipher)?;
-    let mut decrypted = xor_dec(&hash.0, &bytes[0])?;
-    if decrypted == 1 {
-        triple.0 = true;
-    } else if 0 != decrypted {
-        return Err(Error::DecryptionFailed);
-    }
-    for i in 0..n_parties+1 {
-        if bytes[i+1].is_empty() {
-            triple.1.push(None);
+    let (hashbit, hashes) = hash_aes(garbling_key, n_parties + 1, cipher)?;
+    let mut decrypted = xor_dec(&hashbit, &bytes[0])?;
+    let bit = match decrypted {
+        0 => false,
+        1 => true,
+        _ => return Err(Error::DecryptionFailed),
+    };
+    let mut macs = vec![];
+    for i in 0..n_parties {
+        if bytes[i + 1].is_empty() {
+            macs.push(None);
         } else {
-            decrypted = xor_dec(&hash.1[i], &bytes[i+1])?;
+            decrypted = xor_dec(&hashes[i], &bytes[i + 1])?;
             let res: u128 = bincode::deserialize(&(decrypted).to_le_bytes())
                 .map_err(|e| Error::Serde(format!("{e:?}")))?;
-            if i != n_parties {
-                triple.1.push(Some(Mac(res)));
-            } else {
-                triple.2 = Label(res);
-            }
+            macs.push(Some(Mac(res)));
         }
     }
-    Ok(triple)
+    let decrypted = xor_dec(&hashes[n_parties], &bytes[n_parties + 1])?;
+    let res: u128 = bincode::deserialize(&(decrypted).to_le_bytes())
+        .map_err(|e| Error::Serde(format!("{e:?}")))?;
+    let label = Label(res);
+    Ok((bit, macs, label))
 }
 
 fn hash_aes(
@@ -99,14 +99,14 @@ fn hash_aes(
     for i in 0..n_parties + 1 {
         let hash = bincode::serialize(&res)
             .map_err(|e: Box<bincode::ErrorKind>| Error::Serde(format!("{e:?}")))?;
-        if i==0 {
+        if i == 0 {
             hashbit = hash;
         } else {
             let mut block = *GenericArray::from_slice(&hash);
             cipher.encrypt_block(&mut block);
             hashes.push(block.to_vec());
         }
-        res ^= ((4 * *w as u128 + *row as u128) << 64) ^ ((i+1) as u128);
+        res ^= ((4 * *w as u128 + *row as u128) << 64) ^ ((i + 1) as u128);
     }
     Ok((hashbit, hashes))
 }
