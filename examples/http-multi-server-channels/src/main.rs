@@ -12,16 +12,12 @@ use parlay::{
     protocol::{mpc, Preprocessor},
 };
 use reqwest::StatusCode;
-use std::{
-    collections::{HashMap, VecDeque},
-    net::SocketAddr,
-    path::PathBuf,
-    process::exit,
-    result::Result,
-    sync::Arc,
-    time::Duration,
+use std::{net::SocketAddr, path::PathBuf, process::exit, result::Result, time::Duration};
+use tokio::{
+    fs,
+    sync::mpsc::{channel, Receiver, Sender},
+    time::sleep,
 };
-use tokio::{fs, sync::Mutex, time::sleep};
 use tower_http::trace::TraceLayer;
 use url::Url;
 
@@ -94,47 +90,50 @@ async fn main() {
     }
 }
 
-type Session = Arc<Mutex<HashMap<usize, VecDeque<Vec<u8>>>>>;
-
-async fn serve(port: u16) -> Session {
+async fn serve(port: u16, parties: usize) -> Vec<Receiver<Vec<u8>>> {
     tracing_subscriber::fmt::init();
 
-    let state = Arc::new(Mutex::new(HashMap::new()));
-    let session = Arc::clone(&state);
+    let mut senders = vec![];
+    let mut receivers = vec![];
+    for _ in 0..parties {
+        let (s, r) = channel(1);
+        senders.push(s);
+        receivers.push(r);
+    }
 
     let app = Router::new()
         .route("/msg/:from", post(msg))
-        .with_state(state)
+        .with_state(senders)
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     tracing::info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    session
+
+    receivers
 }
 
-async fn msg(State(session): State<Session>, Path(from): Path<u32>, body: Bytes) {
-    let mut session = session.lock().await;
-    let msgs = session.entry(from as usize).or_default();
-    msgs.push_back(body.to_vec());
+async fn msg(State(senders): State<Vec<Sender<Vec<u8>>>>, Path(from): Path<u32>, body: Bytes) {
+    senders[from as usize].send(body.to_vec()).await.unwrap();
 }
 
 struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
     client: reqwest::Client,
-    session: Session,
+    receivers: Vec<Receiver<Vec<u8>>>,
 }
 
 impl HttpChannel {
     async fn new(urls: Vec<Url>, party: usize) -> Self {
         let port = urls[party].port().expect("All URLs must specify a port");
+        let receivers = serve(port, urls.len()).await;
         Self {
             urls,
             party,
             client: reqwest::Client::new(),
-            session: serve(port).await,
+            receivers,
         }
     }
 }
@@ -147,26 +146,18 @@ impl Channel for HttpChannel {
         let url = format!("{}msg/{}", self.urls[p], self.party);
         loop {
             let resp = self.client.post(&url).body(msg.clone()).send().await?;
-            if resp.status().is_success() {
-                return Ok(());
-            } else if resp.status() == StatusCode::NOT_FOUND {
-                println!("Could not reach party {p} at {url}...");
-                sleep(Duration::from_millis(1000)).await;
-            } else {
-                anyhow::bail!("Unexpected status code: {}", resp.status());
+            match resp.status() {
+                StatusCode::OK => return Ok(()),
+                StatusCode::NOT_FOUND => {
+                    println!("Could not reach party {p} at {url}...");
+                    sleep(Duration::from_millis(1000)).await;
+                }
+                status => anyhow::bail!("Unexpected status code: {status}"),
             }
         }
     }
 
     async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, Self::RecvError> {
-        loop {
-            let mut session = self.session.lock().await;
-            if let Some(msg) = session.get_mut(&p).and_then(|msgs| msgs.pop_front()) {
-                return Ok(msg);
-            } else {
-                println!("Waiting for message from party {p}...");
-                sleep(Duration::from_millis(100)).await;
-            }
-        }
+        Ok(self.receivers[p].recv().await.unwrap())
     }
 }
