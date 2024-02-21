@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use anyhow::{Context, Error};
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -12,7 +14,7 @@ use parlay::{
     protocol::{mpc, Preprocessor},
 };
 use reqwest::StatusCode;
-use std::{net::SocketAddr, path::PathBuf, process::exit, result::Result, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
 use tokio::{
     fs,
     sync::mpsc::{channel, Receiver, Sender},
@@ -21,7 +23,7 @@ use tokio::{
 use tower_http::trace::TraceLayer;
 use url::Url;
 
-/// A cli for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
 #[command(name = "parlay")]
 struct Cli {
@@ -57,13 +59,13 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Error> {
     let args = Cli::parse();
     match args.command {
         Commands::Pre { urls } => {
             let parties = urls.len() - 1;
-            let c = HttpChannel::new(urls, parties).await;
-            fpre(c, parties).await.unwrap()
+            let channel = HttpChannel::new(urls, parties).await?;
+            fpre(channel, parties).await.context("FPre")
         }
         Commands::Party {
             urls,
@@ -71,26 +73,22 @@ async fn main() {
             party,
             input,
         } => {
-            let Ok(prg) = fs::read_to_string(&program).await else {
-                eprintln!("Could not find '{}'", program.display());
-                exit(-1);
-            };
-            let prg = compile(&prg).unwrap();
-            let input = prg.parse_arg(party, &input).unwrap().as_bits();
+            let code = fs::read_to_string(&program).await?;
+            let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
+            let input = prg.parse_arg(party, &input)?.as_bits();
             let fpre = Preprocessor::TrustedDealer(urls.len() - 1);
             let p_out: Vec<_> = (0..(urls.len() - 1)).collect();
-            let c = HttpChannel::new(urls, party).await;
-            let out = mpc(c, &prg.circuit, &input, fpre, 0, party, &p_out)
-                .await
-                .unwrap();
-            if !out.is_empty() {
-                println!("\nThe result is {}", prg.parse_output(&out).unwrap());
+            let channel = HttpChannel::new(urls, party).await?;
+            let output = mpc(channel, &prg.circuit, &input, fpre, 0, party, &p_out).await?;
+            if !output.is_empty() {
+                println!("\nThe result is {}", prg.parse_output(&output)?);
             }
+            Ok(())
         }
     }
 }
 
-async fn serve(port: u16, parties: usize) -> Vec<Receiver<Vec<u8>>> {
+async fn serve(port: u16, parties: usize) -> Result<Vec<Receiver<Vec<u8>>>, Error> {
     tracing_subscriber::fmt::init();
 
     let mut senders = vec![];
@@ -108,10 +106,10 @@ async fn serve(port: u16, parties: usize) -> Vec<Receiver<Vec<u8>>> {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     tracing::info!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-    receivers
+    Ok(receivers)
 }
 
 async fn msg(State(senders): State<Vec<Sender<Vec<u8>>>>, Path(from): Path<u32>, body: Bytes) {
@@ -121,20 +119,15 @@ async fn msg(State(senders): State<Vec<Sender<Vec<u8>>>>, Path(from): Path<u32>,
 struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
-    client: reqwest::Client,
-    receivers: Vec<Receiver<Vec<u8>>>,
+    recv: Vec<Receiver<Vec<u8>>>,
 }
 
 impl HttpChannel {
-    async fn new(urls: Vec<Url>, party: usize) -> Self {
+    async fn new(mut urls: Vec<Url>, party: usize) -> Result<Self, Error> {
+        urls.rotate_left(1);
         let port = urls[party].port().expect("All URLs must specify a port");
-        let receivers = serve(port, urls.len()).await;
-        Self {
-            urls,
-            party,
-            client: reqwest::Client::new(),
-            receivers,
-        }
+        let recv = serve(port, urls.len()).await?;
+        Ok(Self { urls, party, recv })
     }
 }
 
@@ -143,10 +136,10 @@ impl Channel for HttpChannel {
     type RecvError = anyhow::Error;
 
     async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), Self::SendError> {
+        let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         loop {
-            let resp = self.client.post(&url).body(msg.clone()).send().await?;
-            match resp.status() {
+            match client.post(&url).body(msg.clone()).send().await?.status() {
                 StatusCode::OK => return Ok(()),
                 StatusCode::NOT_FOUND => {
                     println!("Could not reach party {p} at {url}...");
@@ -158,6 +151,6 @@ impl Channel for HttpChannel {
     }
 
     async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, Self::RecvError> {
-        Ok(self.receivers[p].recv().await.unwrap())
+        Ok(self.recv[p].recv().await.context("recv_bytes_from({p})")?)
     }
 }

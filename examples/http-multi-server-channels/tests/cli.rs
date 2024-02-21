@@ -1,7 +1,8 @@
 use std::{
     io::{BufRead, BufReader},
     process::{Command, Stdio},
-    thread::{self, sleep}, time::Duration,
+    thread::{self, sleep},
+    time::Duration,
 };
 
 const URLS: &str =

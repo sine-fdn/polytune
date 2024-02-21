@@ -20,6 +20,19 @@ pub enum Error {
     Channel(channel::Error),
 }
 
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::CheatingDetected => f.write_str("Cheating detected"),
+            Error::RandomSharesMismatch(a, b) => write!(f, "Unequal number of shares: {a} vs {b}"),
+            Error::AndSharesMismatch(a, b) => write!(f, "Unequal number of AND shares: {a} vs {b}"),
+            Error::Channel(e) => write!(f, "Channel error: {e:?}"),
+        }
+    }
+}
+
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Error::Channel(e)
