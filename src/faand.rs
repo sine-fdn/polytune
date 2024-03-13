@@ -1,7 +1,8 @@
 //! F_aAND protocol from WRK17b.
 
 use blake3::Hasher;
-use rand::random;
+use rand::{random, Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -49,6 +50,40 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     hasher.update(value);
     let result = hasher.finalize();
     &commitment.0 == result.as_bytes()
+}
+
+async fn shared_rng(
+    channel: &mut MsgChannel<impl Channel>,
+    p_own: usize,
+    p_max: usize,
+) -> Result<ChaCha20Rng, Error> {
+    let r = [random::<u128>(), random::<u128>()];
+    let mut buf = [0u8; 32];
+    buf[..16].copy_from_slice(&r[0].to_be_bytes());
+    buf[16..].copy_from_slice(&r[1].to_be_bytes());
+    let c = commit(&buf);
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "commit RNG", &c).await?;
+    }
+    let mut commitments = vec![Commitment([0; 32]); p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        let commitment: Commitment = channel.recv_from(p, "commit RNG").await?;
+        commitments[p] = commitment
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "open RNG", &buf).await?;
+    }
+    let mut buf_xor = buf;
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        let buf: [u8; 32] = channel.recv_from(p, "open RNG").await?;
+        if !open_commitment(&commitments[p], &buf) {
+            return Err(Error::CommitmentCouldNotBeOpened);
+        }
+        for i in 0..32 {
+            buf_xor[i] ^= buf[i];
+        }
+    }
+    Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
 /// Performs F_abit.
@@ -115,9 +150,9 @@ pub(crate) async fn fashare(
     //println!("{:?}\n{:?}\n{:?}\n{:?}", bits, macs, keys, delta);
 
     // Steps 3 including verification of macs and keys
-    // TODO FIGURE OUT HOW Pk calculates with same rm as Pi in the check
+    let mut shared_rng = shared_rng(channel, p_own, p_max).await?;
     for _ in 0..2 * RHO {
-        let randbits: Vec<bool> = (0..len_abit).map(|_| random()).collect();
+        let randbits: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
         let mut xj = false;
         for (&xb, &rb) in x.iter().zip(&randbits) {
             xj ^= xb & rb;
