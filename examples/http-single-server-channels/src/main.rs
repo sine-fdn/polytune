@@ -13,7 +13,7 @@ use tracing::debug;
 mod http_channel;
 mod server;
 
-/// A cli for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
 #[command(name = "parlay")]
 struct Cli {

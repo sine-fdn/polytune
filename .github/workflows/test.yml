@@ -16,6 +16,6 @@ jobs:
     - run: cargo test --verbose
     - run: cargo clippy -- -Dwarnings
     - run: cargo test -- --nocapture
-      working-directory: ./examples/http-channels
+      working-directory: ./examples/http-single-server-channels
     - run: cargo test -- --nocapture
-      working-directory: ./examples/iroh-channels
+      working-directory: ./examples/iroh-p2p-channels

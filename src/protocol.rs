@@ -86,6 +86,25 @@ pub enum Error {
     InvalidOutputParty(usize),
 }
 
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::ChannelError(e) => write!(f, "Channel error: {e:?}"),
+            Error::CircuitError(e) => write!(f, "Circuit error: {e:?}"),
+            Error::GarblingError(e) => write!(f, "Garbling error: {e:?}"),
+            Error::MpcError(e) => write!(f, "MPC error: {e:?}"),
+            Error::PartyDoesNotExist => write!(f, "The specified party does not exist"),
+            Error::WrongInputSize { expected, actual } => {
+                write!(f, "Wrong input, expected {expected} bits, found {actual}")
+            }
+            Error::MissingOutputParties => write!(f, "Output parties are missing"),
+            Error::InvalidOutputParty(p) => write!(f, "Party {p} is not a valid output party"),
+        }
+    }
+}
+
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelError(e)
