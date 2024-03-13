@@ -7,15 +7,16 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - run: cargo build --verbose
-    - run: cargo test --verbose
-    - run: cargo clippy -- -Dwarnings
-    - run: cargo test -- --nocapture
-      working-directory: ./examples/http-single-server-channels
-    - run: cargo test -- --nocapture
-      working-directory: ./examples/iroh-p2p-channels
+      - uses: actions/checkout@v3
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+      - run: cargo clippy -- -Dwarnings
+      - run: cargo test -- --nocapture
+        working-directory: ./examples/http-multi-server-channels
+      - run: cargo test -- --nocapture
+        working-directory: ./examples/http-single-server-channels
+      - run: cargo test -- --nocapture
+        working-directory: ./examples/iroh-p2p-channels
