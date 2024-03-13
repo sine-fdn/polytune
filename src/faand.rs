@@ -80,17 +80,15 @@ pub(crate) async fn fabit(
     }
 }
 
-/// Performs F_aAND.
-pub async fn faand(
-    channel: impl Channel,
+/// Performs F_aShare.
+pub(crate) async fn fashare(
+    channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
     length: usize,
-) -> Result<(), Error> {
-    const RHO: usize = 1;
-    let delta: Delta = Delta(random());
-    let mut channel = MsgChannel(channel);
-
+    delta: Delta,
+) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+    const RHO: usize = 128;
     let len_ashare = length + RHO;
 
     // Protocol Pi_aBit^n
@@ -105,11 +103,11 @@ pub async fn faand(
         let macvec: Vec<u128>;
         let keyvec: Vec<u128>;
         if p_own < p {
-            macvec = fabit(&mut channel, p, delta, &x, true).await?;
-            keyvec = fabit(&mut channel, p, delta, &x, false).await?;
+            macvec = fabit(channel, p, delta, &x, true).await?;
+            keyvec = fabit(channel, p, delta, &x, false).await?;
         } else {
-            keyvec = fabit(&mut channel, p, delta, &x, false).await?;
-            macvec = fabit(&mut channel, p, delta, &x, true).await?;
+            keyvec = fabit(channel, p, delta, &x, false).await?;
+            macvec = fabit(channel, p, delta, &x, true).await?;
         }
         xmacs[p] = macvec;
         xkeys[p] = keyvec;
@@ -261,6 +259,21 @@ pub async fn faand(
         xkeys[p].truncate(length);
         xmacs[p].truncate(length);
     }
+    Ok((x, xkeys, xmacs))
+}
+
+/// Performs F_aAND.
+pub async fn faand(
+    channel: impl Channel,
+    p_own: usize,
+    p_max: usize,
+    length: usize,
+) -> Result<(), Error> {
+    let delta: Delta = Delta(random());
+    let mut channel = MsgChannel(channel);
+
+    let _: (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        fashare(&mut channel, p_own, p_max, length, delta).await?;
 
     // Protocol Pi_HaAND
 
