@@ -147,7 +147,6 @@ pub(crate) async fn fashare(
         xmacs[p] = macvec;
         xkeys[p] = keyvec;
     }
-    //println!("{:?}\n{:?}\n{:?}\n{:?}", bits, macs, keys, delta);
 
     // Steps 3 including verification of macs and keys
     let mut shared_rng = shared_rng(channel, p_own, p_max).await?;
@@ -297,6 +296,95 @@ pub(crate) async fn fashare(
     Ok((x, xkeys, xmacs))
 }
 
+/// Performs F_HaAND.
+pub(crate) async fn fhaand(
+    channel: &mut MsgChannel<impl Channel>,
+    p_own: usize,
+    p_max: usize,
+    length: usize,
+    delta: Delta,
+) -> Result<(bool, Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+    // Protocol Pi_HaAND
+
+    // Upon receiving (i, {y_j^i}) from all P_i
+    let mut y: Vec<bool> = vec![false; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        y[p] = channel.recv_from(p, "laand").await?;
+    }
+
+    // Step 1
+    let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        fashare(channel, p_own, p_max, length, delta).await?;
+
+    //Step 2
+    let mut hvec: Vec<(bool, bool)> = vec![(false, false); p_max];
+    let mut hasher = Hasher::new();
+
+    let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        let s: bool = random();
+        hasher.update(&xkeys[p][0].to_le_bytes());
+        let lsb1 = (hasher.finalize().as_bytes()[0] & 1) != 0;
+        let h0: bool = lsb1 ^ s;
+        hasher.reset();
+        hasher.update(&(xkeys[p][0] ^ delta.0).to_le_bytes());
+        let lsb2 = (hasher.finalize().as_bytes()[0] & 1) != 0;
+        let h1: bool = lsb2 ^ s ^ y[p];
+        channel.send_to(p, "haand", &(&h0, &h1)).await?;
+        hvec[p] = channel.recv_from(p, "haand").await?;
+        //Lsb mac
+        hasher.reset();
+        hasher.update(&xmacs[p][0].to_le_bytes());
+        let lsb = (hasher.finalize().as_bytes()[0] & 1) != 0;
+        let t: bool = if x[p] {
+            hvec[p].0 ^ lsb
+        } else {
+            hvec[p].1 ^ lsb
+        };
+        v ^= t;
+        v ^= s;
+        //channel.send_to(p, "laand", &v).await?;
+    }
+    //Step 3
+    Ok((v, x, xkeys, xmacs))
+}
+
+/// Performs F_LaAND.
+pub(crate) async fn flaand(
+    channel: &mut MsgChannel<impl Channel>,
+    p_own: usize,
+    p_max: usize,
+    length: usize,
+    delta: Delta,
+) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+    // Protocol Pi_LaAND
+    // Step 1
+    let (y, _ykeys, _ymacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        fashare(channel, p_own, p_max, length, delta).await?;
+    let (r, rkeys, rmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        fashare(channel, p_own, p_max, length, delta).await?;
+    
+    // Step 2
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "laand", &y[0]).await?;
+    }
+    let (v, x, _xkeys, _xmacs) = fhaand(channel, p_own, p_max, length, delta).await?;
+    
+    // Step 3
+    let mut z: bool = v;
+    if x[0] {
+        z ^= y[0];
+    }
+    let _e_own: bool = z ^ r[0];
+
+    /*let mut e: Vec<bool> = vec![false; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        //channel.send_to(p, "esend", &e_own).await?;
+        //e = channel.recv_from(p, "esend").await?;
+    }*/
+    Ok((r, rkeys, rmacs))
+}
+
 /// Performs F_aAND.
 pub async fn faand(
     channel: impl Channel,
@@ -307,12 +395,8 @@ pub async fn faand(
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
 
-    let _: (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(&mut channel, p_own, p_max, length, delta).await?;
-
-    // Protocol Pi_HaAND
-
-    // Protocol Pi_LaAND
+    let (_x, _xkeys, _xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        flaand(&mut channel, p_own, p_max, length, delta).await?;
 
     // Protocol Pi_aAND
 
