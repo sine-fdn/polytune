@@ -115,8 +115,8 @@ pub(crate) async fn fabit(
     }
 }
 
-/// Performs F_aShare.
-pub(crate) async fn fashare(
+/// Performs F_aBit^n.
+pub(crate) async fn fabitn(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
@@ -124,11 +124,10 @@ pub(crate) async fn fashare(
     delta: Delta,
 ) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
     const RHO: usize = 128;
-    let len_ashare = length + RHO;
 
     // Protocol Pi_aBit^n
     // Step 1 initialize random bitstring
-    let len_abit = len_ashare + 2 * RHO;
+    let len_abit = length + 2 * RHO;
     let mut x: Vec<bool> = (0..len_abit).map(|_| random()).collect();
 
     // Steps 2 running Pi_aBit^2 for each pair of parties
@@ -186,12 +185,27 @@ pub(crate) async fn fashare(
     }
 
     // Step 4 return first l objects
-    x.truncate(len_ashare);
+    x.truncate(length);
     for p in (0..p_max).filter(|p| *p != p_own) {
-        xkeys[p].truncate(len_ashare);
-        xmacs[p].truncate(len_ashare);
-    }
-    //println!("{:?}\n{:?}\n{:?}\n{:?}", bits, macs, keys, delta);
+        xkeys[p].truncate(length);
+        xmacs[p].truncate(length);
+    }    
+    Ok((x, xkeys, xmacs))
+}
+
+
+/// Performs F_aShare.
+pub(crate) async fn fashare(
+    channel: &mut MsgChannel<impl Channel>,
+    p_own: usize,
+    p_max: usize,
+    length: usize,
+    delta: Delta,
+) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+    const RHO: usize = 128;
+    let len_ashare = length + RHO;
+
+    let (mut x, mut xkeys, mut xmacs) = fabitn(channel, p_own, p_max, len_ashare, delta).await?;
 
     // Protocol Pi_aShare
     // Input: bits of len_ashare length, authenticated bits
@@ -323,7 +337,7 @@ pub(crate) async fn fhaand(
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
         let s: bool = random();
-        hasher.update(&xkeys[p][0].to_le_bytes());
+        hasher.update(&xkeys[p][0].to_le_bytes()); // TODO Figure out the indeces here. Is it [0][0]?
         let lsb1 = (hasher.finalize().as_bytes()[0] & 1) != 0;
         let h0: bool = lsb1 ^ s;
         hasher.reset();
