@@ -24,6 +24,8 @@ pub enum Error {
     AShareMacsMismatch,
     /// A commitment could not be opened.
     CommitmentCouldNotBeOpened,
+    /// The check if the XOR fo all hashes is zero failed.
+    HashNotZero,
 }
 
 impl From<channel::Error> for Error {
@@ -189,10 +191,9 @@ pub(crate) async fn fabitn(
     for p in (0..p_max).filter(|p| *p != p_own) {
         xkeys[p].truncate(length);
         xmacs[p].truncate(length);
-    }    
+    }
     Ok((x, xkeys, xmacs))
 }
-
 
 /// Performs F_aShare.
 pub(crate) async fn fashare(
@@ -315,7 +316,6 @@ pub(crate) async fn fhaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
-    length: usize,
     delta: Delta,
 ) -> Result<(bool, Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
     // Protocol Pi_HaAND
@@ -328,16 +328,16 @@ pub(crate) async fn fhaand(
 
     // Step 1
     let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(channel, p_own, p_max, length, delta).await?;
+        fashare(channel, p_own, p_max, 1, delta).await?;
 
     //Step 2
     let mut hvec: Vec<(bool, bool)> = vec![(false, false); p_max];
     let mut hasher = Hasher::new();
-
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
         let s: bool = random();
-        hasher.update(&xkeys[p][0].to_le_bytes()); // TODO Figure out the indeces here. Is it [0][0]?
+
+        hasher.update(&xkeys[p][0].to_le_bytes());
         let lsb1 = (hasher.finalize().as_bytes()[0] & 1) != 0;
         let h0: bool = lsb1 ^ s;
         hasher.reset();
@@ -350,7 +350,7 @@ pub(crate) async fn fhaand(
         hasher.reset();
         hasher.update(&xmacs[p][0].to_le_bytes());
         let lsb = (hasher.finalize().as_bytes()[0] & 1) != 0;
-        let t: bool = if x[p] {
+        let t: bool = if x[0] {
             hvec[p].0 ^ lsb
         } else {
             hvec[p].1 ^ lsb
@@ -368,49 +368,127 @@ pub(crate) async fn flaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
-    length: usize,
     delta: Delta,
-) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+) -> Result<((Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)), Error> {
     // Protocol Pi_LaAND
     // Step 1
-    let (y, _ykeys, _ymacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(channel, p_own, p_max, length, delta).await?;
-    let (r, rkeys, rmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(channel, p_own, p_max, length, delta).await?;
-    
+    let (y, ykeys, ymacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        fashare(channel, p_own, p_max, 2, delta).await?; // y is y[0], r is y[1]
+
     // Step 2
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "laand", &y[0]).await?;
     }
-    let (v, x, _xkeys, _xmacs) = fhaand(channel, p_own, p_max, length, delta).await?;
-    
+    let (v, x, xkeys, xmacs) = fhaand(channel, p_own, p_max, delta).await?;
+
     // Step 3
     let mut z: bool = v;
     if x[0] {
         z ^= y[0];
     }
-    let _e_own: bool = z ^ r[0];
+    let e_own: bool = z ^ y[1];
 
-    /*let mut e: Vec<bool> = vec![false; p_max];
+    let mut e: Vec<bool> = vec![false; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        //channel.send_to(p, "esend", &e_own).await?;
-        //e = channel.recv_from(p, "esend").await?;
-    }*/
-    Ok((r, rkeys, rmacs))
+        channel.send_to(p, "esend", &e_own).await?;
+        e[p] = channel.recv_from(p, "esend").await?;
+    }
+    let mut _zii: bool = y[1] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
+
+    // Step 4
+    let mut sum: u128 = 0;
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        sum ^= ykeys[p][0];
+        sum ^= ymacs[p][0];
+    }
+    let mut phi = sum;
+    if y[0] {
+        phi = delta.0 ^ sum;
+    }
+
+    // Step 5
+    let mut hasher = Hasher::new();
+    let mut xkeys_phi: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    let mut uij: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    let phi_bytes = phi.to_le_bytes();
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        hasher.reset();
+        hasher.update(&xkeys[p][0].to_le_bytes());
+        xkeys_phi[p] = hasher.finalize().as_bytes().to_owned();
+        hasher.reset();
+        hasher.update(&(xkeys[p][0] ^ delta.0).to_le_bytes());
+        let res = hasher.finalize().as_bytes().to_owned();
+
+        for i in 0..32 {
+            uij[p][i] = res[i] ^ xkeys_phi[p][i];
+            if i < 16 {
+                uij[p][i] ^= phi_bytes[i];
+            }
+        }
+        channel.send_to(p, "uij", &uij).await?;
+    }
+
+    let mut uijp: Vec<Vec<[u8; 32]>> = vec![vec![[0; 32]; p_max]; p_max];
+    let mut xmacs_phi: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        uijp[p] = channel.recv_from(p, "uij").await?;
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        hasher.reset();
+        hasher.update(&xmacs[p][0].to_le_bytes());
+        xmacs_phi[p] = hasher.finalize().as_bytes().to_owned();
+        if x[0] {
+            for i in 0..32 {
+                xmacs_phi[p][i] ^= uijp[p][p_own][i];
+            }
+        }
+    }
+
+    // Step 6
+    let mut hash: [u8; 32] = [0; 32];
+    let mut zxor: Vec<u128> = vec![0; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        for (i, h) in hash.iter_mut().enumerate() {
+            *h = xkeys_phi[p][i] ^ xmacs_phi[p][i];
+        }
+
+        zxor[p] ^= ykeys[p][1]; // 1 because it is for z
+        zxor[p] ^= ymacs[p][1];
+        if y[1] {
+            zxor[p] ^= delta.0;
+        }
+        if x[0] {
+            zxor[p] ^= phi;
+        }
+        for (i, elem) in hash.iter_mut().take(16).enumerate() {
+            *elem ^= zxor[p].to_le_bytes()[i];
+        }
+        channel.send_to(p, "hash", &hash).await?;
+    }
+    
+    let mut hashp: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    let mut xorhash: [u8; 32] = [0; 32];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        hashp[p] = channel.recv_from(p, "hash").await?; //TODO: commitments
+        for (i, h) in xorhash.iter_mut().enumerate() {
+            *h ^= hashp[p][i];
+        }
+    }
+    for elem in xorhash {
+        if elem != 0 {
+            //return Err(Error::HashNotZero);
+        }
+    }
+    Ok(((x, xkeys, xmacs), (y, ykeys, ymacs)))
 }
 
 /// Performs F_aAND.
-pub async fn faand(
-    channel: impl Channel,
-    p_own: usize,
-    p_max: usize,
-    length: usize,
-) -> Result<(), Error> {
+pub async fn faand(channel: impl Channel, p_own: usize, p_max: usize) -> Result<(), Error> {
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
 
-    let (_x, _xkeys, _xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        flaand(&mut channel, p_own, p_max, length, delta).await?;
+    let ((_x, _xkeys, _xmacs), (_y, _ykeys, _ymacs)) =
+        flaand(&mut channel, p_own, p_max, delta).await?;
 
     // Protocol Pi_aAND
 
@@ -427,7 +505,7 @@ mod tests {
     #[tokio::test]
     async fn test_faand() -> Result<(), Error> {
         let parties = 3;
-        let length = 3;
+        //let length = 3;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<tokio::task::JoinHandle<Result<(), crate::faand::Error>>> = vec![];
         for i in 0..parties {
@@ -435,7 +513,6 @@ mod tests {
                 channels.pop().unwrap(),
                 parties - i - 1,
                 parties,
-                length,
             )));
         }
         for i in handles {
