@@ -317,7 +317,10 @@ pub(crate) async fn fhaand(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-) -> Result<(bool, Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+    x: Vec<bool>, 
+    xkeys: Vec<Vec<u128>>, 
+    xmacs: Vec<Vec<u128>>,
+) -> Result<bool, Error> {
     // Protocol Pi_HaAND
 
     // Upon receiving (i, {y_j^i}) from all P_i
@@ -327,8 +330,8 @@ pub(crate) async fn fhaand(
     }
 
     // Step 1
-    let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(channel, p_own, p_max, 1, delta).await?;
+    //let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+    //    fashare(channel, p_own, p_max, 1, delta).await?;
 
     //Step 2
     let mut hvec: Vec<(bool, bool)> = vec![(false, false); p_max];
@@ -360,7 +363,7 @@ pub(crate) async fn fhaand(
         //channel.send_to(p, "laand", &v).await?;
     }
     //Step 3
-    Ok((v, x, xkeys, xmacs))
+    Ok(v)
 }
 
 /// Performs F_LaAND.
@@ -369,40 +372,40 @@ pub(crate) async fn flaand(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-) -> Result<((Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)), Error> {
+) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
     // Protocol Pi_LaAND
     // Step 1
     let (y, ykeys, ymacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(channel, p_own, p_max, 2, delta).await?; // y is y[0], r is y[1]
+        fashare(channel, p_own, p_max, 3, delta).await?; // x is y[0], y is y[1], z is y[2]
 
     // Step 2
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "laand", &y[0]).await?;
+        channel.send_to(p, "laand", &y[1]).await?;
     }
-    let (v, x, xkeys, xmacs) = fhaand(channel, p_own, p_max, delta).await?;
+    let v = fhaand(channel, p_own, p_max, delta, y.clone(), ykeys.clone(), ymacs.clone()).await?;
 
     // Step 3
     let mut z: bool = v;
-    if x[0] {
-        z ^= y[0];
+    if y[0] {
+        z ^= y[1];
     }
-    let e_own: bool = z ^ y[1];
+    let e_own: bool = z ^ y[2];
 
     let mut e: Vec<bool> = vec![false; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "esend", &e_own).await?;
         e[p] = channel.recv_from(p, "esend").await?;
     }
-    let mut _zii: bool = y[1] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
+    let mut _zii: bool = y[2] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
 
     // Step 4
     let mut sum: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
-        sum ^= ykeys[p][0];
-        sum ^= ymacs[p][0];
+        sum ^= ykeys[p][1];
+        sum ^= ymacs[p][1];
     }
     let mut phi = sum;
-    if y[0] {
+    if y[1] {
         phi = delta.0 ^ sum;
     }
 
@@ -413,10 +416,10 @@ pub(crate) async fn flaand(
     let phi_bytes = phi.to_le_bytes();
     for p in (0..p_max).filter(|p| *p != p_own) {
         hasher.reset();
-        hasher.update(&xkeys[p][0].to_le_bytes());
+        hasher.update(&ykeys[p][0].to_le_bytes());
         xkeys_phi[p] = hasher.finalize().as_bytes().to_owned();
         hasher.reset();
-        hasher.update(&(xkeys[p][0] ^ delta.0).to_le_bytes());
+        hasher.update(&(ykeys[p][0] ^ delta.0).to_le_bytes());
         let res = hasher.finalize().as_bytes().to_owned();
 
         for i in 0..32 {
@@ -435,9 +438,9 @@ pub(crate) async fn flaand(
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         hasher.reset();
-        hasher.update(&xmacs[p][0].to_le_bytes());
+        hasher.update(&ymacs[p][0].to_le_bytes());
         xmacs_phi[p] = hasher.finalize().as_bytes().to_owned();
-        if x[0] {
+        if y[0] {
             for i in 0..32 {
                 xmacs_phi[p][i] ^= uijp[p][p_own][i];
             }
@@ -452,12 +455,12 @@ pub(crate) async fn flaand(
             *h = xkeys_phi[p][i] ^ xmacs_phi[p][i];
         }
 
-        zxor[p] ^= ykeys[p][1]; // 1 because it is for z
-        zxor[p] ^= ymacs[p][1];
-        if y[1] {
+        zxor[p] ^= ykeys[p][2]; // 2 because it is for z
+        zxor[p] ^= ymacs[p][2];
+        if y[2] {
             zxor[p] ^= delta.0;
         }
-        if x[0] {
+        if y[0] {
             zxor[p] ^= phi;
         }
         for (i, elem) in hash.iter_mut().take(16).enumerate() {
@@ -479,7 +482,7 @@ pub(crate) async fn flaand(
             //return Err(Error::HashNotZero);
         }
     }
-    Ok(((x, xkeys, xmacs), (y, ykeys, ymacs)))
+    Ok((y, ykeys, ymacs))
 }
 
 /// Performs F_aAND.
@@ -487,7 +490,7 @@ pub async fn faand(channel: impl Channel, p_own: usize, p_max: usize) -> Result<
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
 
-    let ((_x, _xkeys, _xmacs), (_y, _ykeys, _ymacs)) =
+    let (_y, _ykeys, _ymacs) =
         flaand(&mut channel, p_own, p_max, delta).await?;
 
     // Protocol Pi_aAND
