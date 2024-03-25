@@ -15,6 +15,7 @@ use parlay::{
 };
 use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
+use tokio::time::timeout;
 use tokio::{
     fs,
     sync::mpsc::{channel, Receiver, Sender},
@@ -151,6 +152,9 @@ impl Channel for HttpChannel {
     }
 
     async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, Self::RecvError> {
-        Ok(self.recv[p].recv().await.context("recv_bytes_from({p})")?)
+        Ok(timeout(Duration::from_secs(1), self.recv[p].recv())
+            .await
+            .context("recv_bytes_from({p})")?
+            .unwrap_or_default())
     }
 }

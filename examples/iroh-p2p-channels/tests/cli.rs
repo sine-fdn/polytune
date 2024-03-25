@@ -59,5 +59,6 @@ fn simulate() {
     eprintln!("{}", String::from_utf8(out.stderr).unwrap());
     let out = String::from_utf8(out.stdout).unwrap();
     let out = out.lines().last().unwrap_or_default();
+    cmd.kill().unwrap();
     assert_eq!("The result is 6u32", out);
 }

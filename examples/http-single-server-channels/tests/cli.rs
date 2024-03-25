@@ -1,17 +1,19 @@
 use std::{
     io::{BufRead, BufReader},
     process::{Command, Stdio},
-    thread,
+    thread::{self, sleep},
+    time::Duration,
 };
 
 const ENDPOINT: &str = "http://127.0.0.1:8000";
 
 #[test]
 fn simulate() {
-    Command::new("cargo")
+    let mut child = Command::new("cargo")
         .args(["run", "--", "serve"])
         .spawn()
         .unwrap();
+    sleep(Duration::from_millis(500));
     let mut cmd = Command::new("cargo")
         .args([
             "run",
@@ -25,6 +27,7 @@ fn simulate() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    sleep(Duration::from_millis(500));
     let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines();
     let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
     thread::spawn(move || {
@@ -82,5 +85,6 @@ fn simulate() {
     eprintln!("{}", String::from_utf8(out.stderr).unwrap());
     let out = String::from_utf8(out.stdout).unwrap();
     let out = out.lines().last().unwrap_or_default();
+    child.kill().unwrap();
     assert_eq!("The result is 6u32", out);
 }
