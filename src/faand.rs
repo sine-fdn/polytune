@@ -1,7 +1,7 @@
 //! F_aAND protocol from WRK17b.
 
 use blake3::Hasher;
-use rand::{random, Rng, SeedableRng};
+use rand::{random, thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,8 @@ pub enum Error {
     CommitmentCouldNotBeOpened,
     /// The check if the XOR fo all hashes is zero failed.
     HashNotZero,
+    /// Wrong MAC of d when combining two leaky ANDs.
+    WrongDMAC,
 }
 
 impl From<channel::Error> for Error {
@@ -317,8 +319,8 @@ pub(crate) async fn fhaand(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-    x: Vec<bool>, 
-    xkeys: Vec<Vec<u128>>, 
+    x: Vec<bool>,
+    xkeys: Vec<Vec<u128>>,
     xmacs: Vec<Vec<u128>>,
 ) -> Result<bool, Error> {
     // Protocol Pi_HaAND
@@ -382,7 +384,16 @@ pub(crate) async fn flaand(
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "laand", &y[1]).await?;
     }
-    let v = fhaand(channel, p_own, p_max, delta, y.clone(), ykeys.clone(), ymacs.clone()).await?;
+    let v = fhaand(
+        channel,
+        p_own,
+        p_max,
+        delta,
+        y.clone(),
+        ykeys.clone(),
+        ymacs.clone(),
+    )
+    .await?;
 
     // Step 3
     let mut z: bool = v;
@@ -468,7 +479,7 @@ pub(crate) async fn flaand(
         }
         channel.send_to(p, "hash", &hash).await?;
     }
-    
+
     let mut hashp: Vec<[u8; 32]> = vec![[0; 32]; p_max];
     let mut xorhash: [u8; 32] = [0; 32];
     for p in (0..p_max).filter(|p| *p != p_own) {
@@ -485,17 +496,95 @@ pub(crate) async fn flaand(
     Ok((y, ykeys, ymacs))
 }
 
-/// Performs F_aAND.
-pub async fn faand(channel: impl Channel, p_own: usize, p_max: usize) -> Result<(), Error> {
+/// Performs Pi_aAND.
+pub async fn faand(
+    channel: impl Channel,
+    p_own: usize,
+    p_max: usize,
+    circuit_size: u128,
+    length: u128,
+) -> Result<(), Error> {
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
+    let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
+    let lprime = length * b;
 
-    let (_y, _ykeys, _ymacs) =
-        flaand(&mut channel, p_own, p_max, delta).await?;
+    // Step 1
+    let mut triples: Vec<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)> = vec![];
+    for _ in 0..lprime {
+        triples.push(flaand(&mut channel, p_own, p_max, delta).await?);
+    }
 
-    // Protocol Pi_aAND
+    // Step 2 TODO Randomly partition all objects into l buckets, each with B objects
+    let mut rng = thread_rng();
+    let mut available: Vec<usize> = (0..length as usize).collect();
+
+    let mut buckets: Vec<Vec<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)>> =
+        vec![vec![]; length as usize];
+
+    // Assign objects to buckets
+    for obj in triples {
+        let mut indeces: Vec<usize> = available.iter().cloned().collect();
+        indeces.retain(|&index| buckets[index].len() < b as usize);
+
+        if !indeces.is_empty() {
+            let rand_index = rng.gen_range(0..indeces.len());
+            let ind = indeces[rand_index];
+
+            buckets[ind].push(obj);
+            if buckets[ind].len() == b as usize {
+                available.retain(|&index| index != ind);
+            }
+        }
+    }
+
+    /*for (index, bucket) in buckets.iter().enumerate() {
+        println!("Bucket {}: {:?}", index, bucket);
+        println!("{:?} {:?}", buckets.len(), b);
+    }*/
+
+    // Step 3
+    // TODO combine buckets two by two.
+    //combine_two_leaky_ands(&buckets[0][0], &buckets[0][1]);
 
     Ok(())
+}
+
+pub(crate) fn combine_two_leaky_ands(
+    first: &(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>),
+    second: &(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>),
+) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+    let mut result: (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+        (vec![false; 3], vec![vec![]; 3], vec![vec![]; 3]);
+    let d = first.0[1] ^ second.0[1];
+    // TODO Check MAC of d ????
+    if false {
+        return Err(Error::WrongDMAC);
+    }
+    result.0[0] = first.0[0] ^ second.0[0]; // x
+    for j in 0..first.1.len() {
+        result.1[0][j] = first.1[0][j] ^ second.1[0][j]; //TODO deal with the possibility that one of these arrays are empty (for own?)
+        result.2[0][j] = first.2[0][j] ^ second.2[0][j];
+    }
+    result.0[1] = first.0[1]; // y
+                              //result.1[1] = first.1[1];
+    for j in 0..first.1.len() {
+        result.1[1][j] = first.1[1][j];
+        result.2[1][j] = first.2[1][j];
+    }
+    result.0[2] = first.0[2] ^ second.0[2]; // z
+    for j in 0..first.1.len() {
+        result.1[2][j] = first.1[2][j] ^ second.1[2][j];
+        result.2[2][j] = first.2[2][j] ^ second.2[2][j];
+    }
+    if d {
+        result.0[2] ^= second.0[0];
+        for j in 0..first.1.len() {
+            result.1[2][j] ^= second.1[0][j];
+            result.2[2][j] ^= second.2[0][j];
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -508,7 +597,8 @@ mod tests {
     #[tokio::test]
     async fn test_faand() -> Result<(), Error> {
         let parties = 3;
-        //let length = 3;
+        let circuit_size = 100000;
+        let length = 2;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<tokio::task::JoinHandle<Result<(), crate::faand::Error>>> = vec![];
         for i in 0..parties {
@@ -516,6 +606,8 @@ mod tests {
                 channels.pop().unwrap(),
                 parties - i - 1,
                 parties,
+                circuit_size,
+                length,
             )));
         }
         for i in handles {
