@@ -402,11 +402,12 @@ pub(crate) async fn flaand(
     }
     let e_own: bool = z ^ y[2];
 
-    let mut e: Vec<bool> = vec![false; p_max];
+    let mut ep: Vec<bool> = vec![false; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "esend", &e_own).await?;
-        e[p] = channel.recv_from(p, "esend").await?;
+        ep[p] = channel.recv_from(p, "esend").await?;
     }
+    //z = y[2] ^ e_own;
     let mut _zii: bool = y[2] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
 
     // Step 4
@@ -490,6 +491,7 @@ pub(crate) async fn flaand(
     }
     for elem in xorhash {
         if elem != 0 {
+            //eprintln!("FLaAND Failing!!!")
             //return Err(Error::HashNotZero);
         }
     }
@@ -562,12 +564,12 @@ pub(crate) fn combine_two_leaky_ands(
         return Err(Error::WrongDMAC);
     }
     result.0[0] = first.0[0] ^ second.0[0]; // x
+    println!("{:?}", first.1);
     for j in 0..first.1.len() {
-        result.1[0][j] = first.1[0][j] ^ second.1[0][j]; //TODO deal with the possibility that one of these arrays are empty (for own?)
+        result.1[0][j] = first.1[0][j] ^ second.1[0][j]; // TODO deal with the possibility that one of these arrays are empty (for own?)
         result.2[0][j] = first.2[0][j] ^ second.2[0][j];
     }
     result.0[1] = first.0[1]; // y
-                              //result.1[1] = first.1[1];
     for j in 0..first.1.len() {
         result.1[1][j] = first.1[1][j];
         result.2[1][j] = first.2[1][j];
@@ -589,10 +591,128 @@ pub(crate) fn combine_two_leaky_ands(
 
 #[cfg(test)]
 mod tests {
+    use rand::random;
+
     use crate::{
-        channel::{Error, SimpleChannel},
-        faand::faand,
+        channel::{Error, MsgChannel, SimpleChannel},
+        faand::{faand, fashare, fhaand},
+        fpre::Delta,
     };
+
+    #[tokio::test]
+    async fn test_fhaand() -> Result<(), Error> {
+        let parties = 5;
+        let mut channels = SimpleChannel::channels(parties);
+        let mut handles: Vec<tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>>> =
+            vec![];
+
+        for i in 0..parties {
+            let mut check: bool = false;
+            let mut ycheck: Vec<bool> = vec![false; parties];
+            let delta: Delta = Delta(random());
+            let channel = channels.pop().unwrap();
+            let handle: tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>> =
+                tokio::spawn(async move {
+                    let mut msgchannel = MsgChannel(channel);
+                    let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+                        fashare(&mut msgchannel, parties - i - 1, parties, 2, delta).await?;
+                    for p in (0..parties).filter(|p| *p != parties - i - 1) {
+                        msgchannel.send_to(p, "laand", &x[1]).await?;
+                        msgchannel.send_to(p, "check", &x[1]).await?;
+                    }
+                    for p in (0..parties).filter(|p| *p != parties - i - 1) {
+                        ycheck[p] = msgchannel.recv_from(p, "check").await?;
+                        check ^= ycheck[p];
+                    }
+                    check ^= x[0];
+
+                    fhaand(
+                        &mut msgchannel,
+                        parties - i - 1,
+                        parties,
+                        delta,
+                        x,
+                        xkeys,
+                        xmacs,
+                    )
+                    .await
+                    .map(|result| (check, result))
+                });
+            handles.push(handle);
+        }
+
+        let mut xorcheck = false;
+        let mut xorv = false;
+        for handle in handles {
+            let out = handle.await.unwrap();
+            match out {
+                Err(e) => {
+                    eprintln!("Protocol failed {:?}", e);
+                }
+                Ok((check, v)) => {
+                    xorcheck ^= check;
+                    xorv ^= v;
+                }
+            }
+        }
+        if xorcheck != xorv {
+            println!("HaAND test failed!");
+        } else {
+            println!("HaAND test passed!");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fashare() -> Result<(), Error> {
+        let parties = 3;
+        let length = 2;
+        let mut channels = SimpleChannel::channels(parties);
+        let mut handles: Vec<
+            tokio::task::JoinHandle<
+                Result<(usize, Delta, (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)), crate::faand::Error>,
+            >,
+        > = vec![];
+
+        for i in 0..parties {
+            let delta: Delta = Delta(random());
+            let channel = channels.pop().unwrap(); // Take ownership of the channel
+            let handle = tokio::spawn(async move {
+                let mut msgchannel = MsgChannel(channel); // Move the channel into MsgChannel
+                fashare(&mut msgchannel, parties - i - 1, parties, length, delta)
+                    .await
+                    .map(|result| (parties-i-1,delta, result))
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            let out = handle.await.unwrap();
+            match out {
+                Err(e) => {
+                    eprintln!("Protocol failed {:?}", e);
+                }
+                Ok((p_own, delta, (x, xkeys, xmacs))) => {
+                    for l in 0..length {
+                        for p in 0..parties {
+                            if x[l] {
+                                if xkeys[p] != [] && xmacs[p_own] != [] && xkeys[p][l] != xmacs[p_own][l] ^ delta.0 {
+                                    eprintln!("Failed FaShare!!!!!!!!!");
+                                }
+                            } else {
+                                if xkeys[p] != [] && xmacs[p_own] != [] && xkeys[p][l] != xmacs[p_own][l] {
+                                    eprintln!("Failed FaShare!!!!!!!!!");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_faand() -> Result<(), Error> {
