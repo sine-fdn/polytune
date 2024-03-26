@@ -38,6 +38,13 @@ impl From<channel::Error> for Error {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Commitment(pub(crate) [u8; 32]);
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ABits {
+    bits: Vec<bool>,
+    keys: Vec<Vec<u128>>,
+    macs: Vec<Vec<u128>>,
+}
+
 // Commit to a u128 value using BLAKE3 hash function
 fn commit(value: &[u8]) -> Commitment {
     let mut hasher = Hasher::new();
@@ -126,7 +133,7 @@ pub(crate) async fn fabitn(
     p_max: usize,
     length: usize,
     delta: Delta,
-) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+) -> Result<ABits, Error> {
     const RHO: usize = 128;
 
     // Protocol Pi_aBit^n
@@ -194,7 +201,11 @@ pub(crate) async fn fabitn(
         xkeys[p].truncate(length);
         xmacs[p].truncate(length);
     }
-    Ok((x, xkeys, xmacs))
+    Ok(ABits {
+        bits: x,
+        keys: xkeys,
+        macs: xmacs,
+    })
 }
 
 /// Performs F_aShare.
@@ -204,11 +215,11 @@ pub(crate) async fn fashare(
     p_max: usize,
     length: usize,
     delta: Delta,
-) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+) -> Result<ABits, Error> {
     const RHO: usize = 128;
     let len_ashare = length + RHO;
 
-    let (mut x, mut xkeys, mut xmacs) = fabitn(channel, p_own, p_max, len_ashare, delta).await?;
+    let mut abits: ABits = fabitn(channel, p_own, p_max, len_ashare, delta).await?;
 
     // Protocol Pi_aShare
     // Input: bits of len_ashare length, authenticated bits
@@ -222,11 +233,11 @@ pub(crate) async fn fashare(
 
     // 3/(a)
     for r in 0..RHO {
-        dm[r].push(x[length + r] as u8);
+        dm[r].push(abits.bits[length + r] as u8);
         for p in 0..p_max {
             if p != p_own {
-                d0[r] ^= xkeys[p][length + r];
-                let macbytes = xmacs[p][length + r].to_be_bytes().to_vec(); // 16 bytes
+                d0[r] ^= abits.keys[p][length + r];
+                let macbytes = abits.macs[p][length + r].to_be_bytes().to_vec(); // 16 bytes
                 dm[r].extend(macbytes);
             } else {
                 dm[r].extend(vec![0; 16]);
@@ -305,12 +316,12 @@ pub(crate) async fn fashare(
     }
 
     // Step 4
-    x.truncate(length);
+    abits.bits.truncate(length);
     for p in (0..p_max).filter(|p| *p != p_own) {
-        xkeys[p].truncate(length);
-        xmacs[p].truncate(length);
+        abits.keys[p].truncate(length);
+        abits.macs[p].truncate(length);
     }
-    Ok((x, xkeys, xmacs))
+    Ok(abits)
 }
 
 /// Performs F_HaAND.
@@ -319,11 +330,12 @@ pub(crate) async fn fhaand(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-    x: Vec<bool>,
-    xkeys: Vec<Vec<u128>>,
-    xmacs: Vec<Vec<u128>>,
+    x: ABits,
 ) -> Result<bool, Error> {
     // Protocol Pi_HaAND
+
+    // Step 1
+    // Call FaShare to obtain <x>
 
     // Upon receiving (i, {y_j^i}) from all P_i
     let mut y: Vec<bool> = vec![false; p_max];
@@ -331,38 +343,33 @@ pub(crate) async fn fhaand(
         y[p] = channel.recv_from(p, "laand").await?;
     }
 
-    // Step 1
-    //let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-    //    fashare(channel, p_own, p_max, 1, delta).await?;
-
     //Step 2
     let mut hvec: Vec<(bool, bool)> = vec![(false, false); p_max];
     let mut hasher = Hasher::new();
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
         let s: bool = random();
-
-        hasher.update(&xkeys[p][0].to_le_bytes());
-        let lsb1 = (hasher.finalize().as_bytes()[0] & 1) != 0;
-        let h0: bool = lsb1 ^ s;
-        hasher.reset();
-        hasher.update(&(xkeys[p][0] ^ delta.0).to_le_bytes());
-        let lsb2 = (hasher.finalize().as_bytes()[0] & 1) != 0;
+        hasher.update(&x.keys[p][0].to_le_bytes());
+        let mut hash: [u8; 32] = hasher.finalize().into();
+        let lsb1 = (hash[31] & 0b0000_0001) != 0;
+        let h0 = lsb1 ^ s;
+        hasher.update(&(x.keys[p][0] ^ delta.0).to_le_bytes());
+        hash = hasher.finalize().into();
+        let lsb2 = (hash[31] & 0b0000_0001) != 0;
         let h1: bool = lsb2 ^ s ^ y[p];
         channel.send_to(p, "haand", &(&h0, &h1)).await?;
         hvec[p] = channel.recv_from(p, "haand").await?;
         //Lsb mac
-        hasher.reset();
-        hasher.update(&xmacs[p][0].to_le_bytes());
-        let lsb = (hasher.finalize().as_bytes()[0] & 1) != 0;
-        let t: bool = if x[0] {
-            hvec[p].0 ^ lsb
-        } else {
+        hasher.update(&x.macs[p][0].to_le_bytes());
+        hash = hasher.finalize().into();
+        let lsb = (hash[31] & 0b0000_0001) != 0;
+        let t: bool = if x.bits[0] {
             hvec[p].1 ^ lsb
+        } else {
+            hvec[p].0 ^ lsb
         };
         v ^= t;
         v ^= s;
-        //channel.send_to(p, "laand", &v).await?;
     }
     //Step 3
     Ok(v)
@@ -374,33 +381,23 @@ pub(crate) async fn flaand(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
+) -> Result<ABits, Error> {
     // Protocol Pi_LaAND
     // Step 1
-    let (y, ykeys, ymacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        fashare(channel, p_own, p_max, 3, delta).await?; // x is y[0], y is y[1], z is y[2]
+    let abits: ABits = fashare(channel, p_own, p_max, 3, delta).await?; // x is y[0], y is y[1], z is y[2]
 
     // Step 2
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "laand", &y[1]).await?;
+        channel.send_to(p, "laand", &abits.bits[1]).await?;
     }
-    let v = fhaand(
-        channel,
-        p_own,
-        p_max,
-        delta,
-        y.clone(),
-        ykeys.clone(),
-        ymacs.clone(),
-    )
-    .await?;
+    let v = fhaand(channel, p_own, p_max, delta, abits.clone()).await?;
 
     // Step 3
     let mut z: bool = v;
-    if y[0] {
-        z ^= y[1];
+    if abits.bits[0] {
+        z ^= abits.bits[1];
     }
-    let e_own: bool = z ^ y[2];
+    let e_own: bool = z ^ abits.bits[2];
 
     let mut ep: Vec<bool> = vec![false; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
@@ -408,16 +405,16 @@ pub(crate) async fn flaand(
         ep[p] = channel.recv_from(p, "esend").await?;
     }
     //z = y[2] ^ e_own;
-    let mut _zii: bool = y[2] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
+    let mut _zii: bool = abits.bits[2] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
 
     // Step 4
     let mut sum: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
-        sum ^= ykeys[p][1];
-        sum ^= ymacs[p][1];
+        sum ^= abits.keys[p][1];
+        sum ^= abits.macs[p][1];
     }
     let mut phi = sum;
-    if y[1] {
+    if abits.bits[1] {
         phi = delta.0 ^ sum;
     }
 
@@ -428,10 +425,10 @@ pub(crate) async fn flaand(
     let phi_bytes = phi.to_le_bytes();
     for p in (0..p_max).filter(|p| *p != p_own) {
         hasher.reset();
-        hasher.update(&ykeys[p][0].to_le_bytes());
+        hasher.update(&abits.keys[p][0].to_le_bytes());
         xkeys_phi[p] = hasher.finalize().as_bytes().to_owned();
         hasher.reset();
-        hasher.update(&(ykeys[p][0] ^ delta.0).to_le_bytes());
+        hasher.update(&(abits.keys[p][0] ^ delta.0).to_le_bytes());
         let res = hasher.finalize().as_bytes().to_owned();
 
         for i in 0..32 {
@@ -450,9 +447,9 @@ pub(crate) async fn flaand(
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         hasher.reset();
-        hasher.update(&ymacs[p][0].to_le_bytes());
+        hasher.update(&abits.macs[p][0].to_le_bytes());
         xmacs_phi[p] = hasher.finalize().as_bytes().to_owned();
-        if y[0] {
+        if abits.bits[0] {
             for i in 0..32 {
                 xmacs_phi[p][i] ^= uijp[p][p_own][i];
             }
@@ -467,12 +464,12 @@ pub(crate) async fn flaand(
             *h = xkeys_phi[p][i] ^ xmacs_phi[p][i];
         }
 
-        zxor[p] ^= ykeys[p][2]; // 2 because it is for z
-        zxor[p] ^= ymacs[p][2];
-        if y[2] {
+        zxor[p] ^= abits.keys[p][2]; // 2 because it is for z
+        zxor[p] ^= abits.macs[p][2];
+        if abits.bits[2] {
             zxor[p] ^= delta.0;
         }
-        if y[0] {
+        if abits.bits[0] {
             zxor[p] ^= phi;
         }
         for (i, elem) in hash.iter_mut().take(16).enumerate() {
@@ -495,7 +492,7 @@ pub(crate) async fn flaand(
             //return Err(Error::HashNotZero);
         }
     }
-    Ok((y, ykeys, ymacs))
+    Ok(abits)
 }
 
 /// Performs Pi_aAND.
@@ -512,7 +509,7 @@ pub async fn faand(
     let lprime = length * b;
 
     // Step 1
-    let mut triples: Vec<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)> = vec![];
+    let mut triples: Vec<ABits> = vec![];
     for _ in 0..lprime {
         triples.push(flaand(&mut channel, p_own, p_max, delta).await?);
     }
@@ -521,12 +518,11 @@ pub async fn faand(
     let mut rng = thread_rng();
     let mut available: Vec<usize> = (0..length as usize).collect();
 
-    let mut buckets: Vec<Vec<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)>> =
-        vec![vec![]; length as usize];
+    let mut buckets: Vec<Vec<ABits>> = vec![vec![]; length as usize];
 
     // Assign objects to buckets
     for obj in triples {
-        let mut indeces: Vec<usize> = available.iter().cloned().collect();
+        let mut indeces: Vec<usize> = available.to_vec();
         indeces.retain(|&index| buckets[index].len() < b as usize);
 
         if !indeces.is_empty() {
@@ -547,45 +543,45 @@ pub async fn faand(
 
     // Step 3
     // TODO combine buckets two by two.
-    //combine_two_leaky_ands(&buckets[0][0], &buckets[0][1]);
+    let _ = combine_two_leaky_ands(&buckets[0][0], &buckets[0][1]);
 
     Ok(())
 }
 
-pub(crate) fn combine_two_leaky_ands(
-    first: &(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>),
-    second: &(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>),
-) -> Result<(Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>), Error> {
-    let mut result: (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
-        (vec![false; 3], vec![vec![]; 3], vec![vec![]; 3]);
-    let d = first.0[1] ^ second.0[1];
+pub(crate) fn combine_two_leaky_ands(first: &ABits, second: &ABits) -> Result<ABits, Error> {
+    let mut result: ABits = ABits {
+        bits: vec![false; 3],
+        keys: vec![vec![]; 3],
+        macs: vec![vec![]; 3],
+    };
+    let _d = first.bits[1] ^ second.bits[1];
     // TODO Check MAC of d ????
     if false {
         return Err(Error::WrongDMAC);
     }
-    result.0[0] = first.0[0] ^ second.0[0]; // x
-    println!("{:?}", first.1);
-    for j in 0..first.1.len() {
-        result.1[0][j] = first.1[0][j] ^ second.1[0][j]; // TODO deal with the possibility that one of these arrays are empty (for own?)
-        result.2[0][j] = first.2[0][j] ^ second.2[0][j];
+    result.bits[0] = first.bits[0] ^ second.bits[0]; // x
+    /*println!("{:?}", first.keys);
+    for j in 0..first.keys.len() {
+        result.keys[0][j] = first.keys[0][j] ^ second.keys[0][j]; // TODO deal with the possibility that one of these arrays are empty (for own?)
+        result.macs[0][j] = first.macs[0][j] ^ second.macs[0][j];
     }
-    result.0[1] = first.0[1]; // y
-    for j in 0..first.1.len() {
-        result.1[1][j] = first.1[1][j];
-        result.2[1][j] = first.2[1][j];
+    result.bits[1] = first.bits[1]; // y
+    for j in 0..first.keys.len() {
+        result.keys[1][j] = first.keys[1][j];
+        result.macs[1][j] = first.macs[1][j];
     }
-    result.0[2] = first.0[2] ^ second.0[2]; // z
-    for j in 0..first.1.len() {
-        result.1[2][j] = first.1[2][j] ^ second.1[2][j];
-        result.2[2][j] = first.2[2][j] ^ second.2[2][j];
+    result.bits[2] = first.bits[2] ^ second.bits[2]; // z
+    for j in 0..first.keys.len() {
+        result.keys[2][j] = first.keys[2][j] ^ second.keys[2][j];
+        result.macs[2][j] = first.macs[2][j] ^ second.macs[2][j];
     }
     if d {
-        result.0[2] ^= second.0[0];
-        for j in 0..first.1.len() {
-            result.1[2][j] ^= second.1[0][j];
-            result.2[2][j] ^= second.2[0][j];
+        result.bits[2] ^= second.bits[0];
+        for j in 0..first.keys.len() {
+            result.keys[2][j] ^= second.keys[0][j];
+            result.macs[2][j] ^= second.macs[0][j];
         }
-    }
+    }*/
     Ok(result)
 }
 
@@ -595,7 +591,7 @@ mod tests {
 
     use crate::{
         channel::{Error, MsgChannel, SimpleChannel},
-        faand::{faand, fashare, fhaand},
+        faand::{faand, fashare, fhaand, ABits},
         fpre::Delta,
     };
 
@@ -614,29 +610,21 @@ mod tests {
             let handle: tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>> =
                 tokio::spawn(async move {
                     let mut msgchannel = MsgChannel(channel);
-                    let (x, xkeys, xmacs): (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>) =
+                    let abits: ABits =
                         fashare(&mut msgchannel, parties - i - 1, parties, 2, delta).await?;
                     for p in (0..parties).filter(|p| *p != parties - i - 1) {
-                        msgchannel.send_to(p, "laand", &x[1]).await?;
-                        msgchannel.send_to(p, "check", &x[1]).await?;
+                        msgchannel.send_to(p, "laand", &abits.bits[1]).await?;
+                        msgchannel.send_to(p, "check", &abits.bits[1]).await?;
                     }
                     for p in (0..parties).filter(|p| *p != parties - i - 1) {
                         ycheck[p] = msgchannel.recv_from(p, "check").await?;
                         check ^= ycheck[p];
                     }
-                    check ^= x[0];
+                    check ^= abits.bits[0];
 
-                    fhaand(
-                        &mut msgchannel,
-                        parties - i - 1,
-                        parties,
-                        delta,
-                        x,
-                        xkeys,
-                        xmacs,
-                    )
-                    .await
-                    .map(|result| (check, result))
+                    fhaand(&mut msgchannel, parties - i - 1, parties, delta, abits)
+                        .await
+                        .map(|result| (check, result))
                 });
             handles.push(handle);
         }
@@ -670,9 +658,7 @@ mod tests {
         let length = 2;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<
-            tokio::task::JoinHandle<
-                Result<(usize, Delta, (Vec<bool>, Vec<Vec<u128>>, Vec<Vec<u128>>)), crate::faand::Error>,
-            >,
+            tokio::task::JoinHandle<Result<(usize, Delta, ABits), crate::faand::Error>>,
         > = vec![];
 
         for i in 0..parties {
@@ -682,7 +668,7 @@ mod tests {
                 let mut msgchannel = MsgChannel(channel); // Move the channel into MsgChannel
                 fashare(&mut msgchannel, parties - i - 1, parties, length, delta)
                     .await
-                    .map(|result| (parties-i-1,delta, result))
+                    .map(|result| (parties - i - 1, delta, result))
             });
             handles.push(handle);
         }
@@ -693,15 +679,21 @@ mod tests {
                 Err(e) => {
                     eprintln!("Protocol failed {:?}", e);
                 }
-                Ok((p_own, delta, (x, xkeys, xmacs))) => {
+                Ok((p_own, delta, abits)) => {
                     for l in 0..length {
                         for p in 0..parties {
-                            if x[l] {
-                                if xkeys[p] != [] && xmacs[p_own] != [] && xkeys[p][l] != xmacs[p_own][l] ^ delta.0 {
+                            if abits.bits[l] {
+                                if abits.keys[p] != []
+                                    && abits.macs[p_own] != []
+                                    && abits.keys[p][l] != abits.macs[p_own][l] ^ delta.0
+                                {
                                     eprintln!("Failed FaShare!!!!!!!!!");
                                 }
                             } else {
-                                if xkeys[p] != [] && xmacs[p_own] != [] && xkeys[p][l] != xmacs[p_own][l] {
+                                if abits.keys[p] != []
+                                    && abits.macs[p_own] != []
+                                    && abits.keys[p][l] != abits.macs[p_own][l]
+                                {
                                     eprintln!("Failed FaShare!!!!!!!!!");
                                 }
                             }
