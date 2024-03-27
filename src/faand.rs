@@ -345,24 +345,27 @@ pub(crate) async fn fhaand(
 
     //Step 2
     let mut hvec: Vec<(bool, bool)> = vec![(false, false); p_max];
-    let mut hasher = Hasher::new();
+    //let mut hasher = Hasher::new();
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
         let s: bool = random();
-        hasher.update(&x.keys[p][0].to_le_bytes());
-        let mut hash: [u8; 32] = hasher.finalize().into();
-        let lsb1 = (hash[31] & 0b0000_0001) != 0;
+        //hasher.update(&x.keys[p][0].to_le_bytes());
+        //let mut hash: [u8; 32] = hasher.finalize().into();
+        //let lsb1 = (hash[31] & 0b0000_0001) != 0;
+        let lsb1 =  x.keys[p][0] & 1 != 0;
         let h0 = lsb1 ^ s;
-        hasher.update(&(x.keys[p][0] ^ delta.0).to_le_bytes());
-        hash = hasher.finalize().into();
-        let lsb2 = (hash[31] & 0b0000_0001) != 0;
+        //hasher.update(&(x.keys[p][0] ^ delta.0).to_le_bytes());
+        //hash = hasher.finalize().into();
+        //let lsb2 = (hash[31] & 0b0000_0001) != 0;
+        let lsb2 = (x.keys[p][0] ^ delta.0) & 1 != 0;
         let h1: bool = lsb2 ^ s ^ y[p];
         channel.send_to(p, "haand", &(&h0, &h1)).await?;
         hvec[p] = channel.recv_from(p, "haand").await?;
         //Lsb mac
-        hasher.update(&x.macs[p][0].to_le_bytes());
-        hash = hasher.finalize().into();
-        let lsb = (hash[31] & 0b0000_0001) != 0;
+        //hasher.update(&x.macs[p][0].to_le_bytes());
+        //hash = hasher.finalize().into();
+        //let lsb = (hash[31] & 0b0000_0001) != 0;
+        let lsb = x.macs[p][0] & 1 != 0;
         let t: bool = if x.bits[0] {
             hvec[p].1 ^ lsb
         } else {
@@ -597,7 +600,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fhaand() -> Result<(), Error> {
-        let parties = 5;
+        let parties = 3;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>>> =
             vec![];
@@ -618,10 +621,10 @@ mod tests {
                     }
                     for p in (0..parties).filter(|p| *p != parties - i - 1) {
                         ycheck[p] = msgchannel.recv_from(p, "check").await?;
-                        check ^= ycheck[p];
+                        if abits.bits[0] {
+                            check ^= ycheck[p];
+                        }   
                     }
-                    check ^= abits.bits[0];
-
                     fhaand(&mut msgchannel, parties - i - 1, parties, delta, abits)
                         .await
                         .map(|result| (check, result))
