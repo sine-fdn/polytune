@@ -344,7 +344,6 @@ pub(crate) async fn fhaand(
     }
 
     //Step 2
-    let mut hvec: Vec<(bool, bool)> = vec![(false, false); p_max];
     //let mut hasher = Hasher::new();
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
@@ -360,19 +359,22 @@ pub(crate) async fn fhaand(
         let lsb2 = (x.keys[p][0] ^ delta.0) & 1 != 0;
         let h1: bool = lsb2 ^ s ^ y[p];
         channel.send_to(p, "haand", &(&h0, &h1)).await?;
-        hvec[p] = channel.recv_from(p, "haand").await?;
+        v ^= s;
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        let (h0p, h1p): (bool, bool) = channel.recv_from(p, "haand").await?;
         //Lsb mac
         //hasher.update(&x.macs[p][0].to_le_bytes());
         //hash = hasher.finalize().into();
         //let lsb = (hash[31] & 0b0000_0001) != 0;
         let lsb = x.macs[p][0] & 1 != 0;
-        let t: bool = if x.bits[0] {
-            hvec[p].1 ^ lsb
+        let mut t = lsb;
+        if x.bits[0] {
+            t ^= h1p;
         } else {
-            hvec[p].0 ^ lsb
-        };
+            t ^= h0p;
+        }
         v ^= t;
-        v ^= s;
     }
     //Step 3
     Ok(v)
@@ -606,12 +608,11 @@ mod tests {
             vec![];
 
         for i in 0..parties {
-            let mut check: bool = false;
-            let mut ycheck: Vec<bool> = vec![false; parties];
             let delta: Delta = Delta(random());
             let channel = channels.pop().unwrap();
             let handle: tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>> =
                 tokio::spawn(async move {
+                    let mut check: bool = false;
                     let mut msgchannel = MsgChannel(channel);
                     let abits: ABits =
                         fashare(&mut msgchannel, parties - i - 1, parties, 2, delta).await?;
@@ -620,10 +621,10 @@ mod tests {
                         msgchannel.send_to(p, "check", &abits.bits[1]).await?;
                     }
                     for p in (0..parties).filter(|p| *p != parties - i - 1) {
-                        ycheck[p] = msgchannel.recv_from(p, "check").await?;
+                        let ycheck: bool = msgchannel.recv_from(p, "check").await?;
                         if abits.bits[0] {
-                            check ^= ycheck[p];
-                        }   
+                            check ^= ycheck;
+                        }
                     }
                     fhaand(&mut msgchannel, parties - i - 1, parties, delta, abits)
                         .await
@@ -646,11 +647,7 @@ mod tests {
                 }
             }
         }
-        if xorcheck != xorv {
-            println!("HaAND test failed!");
-        } else {
-            println!("HaAND test passed!");
-        }
+        assert_eq!(xorcheck, xorv);
 
         Ok(())
     }
