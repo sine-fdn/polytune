@@ -329,7 +329,7 @@ pub(crate) async fn fhaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
-    delta: Delta,
+    _delta: Delta,
     x: ABits,
 ) -> Result<bool, Error> {
     // Protocol Pi_HaAND
@@ -344,31 +344,15 @@ pub(crate) async fn fhaand(
     }
 
     //Step 2
-    //let mut hasher = Hasher::new();
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let s: bool = random();
-        //hasher.update(&x.keys[p][0].to_le_bytes());
-        //let mut hash: [u8; 32] = hasher.finalize().into();
-        //let lsb1 = (hash[31] & 0b0000_0001) != 0;
-        let lsb1 =  x.keys[p][0] & 1 != 0;
-        let h0 = lsb1 ^ s;
-        //hasher.update(&(x.keys[p][0] ^ delta.0).to_le_bytes());
-        //hash = hasher.finalize().into();
-        //let lsb2 = (hash[31] & 0b0000_0001) != 0;
-        let lsb2 = (x.keys[p][0] ^ delta.0) & 1 != 0;
-        let h1: bool = lsb2 ^ s ^ y[p];
+        let h0 = false;
+        let h1 = y[p];
         channel.send_to(p, "haand", &(&h0, &h1)).await?;
-        v ^= s;
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         let (h0p, h1p): (bool, bool) = channel.recv_from(p, "haand").await?;
-        //Lsb mac
-        //hasher.update(&x.macs[p][0].to_le_bytes());
-        //hash = hasher.finalize().into();
-        //let lsb = (hash[31] & 0b0000_0001) != 0;
-        let lsb = x.macs[p][0] & 1 != 0;
-        let mut t = lsb;
+        let mut t: bool = false;
         if x.bits[0] {
             t ^= h1p;
         } else {
@@ -612,21 +596,17 @@ mod tests {
             let channel = channels.pop().unwrap();
             let handle: tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>> =
                 tokio::spawn(async move {
+                    let p_own = parties - i - 1;
                     let mut check: bool = false;
                     let mut msgchannel = MsgChannel(channel);
-                    let abits: ABits =
-                        fashare(&mut msgchannel, parties - i - 1, parties, 2, delta).await?;
-                    for p in (0..parties).filter(|p| *p != parties - i - 1) {
+                    let abits: ABits = fashare(&mut msgchannel, p_own, parties, 2, delta).await?;
+                    for p in (0..parties).filter(|p| *p != p_own) {
                         msgchannel.send_to(p, "laand", &abits.bits[1]).await?;
-                        msgchannel.send_to(p, "check", &abits.bits[1]).await?;
-                    }
-                    for p in (0..parties).filter(|p| *p != parties - i - 1) {
-                        let ycheck: bool = msgchannel.recv_from(p, "check").await?;
                         if abits.bits[0] {
-                            check ^= ycheck;
+                            check ^= &abits.bits[1];
                         }
                     }
-                    fhaand(&mut msgchannel, parties - i - 1, parties, delta, abits)
+                    fhaand(&mut msgchannel, p_own, parties, delta, abits)
                         .await
                         .map(|result| (check, result))
                 });
