@@ -325,11 +325,11 @@ pub(crate) async fn fashare(
 }
 
 /// Performs F_HaAND.
-pub(crate) async fn fhaand(
+pub(crate) async fn fhaand( //TODO Add back hashing
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
-    _delta: Delta,
+    delta: Delta,
     x: ABits,
 ) -> Result<bool, Error> {
     // Protocol Pi_HaAND
@@ -344,15 +344,31 @@ pub(crate) async fn fhaand(
     }
 
     //Step 2
+    //let mut hasher = Hasher::new();
     let mut v: bool = false; // Step 3 of HaAND makes me believe this needs to be XORed for all parties TODO Check
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let h0 = false;
-        let h1 = y[p];
+        let s: bool = random();
+        //hasher.update(&x.keys[p][0].to_le_bytes());
+        //let mut hash: [u8; 32] = hasher.finalize().into();
+        //let lsb0 = (hash[31] & 0b0000_0001) != 0;
+        let lsb0 =  x.keys[p][0] & 1 != 0;
+        let h0 = lsb0 ^ s;
+
+        //hasher.update(&(x.keys[p][0] ^ delta.0).to_le_bytes());
+        //hash = hasher.finalize().into();
+        //let lsb1 = (hash[31] & 0b0000_0001) != 0;
+        let lsb1 = (x.keys[p][0] ^ delta.0) & 1 != 0;
+        let h1 = lsb1 ^ s ^ y[p];
         channel.send_to(p, "haand", &(&h0, &h1)).await?;
+        v ^= s;
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         let (h0p, h1p): (bool, bool) = channel.recv_from(p, "haand").await?;
-        let mut t: bool = false;
+        //hasher.update(&x.macs[p][0].to_le_bytes());
+        //let hash: [u8; 32] = hasher.finalize().into();
+        //let lsb = (hash[31] & 0b0000_0001) != 0;
+        let lsb = x.macs[p][0] & 1 != 0;
+        let mut t: bool = lsb;
         if x.bits[0] {
             t ^= h1p;
         } else {
