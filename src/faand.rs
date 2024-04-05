@@ -1,7 +1,7 @@
 //! F_aAND protocol from WRK17b.
 
 use blake3::Hasher;
-use rand::{random, thread_rng, Rng, SeedableRng};
+use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 
@@ -340,7 +340,7 @@ pub(crate) async fn fhaand( //TODO Add back hashing
     // Upon receiving (i, {y_j^i}) from all P_i
     let mut y: Vec<bool> = vec![false; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        y[p] = channel.recv_from(p, "laand").await?;
+        y[p] = channel.recv_from(p, "haand").await?;
     }
 
     //Step 2
@@ -386,208 +386,119 @@ pub(crate) async fn flaand(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-) -> Result<ABits, Error> {
+) -> Result<(ABits, ABits, ABits), Error> {
     // Protocol Pi_LaAND
+    // Triple computation
     // Step 1
-    let abits: ABits = fashare(channel, p_own, p_max, 3, delta).await?; // x is y[0], y is y[1], z is y[2]
+    let xbits: ABits = fashare(channel, p_own, p_max, 1, delta).await?;
+
+    let ybits: ABits = fashare(channel, p_own, p_max, 1, delta).await?;
+
+    let rbits: ABits = fashare(channel, p_own, p_max, 1, delta).await?;
 
     // Step 2
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "laand", &abits.bits[1]).await?;
+        channel.send_to(p, "haand", &ybits.bits).await?;
     }
-    let v = fhaand(channel, p_own, p_max, delta, abits.clone()).await?;
+    let v = fhaand(channel, p_own, p_max, delta, xbits.clone()).await?;
 
     // Step 3
     let mut z: bool = v;
-    if abits.bits[0] {
-        z ^= abits.bits[1];
+    if xbits.bits[0] {
+        z ^= ybits.bits[0];
     }
-    let e_own: bool = z ^ abits.bits[2];
+    let e: bool = z ^ rbits.bits[0];
 
-    let mut ep: Vec<bool> = vec![false; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "esend", &e_own).await?;
-        ep[p] = channel.recv_from(p, "esend").await?;
+        channel.send_to(p, "esend", &e).await?;
     }
-    //z = y[2] ^ e_own;
-    let mut _zii: bool = abits.bits[2] ^ e_own; //TODO figure out [z^i]^i and [r^i]^i
+    
+    z = rbits.bits[0] ^ e; // if e is true (1), this is basically a negation of r and should be done as described in Section 2 of WRK17b, if e is false (0), this is a copy 
+    let mut zkeys: Vec<Vec<u128>> = rbits.keys.clone();
+    let zmacs: Vec<Vec<u128>> = rbits.macs.clone();
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        let ep: bool = channel.recv_from(p, "esend").await?;
+        if ep {
+            zkeys[p][0] = rbits.keys[p][0] ^ delta.0;
+        }
+    }
+    let zbits = ABits {
+        bits: vec![z; 1],
+        keys: zkeys,
+        macs: zmacs
+    };
 
+    // Triple Checking
     // Step 4
-    let mut sum: u128 = 0;
+    let mut phi: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
-        sum ^= abits.keys[p][1];
-        sum ^= abits.macs[p][1];
+        phi ^= ybits.keys[p][0];
+        phi ^= ybits.macs[p][0];
     }
-    let mut phi = sum;
-    if abits.bits[1] {
-        phi = delta.0 ^ sum;
+    if ybits.bits[0] {
+        phi ^= delta.0;
     }
 
     // Step 5
-    let mut hasher = Hasher::new();
-    let mut xkeys_phi: Vec<[u8; 32]> = vec![[0; 32]; p_max];
-    let mut uij: Vec<[u8; 32]> = vec![[0; 32]; p_max];
-    let phi_bytes = phi.to_le_bytes();
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        hasher.reset();
-        hasher.update(&abits.keys[p][0].to_le_bytes());
-        xkeys_phi[p] = hasher.finalize().as_bytes().to_owned();
-        hasher.reset();
-        hasher.update(&(abits.keys[p][0] ^ delta.0).to_le_bytes());
-        let res = hasher.finalize().as_bytes().to_owned();
-
-        for i in 0..32 {
-            uij[p][i] = res[i] ^ xkeys_phi[p][i];
-            if i < 16 {
-                uij[p][i] ^= phi_bytes[i];
-            }
-        }
+    let mut uij: Vec<u128> = vec![0; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) { //without hash for now???
+        uij[p] = xbits.keys[p][0] ^ delta.0 ^ xbits.keys[p][0] ^ phi;
         channel.send_to(p, "uij", &uij).await?;
     }
 
-    let mut uijp: Vec<Vec<[u8; 32]>> = vec![vec![[0; 32]; p_max]; p_max];
-    let mut xmacs_phi: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    let mut uijp: Vec<Vec<u128>> = vec![vec![0; p_max]; p_max];
+    let mut xmacs_phi: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         uijp[p] = channel.recv_from(p, "uij").await?;
-    }
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        hasher.reset();
-        hasher.update(&abits.macs[p][0].to_le_bytes());
-        xmacs_phi[p] = hasher.finalize().as_bytes().to_owned();
-        if abits.bits[0] {
-            for i in 0..32 {
-                xmacs_phi[p][i] ^= uijp[p][p_own][i];
-            }
+        xmacs_phi[p] = xbits.macs[p][0];
+        if xbits.bits[0] {
+            xmacs_phi[p] ^= uijp[p][p_own];
         }
     }
 
-    // Step 6
-    let mut hash: [u8; 32] = [0; 32];
-    let mut zxor: Vec<u128> = vec![0; p_max];
+    let mut hash: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
-        for (i, h) in hash.iter_mut().enumerate() {
-            *h = xkeys_phi[p][i] ^ xmacs_phi[p][i];
-        }
-
-        zxor[p] ^= abits.keys[p][2]; // 2 because it is for z
-        zxor[p] ^= abits.macs[p][2];
-        if abits.bits[2] {
-            zxor[p] ^= delta.0;
-        }
-        if abits.bits[0] {
-            zxor[p] ^= phi;
-        }
-        for (i, elem) in hash.iter_mut().take(16).enumerate() {
-            *elem ^= zxor[p].to_le_bytes()[i];
-        }
+        hash ^= xbits.keys[p][0] ^ xmacs_phi[p];
+        hash ^= zbits.keys[p][0] ^ zbits.macs[p][0];
+    }
+    if xbits.bits[0] {
+        hash ^= phi;
+    }
+    if zbits.bits[0] {
+        hash ^= delta.0;
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "hash", &hash).await?;
     }
-
-    let mut hashp: Vec<[u8; 32]> = vec![[0; 32]; p_max];
-    let mut xorhash: [u8; 32] = [0; 32];
+    let mut hashp: Vec<u128> = vec![0; p_max];
+    let mut xorhash:u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
         hashp[p] = channel.recv_from(p, "hash").await?; //TODO: commitments
-        for (i, h) in xorhash.iter_mut().enumerate() {
-            *h ^= hashp[p][i];
-        }
+        xorhash ^= hashp[p];
     }
-    for elem in xorhash {
-        if elem != 0 {
-            //eprintln!("FLaAND Failing!!!")
-            //return Err(Error::HashNotZero);
-        }
-    }
-    Ok(abits)
+    println!("{:?}", xorhash);
+    //assert_eq!(xorhash, 0);
+
+    
+    Ok((xbits, ybits, zbits))
 }
+
 
 /// Performs Pi_aAND.
 pub async fn faand(
     channel: impl Channel,
     p_own: usize,
     p_max: usize,
-    circuit_size: u128,
-    length: u128,
+    _circuit_size: u128,
+    _length: u128,
 ) -> Result<(), Error> {
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
-    let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
-    let lprime = length * b;
-
-    // Step 1
-    let mut triples: Vec<ABits> = vec![];
-    for _ in 0..lprime {
-        triples.push(flaand(&mut channel, p_own, p_max, delta).await?);
-    }
-
-    // Step 2 TODO Randomly partition all objects into l buckets, each with B objects
-    let mut rng = thread_rng();
-    let mut available: Vec<usize> = (0..length as usize).collect();
-
-    let mut buckets: Vec<Vec<ABits>> = vec![vec![]; length as usize];
-
-    // Assign objects to buckets
-    for obj in triples {
-        let mut indeces: Vec<usize> = available.to_vec();
-        indeces.retain(|&index| buckets[index].len() < b as usize);
-
-        if !indeces.is_empty() {
-            let rand_index = rng.gen_range(0..indeces.len());
-            let ind = indeces[rand_index];
-
-            buckets[ind].push(obj);
-            if buckets[ind].len() == b as usize {
-                available.retain(|&index| index != ind);
-            }
-        }
-    }
-
-    /*for (index, bucket) in buckets.iter().enumerate() {
-        println!("Bucket {}: {:?}", index, bucket);
-        println!("{:?} {:?}", buckets.len(), b);
-    }*/
-
-    // Step 3
-    // TODO combine buckets two by two.
-    let _ = combine_two_leaky_ands(&buckets[0][0], &buckets[0][1]);
+    
+    let triple: (ABits, ABits, ABits) = flaand(&mut channel, p_own, p_max, delta).await?;
+    println!("{:?}", triple);
 
     Ok(())
-}
-
-pub(crate) fn combine_two_leaky_ands(first: &ABits, second: &ABits) -> Result<ABits, Error> {
-    let mut result: ABits = ABits {
-        bits: vec![false; 3],
-        keys: vec![vec![]; 3],
-        macs: vec![vec![]; 3],
-    };
-    let _d = first.bits[1] ^ second.bits[1];
-    // TODO Check MAC of d ????
-    if false {
-        return Err(Error::WrongDMAC);
-    }
-    result.bits[0] = first.bits[0] ^ second.bits[0]; // x
-    /*println!("{:?}", first.keys);
-    for j in 0..first.keys.len() {
-        result.keys[0][j] = first.keys[0][j] ^ second.keys[0][j]; // TODO deal with the possibility that one of these arrays are empty (for own?)
-        result.macs[0][j] = first.macs[0][j] ^ second.macs[0][j];
-    }
-    result.bits[1] = first.bits[1]; // y
-    for j in 0..first.keys.len() {
-        result.keys[1][j] = first.keys[1][j];
-        result.macs[1][j] = first.macs[1][j];
-    }
-    result.bits[2] = first.bits[2] ^ second.bits[2]; // z
-    for j in 0..first.keys.len() {
-        result.keys[2][j] = first.keys[2][j] ^ second.keys[2][j];
-        result.macs[2][j] = first.macs[2][j] ^ second.macs[2][j];
-    }
-    if d {
-        result.bits[2] ^= second.bits[0];
-        for j in 0..first.keys.len() {
-            result.keys[2][j] ^= second.keys[0][j];
-            result.macs[2][j] ^= second.macs[0][j];
-        }
-    }*/
-    Ok(result)
 }
 
 #[cfg(test)]
@@ -596,7 +507,7 @@ mod tests {
 
     use crate::{
         channel::{Error, MsgChannel, SimpleChannel},
-        faand::{faand, fashare, fhaand, ABits},
+        faand::{fashare, fhaand, flaand, ABits},
         fpre::Delta,
     };
 
@@ -615,14 +526,15 @@ mod tests {
                     let p_own = parties - i - 1;
                     let mut check: bool = false;
                     let mut msgchannel = MsgChannel(channel);
-                    let abits: ABits = fashare(&mut msgchannel, p_own, parties, 2, delta).await?;
+                    let xbits: ABits = fashare(&mut msgchannel, p_own, parties, 1, delta).await?;
+                    let ybits: ABits = fashare(&mut msgchannel, p_own, parties, 1, delta).await?;
                     for p in (0..parties).filter(|p| *p != p_own) {
-                        msgchannel.send_to(p, "laand", &abits.bits[1]).await?;
-                        if abits.bits[0] {
-                            check ^= &abits.bits[1];
+                        msgchannel.send_to(p, "haand", &ybits.bits[0]).await?;
+                        if xbits.bits[0] {
+                            check ^= &ybits.bits[0];
                         }
                     }
-                    fhaand(&mut msgchannel, p_own, parties, delta, abits)
+                    fhaand(&mut msgchannel, p_own, parties, delta, xbits)
                         .await
                         .map(|result| (check, result))
                 });
@@ -703,30 +615,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_faand() -> Result<(), Error> {
+    async fn test_flaand() -> Result<(), Error> {
         let parties = 3;
-        let circuit_size = 100000;
-        let length = 2;
         let mut channels = SimpleChannel::channels(parties);
-        let mut handles: Vec<tokio::task::JoinHandle<Result<(), crate::faand::Error>>> = vec![];
+        let mut handles: Vec<tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>>> =
+            vec![];
+
         for i in 0..parties {
-            handles.push(tokio::spawn(faand(
-                channels.pop().unwrap(),
-                parties - i - 1,
-                parties,
-                circuit_size,
-                length,
-            )));
+            let delta: Delta = Delta(random());
+            let channel = channels.pop().unwrap();
+            let handle: tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>> =
+                tokio::spawn(async move {
+                    let mut msgchannel = MsgChannel(channel);
+                    flaand(&mut msgchannel, parties - i - 1, parties, delta)
+                        .await
+                });
+            handles.push(handle);
         }
-        for i in handles {
-            let out = i.await.unwrap();
+
+        let mut xorx = false;
+        let mut xory = false;
+        let mut xorz = false;
+        for handle in handles {
+            let out = handle.await.unwrap();
             match out {
                 Err(e) => {
                     eprintln!("Protocol failed {:?}", e);
                 }
-                Ok(()) => {}
+                Ok((xbits, ybits, zbits)) => {
+                    xorx ^= xbits.bits[0];
+                    xory ^= ybits.bits[0];
+                    xorz ^= zbits.bits[0];
+                }
             }
         }
+        assert_eq!(xorx & xory, xorz);
+
         Ok(())
     }
 }
