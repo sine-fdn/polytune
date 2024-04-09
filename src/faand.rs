@@ -30,6 +30,8 @@ pub enum Error {
     HashNotZero,
     /// Wrong MAC of d when combining two leaky ANDs.
     WrongDMAC,
+    /// XOR of all values in FLaAND do not cancel out.
+    XorNotZero,
 }
 
 impl From<channel::Error> for Error {
@@ -413,34 +415,49 @@ pub(crate) async fn flaand(
 
     // Triple Checking
     // Step 4
-    let mut hashed: u128 = 0; //TODO add back hashing
-    let mut uijhash: Vec<u128> = vec![0; p_max];
+    let mut hashed: [u8; 32] = [0; 32];
+    let mut uijhash: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    let mut xkeys_phi: Vec<[u8; 32]> = vec![[0;32]; p_max];
+    let mut xkeys_phi_delta: Vec<[u8; 32]> = vec![[0;32]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        uijhash[p] = xbits.keys[p][0] ^ delta.0 ^ xbits.keys[p][0];
+        xkeys_phi[p] = blake3::hash(&xbits.keys[p][0].to_le_bytes()).into();
+        xkeys_phi_delta[p] = blake3::hash(&(xbits.keys[p][0] ^ delta.0).to_le_bytes()).into();
+        for i in 0..32 {
+            uijhash[p][i] = xkeys_phi[p][i] ^ xkeys_phi_delta[p][i];
+        }
         channel.send_to(p, "uijh", &uijhash).await?;
     }
-    let mut uijphash: Vec<Vec<u128>> = vec![vec![0; p_max]; p_max];
-    let mut xmacs_phihash: Vec<u128> = vec![0; p_max];
+    let mut uijphash: Vec<Vec<[u8; 32]>> = vec![vec![[0; 32]; p_max]; p_max];
+    let mut xmacs_phi: Vec<[u8; 32]> = vec![[0;32]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         uijphash[p] = channel.recv_from(p, "uij").await?;
-        xmacs_phihash[p] = xbits.macs[p][0];
+        xmacs_phi[p] = blake3::hash(&xbits.macs[p][0].to_le_bytes()).into();
         if xbits.bits[0] {
-            xmacs_phihash[p] ^= uijphash[p][p_own];
+            for i in 0..32 {
+                xmacs_phi[p][i] ^= uijphash[p][p_own][i];
+            }
         }
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
-        hashed ^= xbits.keys[p][0] ^ xmacs_phihash[p];
+        for i in 0..32 {
+            hashed[i] ^= xkeys_phi[p][i] ^ xmacs_phi[p][i];
+        }
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "hashed", &hashed).await?;
     }
-    let mut hashedp: Vec<u128> = vec![0; p_max];
-    let mut xorhashed: u128 = hashed;
+    let mut hashedp: Vec<[u8; 32]> = vec![[0; 32]; p_max];
+    let mut xorhashed = hashed;
     for p in (0..p_max).filter(|p| *p != p_own) {
         hashedp[p] = channel.recv_from(p, "hashed").await?; //TODO: commitments
-        xorhashed ^= hashedp[p];
+        for i in 0..32 {
+            xorhashed[i] ^= hashedp[p][i];
+        }
     }
-    assert_eq!(xorhashed, 0);
+    if xorhashed != [0; 32] {
+        return Err(Error::XorNotZero);
+    }
+    println!("{:?}", xorhashed);
 
     //Independent Part without the hashing parts TODO combine the two together once working
     let mut phi: u128 = 0;
@@ -477,7 +494,9 @@ pub(crate) async fn flaand(
         hashp[p] = channel.recv_from(p, "hash").await?; //TODO: commitments
         xorhash ^= hashp[p];
     }
-    assert_eq!(xorhash, 0);
+    if xorhash != 0 {
+        return Err(Error::XorNotZero);
+    }
 
     Ok((xbits, ybits, zbits))
 }
@@ -805,7 +824,7 @@ mod tests {
                         xorx[i] ^= combined[i].0.bits[0];
                         xory[i] ^= combined[i].1.bits[0];
                         xorz[i] ^= combined[i].2.bits[0];
-                        println!("{:?}", combined);
+                        //println!("{:?}", combined);
                     } //TODO Test MACs and KEYs
                 }
             }
