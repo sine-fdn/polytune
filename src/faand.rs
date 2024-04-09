@@ -328,7 +328,8 @@ pub(crate) async fn fashare(
 }
 
 /// Performs F_HaAND.
-pub(crate) async fn fhaand( //TODO Add back hashing
+pub(crate) async fn fhaand(
+    //TODO Add back hashing
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
@@ -350,7 +351,7 @@ pub(crate) async fn fhaand( //TODO Add back hashing
         //hasher.update(&x.keys[p][0].to_le_bytes());
         //let mut hash: [u8; 32] = hasher.finalize().into();
         //let lsb0 = (hash[31] & 0b0000_0001) != 0;
-        let lsb0 =  x.keys[p][0] & 1 != 0;
+        let lsb0 = x.keys[p][0] & 1 != 0;
         let h0 = lsb0 ^ s;
 
         //hasher.update(&(x.keys[p][0] ^ delta.0).to_le_bytes());
@@ -403,8 +404,8 @@ pub(crate) async fn flaand(
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "esend", &e).await?;
     }
-    
-    // if e is true (1), this is basically a negation of r and should be done as described in Section 2 of WRK17b, if e is false (0), this is a copy 
+
+    // if e is true (1), this is basically a negation of r and should be done as described in Section 2 of WRK17b, if e is false (0), this is a copy
     let mut zkeys: Vec<Vec<u128>> = rbits.keys.clone();
     let zmacs: Vec<Vec<u128>> = rbits.macs.clone();
     for p in (0..p_max).filter(|p| *p != p_own) {
@@ -416,9 +417,8 @@ pub(crate) async fn flaand(
     let zbits = ABits {
         bits: vec![z; 1],
         keys: zkeys,
-        macs: zmacs
+        macs: zmacs,
     };
-
 
     // Triple Checking
     // Step 4
@@ -451,7 +451,6 @@ pub(crate) async fn flaand(
     }
     //println!("{:?} first {:?}", p_own, xorhashed);
 
-
     //Independent Part without the hashing parts TODO combine the two together once working
     let mut phi: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
@@ -461,7 +460,7 @@ pub(crate) async fn flaand(
 
     // Step 5
     let mut uij: Vec<u128> = vec![0; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) { 
+    for p in (0..p_max).filter(|p| *p != p_own) {
         uij[p] = phi;
         channel.send_to(p, "uij", &uij).await?;
     }
@@ -489,10 +488,9 @@ pub(crate) async fn flaand(
     }
     //println!("{:?} second {:?}", p_own, xorhash);
     assert_eq!(xorhash ^ xorhashed, 0);
-    
+
     Ok((xbits, ybits, zbits))
 }
-
 
 /// Performs Pi_aAND.
 pub async fn faand(
@@ -500,25 +498,26 @@ pub async fn faand(
     p_own: usize,
     p_max: usize,
     circuit_size: u128,
-    length: u128,
+    length: usize,
 ) -> Result<Vec<(ABits, ABits, ABits)>, Error> {
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
 
     let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
-    let lprime = length * b;
-    
+    let lprime = length as u128 * b;
+
     // Step 1
     let mut triples: Vec<(ABits, ABits, ABits)> = vec![];
     for _ in 0..lprime {
         triples.push(flaand(&mut channel, p_own, p_max, delta).await?);
     }
 
+    //TODO the random partitioning should probably be using the same randomness (?)
     // Step 2 TODO Randomly partition all objects into l buckets, each with B objects
     /*let mut rng = thread_rng();
-    let mut available: Vec<usize> = (0..length as usize).collect();
+    let mut available: Vec<usize> = (0..length).collect();
 
-    let mut buckets: Vec<Vec<ABits>> = vec![vec![]; length as usize];*/
+    let mut buckets: Vec<Vec<ABits>> = vec![vec![]; length];*/
 
     // Assign objects to buckets
     /*for obj in triples {
@@ -541,8 +540,8 @@ pub async fn faand(
         println!("{:?} {:?}", buckets.len(), b);
     }*/
 
-    let mut buckets: Vec<Vec<(ABits, ABits, ABits)>> = vec![vec![]; length as usize];
-    for i in 0..length as usize {
+    let mut buckets: Vec<Vec<(ABits, ABits, ABits)>> = vec![vec![]; length];
+    for i in 0..length {
         for _ in 0..b as usize {
             buckets[i].push(triples.pop().unwrap());
         }
@@ -553,59 +552,73 @@ pub async fn faand(
     // TODO combine buckets two by two.
     let mut bucketcombined: Vec<(ABits, ABits, ABits)> = vec![];
     for b in buckets {
-        bucketcombined.push(combine_bucket(p_own, p_max, b)?);
+        bucketcombined.push(combine_bucket(&mut channel, p_own, p_max, b).await?);
     }
-    println!("{:?}", bucketcombined);
+
     Ok(bucketcombined)
 }
 
-pub(crate) fn combine_bucket( //TODO make this more efficient to do as a tree structure
+pub(crate) async fn combine_bucket(
+    //TODO make this more efficient to do as a tree structure
+    channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
     bucket: Vec<(ABits, ABits, ABits)>,
 ) -> Result<(ABits, ABits, ABits), Error> {
     let mut bucketcopy = bucket.clone();
     let mut result = bucketcopy.pop().unwrap();
-    while let Some(triple) = bucketcopy.pop(){
-        result = combine_two_leaky_ands(p_own, p_max, &result, &triple)?;
+    while let Some(triple) = bucketcopy.pop() {
+        result = combine_two_leaky_ands(channel, p_own, p_max, &result, &triple).await?;
     }
     Ok(result)
 }
 
-pub(crate) fn combine_two_leaky_ands(
+pub(crate) async fn combine_two_leaky_ands(
+    channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
-    (x1, y1, z1): &(ABits, ABits, ABits), (x2, y2, z2): &(ABits, ABits, ABits)
+    (x1, y1, z1): &(ABits, ABits, ABits),
+    (x2, y2, z2): &(ABits, ABits, ABits),
 ) -> Result<(ABits, ABits, ABits), Error> {
-    let d = y1.bits[0] ^ y2.bits[0];
+    let mut d = y1.bits[0] ^ y2.bits[0];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "dvalue", &d).await?;
+    }
+    let mut dp: Vec<bool> = vec![false; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        dp[p] = channel.recv_from(p, "dvalue").await?; //TOCHECK: is this how d should be "revealed"?
+        d ^= dp[p];
+    }
+
     // TODO Check MACs here
     if false {
         return Err(Error::WrongDMAC);
     }
-    
+
+    let mut xbits: Vec<bool> = vec![false; 1];
+    xbits[0] = x1.bits[0] ^ x2.bits[0];
     let mut xmacs = x1.macs.clone();
     let mut xkeys = x1.keys.clone();
-    for p in (0..p_max).filter(|p| *p != p_own) { 
+    for p in (0..p_max).filter(|p| *p != p_own) {
         xmacs[p][0] ^= x2.macs[p][0];
         xkeys[p][0] ^= x2.keys[p][0];
     }
     let xres: ABits = ABits {
-        bits: vec![x1.bits[0] ^ x2.bits[0]; 1],
+        bits: xbits,
         keys: xkeys,
-        macs: xmacs
+        macs: xmacs,
     };
 
-    let mut zbits = z1.bits.clone();
+    let mut zbits = vec![false; 1];
+    zbits[0] = z1.bits[0] ^ z2.bits[0] ^ d & x2.bits[0];
     let mut zmacs = z1.macs.clone();
     let mut zkeys = z1.keys.clone();
-    for p in (0..p_max).filter(|p| *p != p_own) { 
+    for p in (0..p_max).filter(|p| *p != p_own) {
         zmacs[p][0] ^= z2.macs[p][0];
         zkeys[p][0] ^= z2.keys[p][0];
     }
-    zbits[0] ^= z2.bits[0];
     if d {
-        zbits[0] ^= x2.bits[0];
-        for p in (0..p_max).filter(|p| *p != p_own) { 
+        for p in (0..p_max).filter(|p| *p != p_own) {
             zmacs[p][0] ^= x2.macs[p][0];
             zkeys[p][0] ^= x2.keys[p][0];
         }
@@ -613,7 +626,7 @@ pub(crate) fn combine_two_leaky_ands(
     let zres: ABits = ABits {
         bits: zbits,
         keys: zkeys,
-        macs: zmacs
+        macs: zmacs,
     };
     Ok((xres, y1.clone(), zres))
 }
@@ -624,7 +637,7 @@ mod tests {
 
     use crate::{
         channel::{Error, MsgChannel, SimpleChannel},
-        faand::{fashare, fhaand, flaand, faand, ABits},
+        faand::{faand, fashare, fhaand, flaand, ABits},
         fpre::Delta,
     };
 
@@ -632,7 +645,7 @@ mod tests {
     async fn test_fhaand() -> Result<(), Error> {
         let parties = 3;
         let mut channels = SimpleChannel::channels(parties);
-        
+
         let mut handles: Vec<tokio::task::JoinHandle<Result<(bool, bool), crate::faand::Error>>> =
             vec![];
 
@@ -715,7 +728,7 @@ mod tests {
                                     && abits.keys[p][l] != abits.macs[p_own][l] ^ delta.0
                                 {
                                     eprintln!("Failed FaShare!!!!!!!!!");
-                                } 
+                                }
                             } else {
                                 if abits.keys[p] != []
                                     && abits.macs[p_own] != []
@@ -736,41 +749,42 @@ mod tests {
     #[tokio::test]
     async fn test_flaand() -> Result<(), Error> {
         for _ in 0..1 {
-        let parties = 3;
-        let mut channels = SimpleChannel::channels(parties);
-        let mut handles: Vec<tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>>> =
-            vec![];
+            let parties = 3;
+            let mut channels = SimpleChannel::channels(parties);
+            let mut handles: Vec<
+                tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>>,
+            > = vec![];
 
-        for i in 0..parties {
-            let delta: Delta = Delta(random());
-            let channel = channels.pop().unwrap();
-            let handle: tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>> =
-                tokio::spawn(async move {
+            for i in 0..parties {
+                let delta: Delta = Delta(random());
+                let channel = channels.pop().unwrap();
+                let handle: tokio::task::JoinHandle<
+                    Result<(ABits, ABits, ABits), crate::faand::Error>,
+                > = tokio::spawn(async move {
                     let mut msgchannel = MsgChannel(channel);
-                    flaand(&mut msgchannel, parties - i - 1, parties, delta)
-                        .await
+                    flaand(&mut msgchannel, parties - i - 1, parties, delta).await
                 });
-            handles.push(handle);
-        }
+                handles.push(handle);
+            }
 
-        let mut xorx = false;
-        let mut xory = false;
-        let mut xorz = false;
-        for handle in handles {
-            let out = handle.await.unwrap();
-            match out {
-                Err(e) => {
-                    eprintln!("Protocol failed {:?}", e);
-                }
-                Ok((xbits, ybits, zbits)) => {
-                    xorx ^= xbits.bits[0];
-                    xory ^= ybits.bits[0];
-                    xorz ^= zbits.bits[0];
+            let mut xorx = false;
+            let mut xory = false;
+            let mut xorz = false;
+            for handle in handles {
+                let out = handle.await.unwrap();
+                match out {
+                    Err(e) => {
+                        eprintln!("Protocol failed {:?}", e);
+                    }
+                    Ok((xbits, ybits, zbits)) => {
+                        xorx ^= xbits.bits[0];
+                        xory ^= ybits.bits[0];
+                        xorz ^= zbits.bits[0];
+                    }
                 }
             }
+            assert_eq!(xorx & xory, xorz);
         }
-        assert_eq!(xorx & xory, xorz);
-    }
         Ok(())
     }
 
@@ -778,12 +792,15 @@ mod tests {
     async fn test_faand() -> Result<(), Error> {
         let parties = 3;
         let circuit_size = 100000;
-        let length = 2;
+        let length: usize = 5;
         let mut channels = SimpleChannel::channels(parties);
-        let mut handles: Vec<tokio::task::JoinHandle<Result<Vec<(ABits, ABits, ABits)>, crate::faand::Error>>> = vec![];
+        let mut handles: Vec<
+            tokio::task::JoinHandle<Result<Vec<(ABits, ABits, ABits)>, crate::faand::Error>>,
+        > = vec![];
         for i in 0..parties {
-            let handle: tokio::task::JoinHandle<Result<Vec<(ABits, ABits, ABits)>, crate::faand::Error>> =
-            tokio::spawn(faand(
+            let handle: tokio::task::JoinHandle<
+                Result<Vec<(ABits, ABits, ABits)>, crate::faand::Error>,
+            > = tokio::spawn(faand(
                 channels.pop().unwrap(),
                 parties - i - 1,
                 parties,
@@ -792,6 +809,9 @@ mod tests {
             ));
             handles.push(handle);
         }
+        let mut xorx = vec![false; length];
+        let mut xory = vec![false; length];
+        let mut xorz = vec![false; length];
         for handle in handles {
             let out = handle.await.unwrap();
             match out {
@@ -799,9 +819,16 @@ mod tests {
                     eprintln!("Protocol failed {:?}", e);
                 }
                 Ok(combined) => {
-                    println!("{:?}", combined);
+                    for i in 0..length {
+                        xorx[i] ^= combined[i].0.bits[0];
+                        xory[i] ^= combined[i].1.bits[0];
+                        xorz[i] ^= combined[i].2.bits[0];
+                    }
                 }
             }
+        }
+        for i in 0..length {
+            assert_eq!(xorx[i] & xory[i], xorz[i]);
         }
         Ok(())
     }
