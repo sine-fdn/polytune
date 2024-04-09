@@ -440,7 +440,7 @@ pub(crate) async fn flaand(
         hashedp[p] = channel.recv_from(p, "hashed").await?; //TODO: commitments
         xorhashed ^= hashedp[p];
     }
-    //println!("{:?} first {:?}", p_own, xorhashed);
+    assert_eq!(xorhashed, 0);
 
     //Independent Part without the hashing parts TODO combine the two together once working
     let mut phi: u128 = 0;
@@ -477,8 +477,7 @@ pub(crate) async fn flaand(
         hashp[p] = channel.recv_from(p, "hash").await?; //TODO: commitments
         xorhash ^= hashp[p];
     }
-    //println!("{:?} second {:?}", p_own, xorhash);
-    assert_eq!(xorhash ^ xorhashed, 0);
+    assert_eq!(xorhash, 0);
 
     Ok((xbits, ybits, zbits))
 }
@@ -503,20 +502,20 @@ pub async fn faand(
         triples.push(flaand(&mut channel, p_own, p_max, delta).await?);
     }
 
-    //TODO the random partitioning should probably be using the same randomness (?)
-    // Step 2 TODO Randomly partition all objects into l buckets, each with B objects
-    /*let mut rng = thread_rng();
-    let mut available: Vec<usize> = (0..length).collect();
-
-    let mut buckets: Vec<Vec<ABits>> = vec![vec![]; length];*/
+    // Step 2
+    let mut buckets: Vec<Vec<(ABits, ABits, ABits)>> = vec![vec![]; length];
 
     // Assign objects to buckets
-    /*for obj in triples {
+    let mut available: Vec<usize> = (0..length).collect();
+    let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
+    for obj in triples {
         let mut indeces: Vec<usize> = available.to_vec();
         indeces.retain(|&index| buckets[index].len() < b as usize);
 
         if !indeces.is_empty() {
-            let rand_index = rng.gen_range(0..indeces.len());
+            //let rand_index: usize = rng.gen_range(0..indeces.len());
+            let rand_index: usize = shared_rng.gen_range(0..indeces.len());
+            //let rand_index: usize = rand as usize % indeces.len();
             let ind = indeces[rand_index];
 
             buckets[ind].push(obj);
@@ -524,26 +523,13 @@ pub async fn faand(
                 available.retain(|&index| index != ind);
             }
         }
-    }*/
-
-    /*for (index, bucket) in buckets.iter().enumerate() {
-        println!("Bucket {}: {:?}", index, bucket);
-        println!("{:?} {:?}", buckets.len(), b);
-    }*/
-
-    let mut buckets: Vec<Vec<(ABits, ABits, ABits)>> = vec![vec![]; length];
-    for i in 0..length {
-        for _ in 0..b as usize {
-            buckets[i].push(triples.pop().unwrap());
-        }
     }
     //println!("{:?}", buckets);
 
     // Step 3
-    // TODO combine buckets two by two.
     let mut bucketcombined: Vec<(ABits, ABits, ABits)> = vec![];
     for b in buckets {
-        bucketcombined.push(combine_bucket(&mut channel, p_own, p_max, b).await?);
+        bucketcombined.push(combine_bucket(&mut channel, p_own, p_max, delta, b).await?);
     }
 
     Ok(bucketcombined)
@@ -554,12 +540,13 @@ pub(crate) async fn combine_bucket(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
+    delta: Delta,
     bucket: Vec<(ABits, ABits, ABits)>,
 ) -> Result<(ABits, ABits, ABits), Error> {
     let mut bucketcopy = bucket.clone();
     let mut result = bucketcopy.pop().unwrap();
     while let Some(triple) = bucketcopy.pop() {
-        result = combine_two_leaky_ands(channel, p_own, p_max, &result, &triple).await?;
+        result = combine_two_leaky_ands(channel, p_own, p_max, delta, &result, &triple).await?;
     }
     Ok(result)
 }
@@ -568,22 +555,26 @@ pub(crate) async fn combine_two_leaky_ands(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
+    delta: Delta,
     (x1, y1, z1): &(ABits, ABits, ABits),
     (x2, y2, z2): &(ABits, ABits, ABits),
 ) -> Result<(ABits, ABits, ABits), Error> {
     let mut d = y1.bits[0] ^ y2.bits[0];
+    let mut dmacs: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "dvalue", &d).await?;
-    }
-    let mut dp: Vec<bool> = vec![false; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        dp[p] = channel.recv_from(p, "dvalue").await?; //TOCHECK: is this how d should be "revealed"?
-        d ^= dp[p];
+        dmacs[p] = y1.macs[p][0] ^ y2.macs[p][0];
     }
 
-    // TODO Check MACs here
-    if false {
-        return Err(Error::WrongDMAC);
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "dvalue", &(d, dmacs[p])).await?;
+    }
+    let mut dp: Vec<(bool, u128)> = vec![(false, 0); p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        dp[p] = channel.recv_from(p, "dvalue").await?; //TOCHECK: is this how d should be "revealed"?
+        d ^= dp[p].0;
+        if (d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0] ^ delta.0) || (!d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0]) {   // TODO Check MACs here
+            //return Err(Error::WrongDMAC);
+        }
     }
 
     let mut xbits: Vec<bool> = vec![false; 1];
@@ -783,7 +774,7 @@ mod tests {
     async fn test_faand() -> Result<(), Error> {
         let parties = 3;
         let circuit_size = 100000;
-        let length: usize = 1;
+        let length: usize = 2;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<
             tokio::task::JoinHandle<Result<Vec<(ABits, ABits, ABits)>, crate::faand::Error>>,
