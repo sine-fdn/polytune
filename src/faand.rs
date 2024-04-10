@@ -373,6 +373,20 @@ pub(crate) async fn fhaand(
     Ok(v)
 }
 
+pub(crate) fn hash128(input: u128) -> u128 {
+    /*//let key: [u8; 32] = [1; 32];
+    //let res: [u8; 32] = blake3::keyed_hash(&key, &input.to_le_bytes()).into();
+    let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
+    let mut value1: u128 = 0;
+    //let mut value2: u128 = 0;
+    for i in 0..16 {
+        value1 |= (res[i] as u128) << (8 * i);
+        //value2 |= (res[i + 16] as u128) << (8 * i);
+    }
+    value1 //^ value2*/
+    input
+}
+
 /// Performs F_LaAND.
 pub(crate) async fn flaand(
     channel: &mut MsgChannel<impl Channel>,
@@ -415,49 +429,37 @@ pub(crate) async fn flaand(
 
     // Triple Checking
     // Step 4
-    let mut hashed: [u8; 32] = [0; 32];
-    let mut uijhash: Vec<[u8; 32]> = vec![[0; 32]; p_max];
-    let mut xkeys_phi: Vec<[u8; 32]> = vec![[0;32]; p_max];
-    let mut xkeys_phi_delta: Vec<[u8; 32]> = vec![[0;32]; p_max];
+
+    let mut hashed: u128 = 0; //TODO add back hashing
+    let mut uijhash: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        xkeys_phi[p] = blake3::hash(&xbits.keys[p][0].to_le_bytes()).into();
-        xkeys_phi_delta[p] = blake3::hash(&(xbits.keys[p][0] ^ delta.0).to_le_bytes()).into();
-        for i in 0..32 {
-            uijhash[p][i] = xkeys_phi[p][i] ^ xkeys_phi_delta[p][i];
-        }
+        uijhash[p] = hash128(xbits.keys[p][0] ^ delta.0) ^ hash128(xbits.keys[p][0]);
         channel.send_to(p, "uijh", &uijhash).await?;
     }
-    let mut uijphash: Vec<Vec<[u8; 32]>> = vec![vec![[0; 32]; p_max]; p_max];
-    let mut xmacs_phi: Vec<[u8; 32]> = vec![[0;32]; p_max];
+    let mut uijphash: Vec<Vec<u128>> = vec![vec![0; p_max]; p_max];
+    let mut xmacs_phihash: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         uijphash[p] = channel.recv_from(p, "uij").await?;
-        xmacs_phi[p] = blake3::hash(&xbits.macs[p][0].to_le_bytes()).into();
+        xmacs_phihash[p] = hash128(xbits.macs[p][0]);
         if xbits.bits[0] {
-            for i in 0..32 {
-                xmacs_phi[p][i] ^= uijphash[p][p_own][i];
-            }
+            xmacs_phihash[p] ^= uijphash[p][p_own];
         }
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
-        for i in 0..32 {
-            hashed[i] ^= xkeys_phi[p][i] ^ xmacs_phi[p][i];
-        }
+        hashed ^= xbits.keys[p][0] ^ xmacs_phihash[p];
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "hashed", &hashed).await?;
     }
-    let mut hashedp: Vec<[u8; 32]> = vec![[0; 32]; p_max];
-    let mut xorhashed = hashed;
+    let mut hashedp: Vec<u128> = vec![0; p_max];
+    let mut xorhashed: u128 = hashed;
     for p in (0..p_max).filter(|p| *p != p_own) {
         hashedp[p] = channel.recv_from(p, "hashed").await?; //TODO: commitments
-        for i in 0..32 {
-            xorhashed[i] ^= hashedp[p][i];
-        }
+        xorhashed ^= hashedp[p];
     }
-    if xorhashed != [0; 32] {
+    if xorhashed != 0 {
         return Err(Error::XorNotZero);
     }
-    println!("{:?}", xorhashed);
 
     //Independent Part without the hashing parts TODO combine the two together once working
     let mut phi: u128 = 0;
