@@ -66,7 +66,8 @@ async fn main() -> Result<(), Error> {
         Commands::Pre { urls } => {
             let parties = urls.len() - 1;
             let channel = HttpChannel::new(urls, parties).await?;
-            fpre(channel, parties).await.context("FPre")
+            fpre(channel, parties).await.context("FPre").unwrap();
+            Ok(())
         }
         Commands::Party {
             urls,
