@@ -374,17 +374,14 @@ pub(crate) async fn fhaand(
 }
 
 pub(crate) fn hash128(input: u128) -> u128 {
-    /*//let key: [u8; 32] = [1; 32];
-    //let res: [u8; 32] = blake3::keyed_hash(&key, &input.to_le_bytes()).into();
     let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
     let mut value1: u128 = 0;
-    //let mut value2: u128 = 0;
+    let mut value2: u128 = 0;
     for i in 0..16 {
         value1 |= (res[i] as u128) << (8 * i);
-        //value2 |= (res[i + 16] as u128) << (8 * i);
+        value2 |= (res[i + 16] as u128) << (8 * i);
     }
-    value1 //^ value2*/
-    input
+    value1 ^ value2
 }
 
 /// Performs F_LaAND.
@@ -429,11 +426,12 @@ pub(crate) async fn flaand(
 
     // Triple Checking
     // Step 4
-
-    let mut hashed: u128 = 0; //TODO add back hashing
+    let mut hashed: u128 = 0;
     let mut uijhash: Vec<u128> = vec![0; p_max];
+    let mut xkeys_phihash: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        uijhash[p] = hash128(xbits.keys[p][0] ^ delta.0) ^ hash128(xbits.keys[p][0]);
+        xkeys_phihash[p] = hash128(xbits.keys[p][0]);
+        uijhash[p] = hash128(xbits.keys[p][0] ^ delta.0) ^ xkeys_phihash[p];
         channel.send_to(p, "uijh", &uijhash).await?;
     }
     let mut uijphash: Vec<Vec<u128>> = vec![vec![0; p_max]; p_max];
@@ -446,7 +444,7 @@ pub(crate) async fn flaand(
         }
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
-        hashed ^= xbits.keys[p][0] ^ xmacs_phihash[p];
+        hashed ^= xkeys_phihash[p] ^ xmacs_phihash[p];
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "hashed", &hashed).await?;
