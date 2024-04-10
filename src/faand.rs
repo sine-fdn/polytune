@@ -32,6 +32,8 @@ pub enum Error {
     WrongDMAC,
     /// XOR of all values in FLaAND do not cancel out.
     XorNotZero,
+    /// Commitment of sent hash is wrong in FLaAND.
+    CommitmentNotMatching,
 }
 
 impl From<channel::Error> for Error {
@@ -454,13 +456,25 @@ pub(crate) async fn flaand(
     }
     hash ^= xbits.bits[0] as u128 * phi;
     hash ^= zbits.bits[0] as u128 * delta.0;
+    let comm: Commitment = commit(&hash.to_be_bytes());
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "hashcomm", &comm).await?;
+    }
+    let mut commp: Vec<Commitment> = vec![Commitment([0; 32]); p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        commp[p] = channel.recv_from(p, "hashcomm").await?;
+    }
+
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "hash", &hash).await?;
     }
     let mut hashp: Vec<u128> = vec![0; p_max];
     let mut xorhash: u128 = hash; // XOR for all parties, including p_own
     for p in (0..p_max).filter(|p| *p != p_own) {
-        hashp[p] = channel.recv_from(p, "hash").await?; //TODO: commitments
+        hashp[p] = channel.recv_from(p, "hash").await?;
+        if !open_commitment(&commp[p], &hashp[p].to_be_bytes()){
+            return Err(Error::CommitmentNotMatching);
+        }
         xorhash ^= hashp[p];
     }
 
