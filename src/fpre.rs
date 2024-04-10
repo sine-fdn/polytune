@@ -40,7 +40,10 @@ impl From<channel::Error> for Error {
 }
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
-pub async fn fpre(channel: impl Channel, parties: usize) -> Result<(), Error> {
+pub async fn fpre<C>(channel: C, parties: usize) -> Result<C, Error>
+where
+    C: Channel,
+{
     let mut channel = MsgChannel(channel);
     for p in 0..parties {
         channel.recv_from(p, "delta (fpre)").await?;
@@ -183,7 +186,7 @@ pub async fn fpre(channel: impl Channel, parties: usize) -> Result<(), Error> {
     for (p, and_shares) in and_shares.into_iter().enumerate() {
         channel.send_to(p, "AND shares (fpre)", &and_shares).await?;
     }
-    Ok(())
+    Ok(channel.0)
 }
 
 /// The global key known only to a single party that is used to authenticate bits.
