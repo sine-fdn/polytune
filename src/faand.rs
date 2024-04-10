@@ -446,7 +446,7 @@ pub(crate) async fn flaand(
     let mut xmacs_phi: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         uijp[p] = channel.recv_from(p, "uij").await?;
-        xmacs_phi[p] = hash128(xbits.macs[p][0]) ^ xbits.bits[0] as u128 * uijp[p][p_own];
+        xmacs_phi[p] = hash128(xbits.macs[p][0]) ^ (xbits.bits[0] as u128 * uijp[p][p_own]);
     }
 
     // Step 6
