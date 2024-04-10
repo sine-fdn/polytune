@@ -426,40 +426,6 @@ pub(crate) async fn flaand(
 
     // Triple Checking
     // Step 4
-    let mut hashed: u128 = 0;
-    let mut uijhash: Vec<u128> = vec![0; p_max];
-    let mut xkeys_phihash: Vec<u128> = vec![0; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        xkeys_phihash[p] = hash128(xbits.keys[p][0]);
-        uijhash[p] = hash128(xbits.keys[p][0] ^ delta.0) ^ xkeys_phihash[p];
-        channel.send_to(p, "uijh", &uijhash).await?;
-    }
-    let mut uijphash: Vec<Vec<u128>> = vec![vec![0; p_max]; p_max];
-    let mut xmacs_phihash: Vec<u128> = vec![0; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        uijphash[p] = channel.recv_from(p, "uij").await?;
-        xmacs_phihash[p] = hash128(xbits.macs[p][0]);
-        if xbits.bits[0] {
-            xmacs_phihash[p] ^= uijphash[p][p_own];
-        }
-    }
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        hashed ^= xkeys_phihash[p] ^ xmacs_phihash[p];
-    }
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "hashed", &hashed).await?;
-    }
-    let mut hashedp: Vec<u128> = vec![0; p_max];
-    let mut xorhashed: u128 = hashed;
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        hashedp[p] = channel.recv_from(p, "hashed").await?; //TODO: commitments
-        xorhashed ^= hashedp[p];
-    }
-    if xorhashed != 0 {
-        return Err(Error::XorNotZero);
-    }
-
-    //Independent Part without the hashing parts TODO combine the two together once working
     let mut phi: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
         phi ^= ybits.keys[p][0] ^ ybits.macs[p][0];
@@ -468,20 +434,23 @@ pub(crate) async fn flaand(
 
     // Step 5
     let mut uij: Vec<u128> = vec![0; p_max];
+    let mut xkeys_phi: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        uij[p] = phi;
+        xkeys_phi[p] = hash128(xbits.keys[p][0]);
+        uij[p] = hash128(xbits.keys[p][0] ^ delta.0) ^ xkeys_phi[p] ^ phi;
         channel.send_to(p, "uij", &uij).await?;
     }
     let mut uijp: Vec<Vec<u128>> = vec![vec![0; p_max]; p_max];
     let mut xmacs_phi: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         uijp[p] = channel.recv_from(p, "uij").await?;
-
-        xmacs_phi[p] ^= xbits.bits[0] as u128 * uijp[p][p_own];
+        xmacs_phi[p] = hash128(xbits.macs[p][0]) ^ xbits.bits[0] as u128 * uijp[p][p_own];
     }
+
+    // Step 6
     let mut hash: u128 = 0;
     for p in (0..p_max).filter(|p| *p != p_own) {
-        hash ^= zbits.keys[p][0] ^ zbits.macs[p][0] ^ xmacs_phi[p];
+        hash ^= zbits.keys[p][0] ^ zbits.macs[p][0] ^ xmacs_phi[p] ^ xkeys_phi[p];
     }
     hash ^= xbits.bits[0] as u128 * phi;
     hash ^= zbits.bits[0] as u128 * delta.0;
@@ -494,6 +463,8 @@ pub(crate) async fn flaand(
         hashp[p] = channel.recv_from(p, "hash").await?; //TODO: commitments
         xorhash ^= hashp[p];
     }
+
+    // Step 7
     if xorhash != 0 {
         return Err(Error::XorNotZero);
     }
