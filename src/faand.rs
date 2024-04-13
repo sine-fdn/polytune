@@ -1,4 +1,4 @@
-//! F_aAND protocol from WRK17b.
+//! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
 
 use std::vec;
 
@@ -13,6 +13,8 @@ use crate::{
     fpre::Delta,
 };
 
+const RHO: usize = 128;
+
 /// A custom error type.
 #[derive(Debug)]
 pub enum Error {
@@ -20,8 +22,6 @@ pub enum Error {
     ChannelError(channel::Error),
     /// The MAC is not the correct one in aBit.
     ABitMacMisMatch,
-    /// A calculated bit value is not 0 or 1.
-    BitNotBit,
     /// The xor of MACs is not equal to the XOR of corresponding keys or that XOR delta.
     AShareMacsMismatch,
     /// A commitment could not be opened.
@@ -44,7 +44,7 @@ impl From<channel::Error> for Error {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Commitment(pub(crate) [u8; 32]);
 
-/// Authenticated bits with the bit, keys and macs.
+/// Authenticated bits with the bits, keys (for other's bits) and macs (for own bit).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ABits {
     bits: Vec<bool>,
@@ -52,7 +52,7 @@ pub struct ABits {
     macs: Vec<Vec<u128>>,
 }
 
-// Commit to a u128 value using BLAKE3 hash function
+/// Commit to a u128 value using the BLAKE3 hash function.
 fn commit(value: &[u8]) -> Commitment {
     let mut hasher = Hasher::new();
     hasher.update(value);
@@ -62,7 +62,7 @@ fn commit(value: &[u8]) -> Commitment {
     Commitment(commitment)
 }
 
-// Open the commitment and reveal the original value
+/// Open the commitment and reveal the original value.
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     let mut hasher = Hasher::new();
     hasher.update(value);
@@ -70,6 +70,7 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     &commitment.0 == result.as_bytes()
 }
 
+/// Multi-party coin tossing to generate shared randomness.
 async fn shared_rng(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -104,7 +105,10 @@ async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
-/// Performs F_abit.
+/// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
+/// The sender sends bit x, the receiver inputs delta, and the receiver receives a random key,
+/// whereas the sender receives a MAC, which is the key XOR the bit times delta.
+/// This protocol performs multiple of these at once.
 pub(crate) async fn fabit(
     channel: &mut MsgChannel<impl Channel>,
     p_to: usize,
@@ -133,7 +137,7 @@ pub(crate) async fn fabit(
     }
 }
 
-/// Performs F_aBit^n.
+/// Protocol PI_aBit^n that performs F_aBit^n. A random bit-string is generated as well as the corresponding keys and MACs are sent to all parties.
 pub(crate) async fn fabitn(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -141,9 +145,6 @@ pub(crate) async fn fabitn(
     length: usize,
     delta: Delta,
 ) -> Result<ABits, Error> {
-    const RHO: usize = 128;
-
-    // Protocol Pi_aBit^n
     // Step 1 initialize random bitstring
     let len_abit = length + 2 * RHO;
     let mut x: Vec<bool> = (0..len_abit).map(|_| random()).collect();
@@ -173,14 +174,14 @@ pub(crate) async fn fabitn(
         for (&xb, &rb) in x.iter().zip(&randbits) {
             xj ^= xb & rb;
         }
-
         for p in (0..p_max).filter(|p| *p != p_own) {
-            let mut xjp: Vec<bool> = vec![false; p_max];
             channel.send_to(p, "xj", &xj).await?;
+        }
+        let mut xjp: Vec<bool> = vec![false; p_max];
+        for p in (0..p_max).filter(|p| *p != p_own) {
             xjp[p] = channel.recv_from(p, "xj").await?;
 
             let mut macint: u128 = 0;
-            let mut keyint: u128 = 0;
             for (i, rbit) in randbits.iter().enumerate().take(len_abit) {
                 if *rbit {
                     macint ^= xmacs[p][i];
@@ -189,8 +190,10 @@ pub(crate) async fn fabitn(
             channel
                 .send_to(p, "mac", &(macint, randbits.clone()))
                 .await?;
+        }
+        for p in (0..p_max).filter(|p| *p != p_own) {
             let (macp, randbitsp): (u128, Vec<bool>) = channel.recv_from(p, "mac").await?;
-
+            let mut keyint: u128 = 0;
             for (i, rbit) in randbitsp.iter().enumerate().take(len_abit) {
                 if *rbit {
                     keyint ^= xkeys[p][i];
@@ -215,7 +218,7 @@ pub(crate) async fn fabitn(
     })
 }
 
-/// Performs F_aShare.
+/// Protocol PI_aShare that performs F_aShare. Random bit strings are picked and random authenticated shares are distributed to the parties.
 pub(crate) async fn fashare(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -223,9 +226,10 @@ pub(crate) async fn fashare(
     length: usize,
     delta: Delta,
 ) -> Result<ABits, Error> {
-    const RHO: usize = 128;
+    //Step 1
     let len_ashare = length + RHO;
 
+    //Step 2
     let mut abits: ABits = fabitn(channel, p_own, p_max, len_ashare, delta).await?;
 
     // Protocol Pi_aShare
@@ -234,22 +238,23 @@ pub(crate) async fn fashare(
     let mut d0: Vec<u128> = vec![0; RHO]; // xorkeys
     let mut d1: Vec<u128> = vec![0; RHO]; // xorkeysdelta
     let mut dm: Vec<Vec<u8>> = vec![vec![]; RHO]; // multiple macs
-    let mut c0: Vec<Commitment> = vec![]; // commitment to d0
-    let mut c1: Vec<Commitment> = vec![]; // commitment to d1
-    let mut cm: Vec<Commitment> = vec![]; // commitment to dm
+    let mut c0: Vec<Commitment> = Vec::with_capacity(RHO); // commitment to d0
+    let mut c1: Vec<Commitment> = Vec::with_capacity(RHO); // commitment to d1
+    let mut cm: Vec<Commitment> = Vec::with_capacity(RHO); // commitment to dm
 
-    // 3/(a)
+    // Step 3/(a)
     for r in 0..RHO {
-        dm[r].push(abits.bits[length + r] as u8);
+        let mut dm_entry = Vec::with_capacity(p_max * 16);
+        dm_entry.push(abits.bits[length + r] as u8);
         for p in 0..p_max {
             if p != p_own {
                 d0[r] ^= abits.keys[p][length + r];
-                let macbytes = abits.macs[p][length + r].to_be_bytes().to_vec(); // 16 bytes
-                dm[r].extend(macbytes);
+                dm_entry.extend(&abits.macs[p][length + r].to_be_bytes());
             } else {
-                dm[r].extend(vec![0; 16]);
+                dm_entry.extend(&[0; 16]);
             }
         }
+        dm[r] = dm_entry;
         d1[r] = d0[r] ^ delta.0;
         c0.push(commit(&d0[r].to_be_bytes()));
         c1.push(commit(&d1[r].to_be_bytes()));
@@ -259,6 +264,8 @@ pub(crate) async fn fashare(
         vec![(vec![], vec![], vec![]); p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "commit", &(&c0, &c1, &cm)).await?;
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
         let result: (Vec<Commitment>, Vec<Commitment>, Vec<Commitment>) =
             channel.recv_from(p, "commit").await?;
         commitments[p] = result;
@@ -268,6 +275,8 @@ pub(crate) async fn fashare(
     let mut dmp: Vec<Vec<Vec<u8>>> = vec![vec![vec![]; RHO]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "verify", &dm).await?;
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
         dmp[p] = channel.recv_from(p, "verify").await?;
     }
     dmp[p_own] = dm;
@@ -283,13 +292,13 @@ pub(crate) async fn fashare(
             xorkeysbit[r] = d0[r];
         } else if combit[r] == 1 {
             xorkeysbit[r] = d1[r];
-        } else {
-            return Err(Error::BitNotBit);
         }
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "bitcom", &xorkeysbit).await?;
     }
     let mut xorkeysbitp: Vec<Vec<u128>> = vec![vec![0; RHO]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "bitcom", &xorkeysbit).await?;
         xorkeysbitp[p] = channel.recv_from(p, "bitcom").await?;
     }
 
@@ -307,13 +316,13 @@ pub(crate) async fn fashare(
             }
         }
     }
-
     for r in 0..RHO {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            if open_commitment(&commitments[p].0[r], &xorkeysbitp[p][r].to_be_bytes())
-                || open_commitment(&commitments[p].1[r], &xorkeysbitp[p][r].to_be_bytes())
+            let bj = &xorkeysbitp[p][r].to_be_bytes();
+            if open_commitment(&commitments[p].0[r], bj)
+                || open_commitment(&commitments[p].1[r], bj)
             {
-                if !xormacs[p][r] == xorkeysbitp[p][r] {
+                if xormacs[p][r] != xorkeysbitp[p][r] {
                     return Err(Error::AShareMacsMismatch);
                 }
             } else {
@@ -472,7 +481,7 @@ pub(crate) async fn flaand(
     let mut xorhash: u128 = hash; // XOR for all parties, including p_own
     for p in (0..p_max).filter(|p| *p != p_own) {
         hashp[p] = channel.recv_from(p, "hash").await?;
-        if !open_commitment(&commp[p], &hashp[p].to_be_bytes()){
+        if !open_commitment(&commp[p], &hashp[p].to_be_bytes()) {
             return Err(Error::CommitmentNotMatching);
         }
         xorhash ^= hashp[p];
@@ -576,8 +585,10 @@ pub(crate) async fn combine_two_leaky_ands(
     for p in (0..p_max).filter(|p| *p != p_own) {
         dp[p] = channel.recv_from(p, "dvalue").await?; //TOCHECK: is this how d should be "revealed"?
         d ^= dp[p].0;
-        if (d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0] ^ delta.0) || (!d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0]) {   // TODO Check MACs here
-            //return Err(Error::WrongDMAC);
+        if (d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0] ^ delta.0)
+            || (!d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0])
+        { // TODO Check MACs here
+             //return Err(Error::WrongDMAC);
         }
     }
 
