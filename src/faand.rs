@@ -13,7 +13,7 @@ use crate::{
     fpre::Delta,
 };
 
-const RHO: usize = 128;
+const RHO: usize = 40;
 
 /// A custom error type.
 #[derive(Debug)]
@@ -162,7 +162,7 @@ pub(crate) async fn fabitn(
         xkeys[p] = keyvec;
     }
 
-    // Steps 3 including verification of macs and keys
+    // Step 3 including verification of macs and keys
     let mut shared_rng = shared_rng(channel, p_own, p_max).await?;
     for _ in 0..2 * RHO {
         let randbits: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
@@ -814,6 +814,7 @@ mod tests {
         let mut xorx = vec![false; length];
         let mut xory = vec![false; length];
         let mut xorz = vec![false; length];
+        let mut combined_all: Vec<Vec<(ABits, ABits, ABits)>> = vec![vec![]; parties];
         for handle in handles {
             let out = handle.await.unwrap();
             match out {
@@ -826,7 +827,8 @@ mod tests {
                         xory[i] ^= combined[i].1.bits[0];
                         xorz[i] ^= combined[i].2.bits[0];
                         //println!("{:?}", combined);
-                    } //TODO Test MACs and KEYs
+                    }
+                    combined_all.push(combined);
                 }
             }
         }
