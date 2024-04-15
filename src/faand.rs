@@ -1,7 +1,5 @@
 //! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
 
-use std::vec;
-
 use blake3::Hasher;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -9,13 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     channel::{self, Channel, MsgChannel},
-    //fpre::{Auth, Delta, Key, Mac, Share},
     fpre::Delta,
 };
 
 const RHO: usize = 40;
 
-/// A custom error type.
+/// Errors occurring during preprocessing.
 #[derive(Debug)]
 pub enum Error {
     /// A message could not be sent or received.
@@ -37,6 +34,7 @@ impl From<channel::Error> for Error {
         Self::ChannelError(e)
     }
 }
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Commitment(pub(crate) [u8; 32]);
 
@@ -102,9 +100,10 @@ async fn shared_rng(
 }
 
 /// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
+///
 /// The sender sends bit x, the receiver inputs delta, and the receiver receives a random key,
-/// whereas the sender receives a MAC, which is the key XOR the bit times delta.
-/// This protocol performs multiple of these at once.
+/// whereas the sender receives a MAC, which is the key XOR the bit times delta. This protocol
+/// performs multiple of these at once.
 pub(crate) async fn fabit(
     channel: &mut MsgChannel<impl Channel>,
     p_to: usize,
@@ -133,7 +132,10 @@ pub(crate) async fn fabit(
     }
 }
 
-/// Protocol PI_aBit^n that performs F_aBit^n. A random bit-string is generated as well as the corresponding keys and MACs are sent to all parties.
+/// Protocol PI_aBit^n that performs F_aBit^n.
+///
+/// A random bit-string is generated as well as the corresponding keys and MACs are sent to all
+/// parties.
 pub(crate) async fn fabitn(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -214,7 +216,9 @@ pub(crate) async fn fabitn(
     })
 }
 
-/// Protocol PI_aShare that performs F_aShare. Random bit strings are picked and random authenticated shares are distributed to the parties.
+/// Protocol PI_aShare that performs F_aShare.
+///
+/// Random bit strings are picked and random authenticated shares are distributed to the parties.
 pub(crate) async fn fashare(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -336,8 +340,10 @@ pub(crate) async fn fashare(
     Ok(abits)
 }
 
-/// Protocol Pi_HaAND that performs F_HaAND. The XOR of xiyj values are generated obliviously,
-/// which is half of the z value in an authenticated share, i.e., a half-authenticated share.
+/// Protocol Pi_HaAND that performs F_HaAND.
+///
+/// The XOR of xiyj values are generated obliviously, which is half of the z value in an
+/// authenticated share, i.e., a half-authenticated share.
 pub(crate) async fn fhaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -383,9 +389,11 @@ pub(crate) async fn fhaand(
     Ok(v)
 }
 
-/// Hash 128 bits input 128 bits using BLAKE3. We hash into 256 bits and then xor the first 128 bits and the second 128 bits.
-/// In our case this works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing with
-/// u128s instead while still cancelling the hashes out if correct.
+/// Hash 128 bits input 128 bits using BLAKE3.
+///
+/// We hash into 256 bits and then xor the first 128 bits and the second 128 bits. In our case this
+/// works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing
+/// with u128s instead while still cancelling the hashes out if correct.
 pub(crate) fn hash128(input: u128) -> u128 {
     let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
     let mut value1: u128 = 0;
@@ -397,8 +405,10 @@ pub(crate) fn hash128(input: u128) -> u128 {
     value1 ^ value2
 }
 
-/// Protocol Pi_LaAND that performs F_LaAND, i.e., generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that
-/// the AND of the XORs of the x and y values equals to the XOR of the z values.
+/// Protocol Pi_LaAND that performs F_LaAND.
+///
+/// Generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that the AND of the XORs of the
+/// x and y values equals to the XOR of the z values.
 pub(crate) async fn flaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -420,7 +430,8 @@ pub(crate) async fn flaand(
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "esend", &e).await?;
     }
-    // if e is true (1), this is basically a negation of r and should be done as described in Section 2 of WRK17b, if e is false (0), this is a copy
+    // if e is true (1), this is basically a negation of r and should be done as described in
+    // Section 2 of WRK17b, if e is false (0), this is a copy
     let mut zkeys: Vec<Vec<u128>> = rbits.keys.clone();
     let zmacs: Vec<Vec<u128>> = rbits.macs.clone();
     for p in (0..p_max).filter(|p| *p != p_own) {
@@ -494,7 +505,9 @@ pub(crate) async fn flaand(
     Ok((xbits, ybits, zbits))
 }
 
-/// Protocol Pi_aAND that performs F_aAND. The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+/// Protocol Pi_aAND that performs F_aAND.
+///
+/// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 pub async fn faand(
     channel: impl Channel,
     p_own: usize,
@@ -525,9 +538,7 @@ pub async fn faand(
         indeces.retain(|&index| buckets[index].len() < b as usize);
 
         if !indeces.is_empty() {
-            //let rand_index: usize = rng.gen_range(0..indeces.len());
             let rand_index: usize = shared_rng.gen_range(0..indeces.len());
-            //let rand_index: usize = rand as usize % indeces.len();
             let ind = indeces[rand_index];
 
             buckets[ind].push(obj);
@@ -536,7 +547,6 @@ pub async fn faand(
             }
         }
     }
-    //println!("{:?}", buckets);
 
     // Step 3
     let mut bucketcombined: Vec<(ABits, ABits, ABits)> = vec![];
@@ -826,7 +836,6 @@ mod tests {
                         xorx[i] ^= combined[i].0.bits[0];
                         xory[i] ^= combined[i].1.bits[0];
                         xorz[i] ^= combined[i].2.bits[0];
-                        //println!("{:?}", combined);
                     }
                     combined_all.push(combined);
                 }
