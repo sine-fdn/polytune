@@ -94,6 +94,7 @@ async fn main() -> Result<(), Error> {
     tracing::info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    println!("Found {} active policies", policies.accepted.len());
     loop {
         for policy in &policies.accepted {
             if policy.leader == policy.party {
