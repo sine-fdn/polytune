@@ -26,14 +26,10 @@ pub enum Error {
     AShareMacsMismatch,
     /// A commitment could not be opened.
     CommitmentCouldNotBeOpened,
-    /// The check if the XOR fo all hashes is zero failed.
-    HashNotZero,
-    /// Wrong MAC of d when combining two leaky ANDs.
-    WrongDMAC,
     /// XOR of all values in FLaAND do not cancel out.
-    XorNotZero,
-    /// Commitment of sent hash is wrong in FLaAND.
-    CommitmentNotMatching,
+    LaANDXorNotZero,
+    /// Wrong MAC of d when combining two leaky ANDs.
+    AANDWrongDMAC,
 }
 
 impl From<channel::Error> for Error {
@@ -340,7 +336,8 @@ pub(crate) async fn fashare(
     Ok(abits)
 }
 
-/// Performs F_HaAND.
+/// Protocol Pi_HaAND that performs F_HaAND. The XOR of xiyj values are generated obliviously,
+/// which is half of the z value in an authenticated share, i.e., a half-authenticated share.
 pub(crate) async fn fhaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -353,6 +350,7 @@ pub(crate) async fn fhaand(
 
     // Step 1
     // Call FaShare to obtain <x>
+    // FaShare is called in FLaAND instead and x is provided as input
 
     //Step 2
     let mut v: bool = false;
@@ -380,10 +378,14 @@ pub(crate) async fn fhaand(
         }
         v ^= t;
     }
+
     //Step 3
     Ok(v)
 }
 
+/// Hash 128 bits input 128 bits using BLAKE3. We hash into 256 bits and then xor the first 128 bits and the second 128 bits.
+/// In our case this works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing with
+/// u128s instead while still cancelling the hashes out if correct.
 pub(crate) fn hash128(input: u128) -> u128 {
     let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
     let mut value1: u128 = 0;
@@ -395,14 +397,14 @@ pub(crate) fn hash128(input: u128) -> u128 {
     value1 ^ value2
 }
 
-/// Performs F_LaAND.
+/// Protocol Pi_LaAND that performs F_LaAND, i.e., generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that
+/// the AND of the XORs of the x and y values equals to the XOR of the z values.
 pub(crate) async fn flaand(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
     delta: Delta,
 ) -> Result<(ABits, ABits, ABits), Error> {
-    // Protocol Pi_LaAND
     // Triple computation
     // Step 1
     let xbits: ABits = fashare(channel, p_own, p_max, 1, delta).await?;
@@ -415,11 +417,9 @@ pub(crate) async fn flaand(
     // Step 3
     let z: bool = v ^ (xbits.bits[0] & ybits.bits[0]);
     let e: bool = z ^ rbits.bits[0];
-
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "esend", &e).await?;
     }
-
     // if e is true (1), this is basically a negation of r and should be done as described in Section 2 of WRK17b, if e is false (0), this is a copy
     let mut zkeys: Vec<Vec<u128>> = rbits.keys.clone();
     let zmacs: Vec<Vec<u128>> = rbits.macs.clone();
@@ -473,7 +473,6 @@ pub(crate) async fn flaand(
     for p in (0..p_max).filter(|p| *p != p_own) {
         commp[p] = channel.recv_from(p, "hashcomm").await?;
     }
-
     for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "hash", &hash).await?;
     }
@@ -482,20 +481,20 @@ pub(crate) async fn flaand(
     for p in (0..p_max).filter(|p| *p != p_own) {
         hashp[p] = channel.recv_from(p, "hash").await?;
         if !open_commitment(&commp[p], &hashp[p].to_be_bytes()) {
-            return Err(Error::CommitmentNotMatching);
+            return Err(Error::CommitmentCouldNotBeOpened);
         }
         xorhash ^= hashp[p];
     }
 
     // Step 7
     if xorhash != 0 {
-        return Err(Error::XorNotZero);
+        return Err(Error::LaANDXorNotZero);
     }
 
     Ok((xbits, ybits, zbits))
 }
 
-/// Performs Pi_aAND.
+/// Protocol Pi_aAND that performs F_aAND. The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 pub async fn faand(
     channel: impl Channel,
     p_own: usize,
@@ -548,8 +547,9 @@ pub async fn faand(
     Ok(bucketcombined)
 }
 
+/// Combine the whole bucket by combining elements two by two.
 pub(crate) async fn combine_bucket(
-    //TODO make this more efficient to do as a tree structure
+    // TODO make this more efficient to do as a tree structure
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
@@ -564,6 +564,7 @@ pub(crate) async fn combine_bucket(
     Ok(result)
 }
 
+/// Combine two leaky ANDs into one non-leaky AND.
 pub(crate) async fn combine_two_leaky_ands(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -572,26 +573,25 @@ pub(crate) async fn combine_two_leaky_ands(
     (x1, y1, z1): &(ABits, ABits, ABits),
     (x2, y2, z2): &(ABits, ABits, ABits),
 ) -> Result<(ABits, ABits, ABits), Error> {
+    // Step (a)
     let mut d = y1.bits[0] ^ y2.bits[0];
     let mut dmacs: Vec<u128> = vec![0; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         dmacs[p] = y1.macs[p][0] ^ y2.macs[p][0];
-    }
-
-    for p in (0..p_max).filter(|p| *p != p_own) {
         channel.send_to(p, "dvalue", &(d, dmacs[p])).await?;
     }
     let mut dp: Vec<(bool, u128)> = vec![(false, 0); p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         dp[p] = channel.recv_from(p, "dvalue").await?; //TOCHECK: is this how d should be "revealed"?
-        d ^= dp[p].0;
-        if (d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0] ^ delta.0)
-            || (!d && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0])
-        { // TODO Check MACs here
-             //return Err(Error::WrongDMAC);
+        if (dp[p].0 && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0] ^ delta.0)
+            || (!dp[p].0 && dp[p].1 != y1.keys[p][0] ^ y2.keys[p][0])
+        {
+            return Err(Error::AANDWrongDMAC);
         }
+        d ^= dp[p].0;
     }
 
+    //Step (b)
     let mut xbits: Vec<bool> = vec![false; 1];
     xbits[0] = x1.bits[0] ^ x2.bits[0];
     let mut xmacs = x1.macs.clone();
@@ -625,6 +625,7 @@ pub(crate) async fn combine_two_leaky_ands(
         keys: zkeys,
         macs: zmacs,
     };
+
     Ok((xres, y1.clone(), zres))
 }
 
@@ -649,16 +650,20 @@ mod tests {
 
         for i in 0..parties {
             let delta: Delta = Delta(random());
-            let channel = channels.pop().unwrap(); // Take ownership of the channel
+            let channel = channels.pop().unwrap();
             let handle = tokio::spawn(async move {
-                let mut msgchannel = MsgChannel(channel); // Move the channel into MsgChannel
+                let mut msgchannel = MsgChannel(channel);
                 fashare(&mut msgchannel, parties - i - 1, parties, length, delta)
                     .await
                     .map(|result| (parties - i - 1, delta, result))
             });
             handles.push(handle);
         }
-
+        let mut bits = vec![vec![false; length]; parties];
+        let mut macs_to_match = vec![vec![vec![0; length]; parties]; parties];
+        let mut keys_to_match = vec![vec![vec![0; length]; parties]; parties];
+        let mut deltas = vec![Delta(0); parties];
+        let mut party_num = parties;
         for handle in handles {
             let out = handle.await.unwrap();
             match out {
@@ -666,24 +671,26 @@ mod tests {
                     eprintln!("Protocol failed {:?}", e);
                 }
                 Ok((p_own, delta, abits)) => {
+                    party_num -= 1;
                     for l in 0..length {
-                        for p in 0..parties {
-                            if abits.bits[l] {
-                                if abits.keys[p] != []
-                                    && abits.macs[p_own] != []
-                                    && abits.keys[p][l] != abits.macs[p_own][l] ^ delta.0
-                                {
-                                    eprintln!("Failed FaShare!!!!!!!!!");
-                                }
-                            } else {
-                                if abits.keys[p] != []
-                                    && abits.macs[p_own] != []
-                                    && abits.keys[p][l] != abits.macs[p_own][l]
-                                {
-                                    eprintln!("Failed FaShare!!!!!!!!!");
-                                }
-                            }
+                        for p in (0..parties).filter(|p| *p != p_own) {
+                            deltas[party_num] = delta;
+                            bits[party_num][l] = abits.bits[l];
+                            macs_to_match[party_num][p][l] = abits.macs[p][l];
+                            keys_to_match[party_num][p][l] = abits.keys[p][l];
                         }
+                    }
+                }
+            }
+        }
+        for i in 0..parties {
+            for p in (0..parties).filter(|p| *p != i) {
+                for l in 0..length {
+                    if bits[i][l] && macs_to_match[i][p][l] ^ deltas[p].0 != keys_to_match[p][i][l]
+                    {
+                        eprintln!("Error in FaShare!");
+                    } else if !bits[i][l] && macs_to_match[i][p][l] != keys_to_match[p][i][l] {
+                        eprintln!("Error in FaShare!");
                     }
                 }
             }
@@ -745,43 +752,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_flaand() -> Result<(), Error> {
-        for _ in 0..1 {
-            let parties = 3;
-            let mut channels = SimpleChannel::channels(parties);
-            let mut handles: Vec<
-                tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>>,
-            > = vec![];
+        let parties = 3;
+        let mut channels = SimpleChannel::channels(parties);
+        let mut handles: Vec<
+            tokio::task::JoinHandle<Result<(ABits, ABits, ABits), crate::faand::Error>>,
+        > = vec![];
 
-            for i in 0..parties {
-                let delta: Delta = Delta(random());
-                let channel = channels.pop().unwrap();
-                let handle: tokio::task::JoinHandle<
-                    Result<(ABits, ABits, ABits), crate::faand::Error>,
-                > = tokio::spawn(async move {
-                    let mut msgchannel = MsgChannel(channel);
-                    flaand(&mut msgchannel, parties - i - 1, parties, delta).await
-                });
-                handles.push(handle);
-            }
+        for i in 0..parties {
+            let delta: Delta = Delta(random());
+            let channel = channels.pop().unwrap();
+            let handle: tokio::task::JoinHandle<
+                Result<(ABits, ABits, ABits), crate::faand::Error>,
+            > = tokio::spawn(async move {
+                let mut msgchannel = MsgChannel(channel);
+                flaand(&mut msgchannel, parties - i - 1, parties, delta).await
+            });
+            handles.push(handle);
+        }
 
-            let mut xorx = false;
-            let mut xory = false;
-            let mut xorz = false;
-            for handle in handles {
-                let out = handle.await.unwrap();
-                match out {
-                    Err(e) => {
-                        eprintln!("Protocol failed {:?}", e);
-                    }
-                    Ok((xbits, ybits, zbits)) => {
-                        xorx ^= xbits.bits[0];
-                        xory ^= ybits.bits[0];
-                        xorz ^= zbits.bits[0];
-                    }
+        let mut xorx = false;
+        let mut xory = false;
+        let mut xorz = false;
+        for handle in handles {
+            let out = handle.await.unwrap();
+            match out {
+                Err(e) => {
+                    eprintln!("Protocol failed {:?}", e);
+                }
+                Ok((xbits, ybits, zbits)) => {
+                    xorx ^= xbits.bits[0];
+                    xory ^= ybits.bits[0];
+                    xorz ^= zbits.bits[0];
                 }
             }
-            assert_eq!(xorx & xory, xorz);
         }
+        assert_eq!(xorx & xory, xorz);
         Ok(())
     }
 
