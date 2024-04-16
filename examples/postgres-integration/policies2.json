@@ -9,8 +9,8 @@
       ],
       "program": ".add.garble.rs",
       "leader": 0,
-      "party": 0,
-      "input": "0u32"
+      "party": 2,
+      "input": "2u32"
     }
   ]
 }

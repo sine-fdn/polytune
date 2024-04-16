@@ -4,12 +4,13 @@
       "participants": [
         "http://localhost:8000",
         "http://localhost:8001",
-        "http://localhost:8002"
+        "http://localhost:8002",
+        "http://localhost:8003"
       ],
       "program": ".add.garble.rs",
       "leader": 0,
       "party": 1,
-      "input": "3u32"
+      "input": "1u32"
     }
   ]
 }

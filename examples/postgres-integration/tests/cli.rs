@@ -1,6 +1,7 @@
 use std::{
     io::{BufRead, BufReader},
     process::{exit, Command, Stdio},
+    sync::mpsc::channel,
     thread::{self, sleep},
     time::Duration,
 };
@@ -11,7 +12,7 @@ fn simulate() {
     println!("\n\n--- {millis}ms ---\n\n");
     let mut children = vec![];
     let mut cmd = Command::new("cargo")
-        .args(["run", "--", "--port=8002", "--config=preprocessor.json"])
+        .args(["run", "--", "--port=8003", "--config=preprocessor.json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -31,7 +32,7 @@ fn simulate() {
         }
     });
     children.push(cmd);
-    for p in [1] {
+    for p in [1, 2] {
         let port = format!("--port=800{p}");
         let config = format!("--config=policies{p}.json");
         let args = vec!["run", "--", &port, &config];
@@ -66,11 +67,12 @@ fn simulate() {
     let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines();
     let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
     children.push(cmd);
+    let (s, r) = channel::<()>();
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line == "Output is 5u32" {
-                exit(0);
+            if line == "Output is 3u32" {
+                return s.send(()).unwrap();
             }
         }
     });
@@ -79,10 +81,15 @@ fn simulate() {
             eprintln!("party0> {line}");
         }
     });
-    sleep(Duration::from_secs(10));
-    eprintln!("Test did not complete!");
+    let result = r.recv_timeout(Duration::from_secs(10));
     for mut child in children {
         child.kill().unwrap();
     }
-    exit(-1);
+    match result {
+        Ok(_) => exit(0),
+        Err(_) => {
+            eprintln!("Test did not complete!");
+            exit(-1);
+        }
+    }
 }
