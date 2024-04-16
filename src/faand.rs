@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     channel::{self, Channel, MsgChannel},
-    fpre::Delta,
+    fpre::{Delta, Auth, Key, Mac, Share},
 };
 
 const RHO: usize = 40;
@@ -43,14 +43,6 @@ pub struct ABits {
     bits: Vec<bool>,
     keys: Vec<Vec<u128>>,
     macs: Vec<Vec<u128>>,
-}
-
-/// Authenticated bit with the bit, keys (for other's bits) and macs (for own bit).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ABit {
-    bit: bool,
-    keys: Vec<u128>,
-    macs: Vec<u128>,
 }
 
 /// Commit to a u128 value using the BLAKE3 hash function.
@@ -559,38 +551,19 @@ fn bucket_size(circuit_size: usize) -> usize {
     }
 }
 
-fn transform_abits(alltriples: (ABits, ABits, ABits), length: usize, p_max: usize, p_own: usize) -> Vec<(ABit, ABit, ABit)> {
-    let mut triples: Vec<(ABit, ABit, ABit)> = vec![];
-    let mut keys0: Vec<u128> = vec![0; p_max];
-    let mut keys1: Vec<u128> = vec![0; p_max];
-    let mut keys2: Vec<u128> = vec![0; p_max];
-    let mut macs0: Vec<u128> = vec![0; p_max];
-    let mut macs1: Vec<u128> = vec![0; p_max];
-    let mut macs2: Vec<u128> = vec![0; p_max];
+fn transform_abits(alltriples: (ABits, ABits, ABits), length: usize, p_max: usize, p_own: usize) -> Vec<(Share, Share, Share)> {
+    let mut triples: Vec<(Share, Share, Share)> = vec![];
+    let mut auth0 = Auth(vec![None; p_max]);
+    let mut auth1 = Auth(vec![None; p_max]);
+    let mut auth2 = Auth(vec![None; p_max]);
     for l in 0..length {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            keys0[p] = alltriples.0.keys[p][l];
-            keys1[p] = alltriples.1.keys[p][l];
-            keys2[p] = alltriples.2.keys[p][l];
-            macs0[p] = alltriples.0.macs[p][l];
-            macs1[p] = alltriples.1.macs[p][l];
-            macs2[p] = alltriples.2.macs[p][l];
+            auth0.0[p] = Some((Mac(alltriples.0.macs[p][l]), Key(alltriples.0.keys[p][l])));
+            auth1.0[p] = Some((Mac(alltriples.1.macs[p][l]), Key(alltriples.1.keys[p][l])));
+            auth2.0[p] = Some((Mac(alltriples.2.macs[p][l]), Key(alltriples.2.keys[p][l])));
         }
-        triples.push((ABit {
-            bit: alltriples.0.bits[l],
-            keys: keys0.clone(),
-            macs: macs0.clone(),
-        }, ABit {
-            bit: alltriples.1.bits[l],
-            keys: keys1.clone(),
-            macs: macs1.clone(),
-        }, ABit {
-            bit: alltriples.2.bits[l],
-            keys: keys2.clone(),
-            macs: macs2.clone(),
-        }))
+        triples.push((Share(alltriples.0.bits[l], auth0.clone()), Share(alltriples.1.bits[l], auth1.clone()), Share(alltriples.2.bits[l], auth2.clone())));
     }
-
     triples
 }
 
@@ -603,7 +576,7 @@ pub async fn faand(
     p_max: usize,
     circuit_size: usize,
     length: usize,
-) -> Result<Vec<(ABit, ABit, ABit)>, Error> {
+) -> Result<Vec<(Share, Share, Share)>, Error> {
     let delta: Delta = Delta(random());
     let mut channel = MsgChannel(channel);
 
@@ -617,7 +590,7 @@ pub async fn faand(
     let triples = transform_abits(alltriples, lprime, p_max, p_own);
 
     // Step 2
-    let mut buckets: Vec<Vec<(ABit, ABit, ABit)>> = vec![vec![]; length];
+    let mut buckets: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; length];
 
     // Assign objects to buckets
     let mut available: Vec<usize> = (0..length).collect();
@@ -637,7 +610,7 @@ pub async fn faand(
     }
 
     // Step 3
-    let mut bucketcombined: Vec<(ABit, ABit, ABit)> = vec![];
+    let mut bucketcombined: Vec<(Share, Share, Share)> = vec![];
     for b in buckets {
         bucketcombined.push(combine_bucket(&mut channel, p_own, p_max, delta, b).await?);
     }
@@ -652,8 +625,8 @@ pub(crate) async fn combine_bucket(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-    bucket: Vec<(ABit, ABit, ABit)>,
-) -> Result<(ABit, ABit, ABit), Error> {
+    bucket: Vec<(Share, Share, Share)>,
+) -> Result<(Share, Share, Share), Error> {
     let mut bucketcopy = bucket.clone();
     let mut result = bucketcopy.pop().unwrap();
     while let Some(triple) = bucketcopy.pop() {
@@ -668,21 +641,21 @@ pub(crate) async fn combine_two_leaky_ands(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-    (x1, y1, z1): &(ABit, ABit, ABit),
-    (x2, y2, z2): &(ABit, ABit, ABit),
-) -> Result<(ABit, ABit, ABit), Error> {
+    (x1, y1, z1): &(Share, Share, Share),
+    (x2, y2, z2): &(Share, Share, Share),
+) -> Result<(Share, Share, Share), Error> {
     // Step (a)
-    let mut d = y1.bit ^ y2.bit;
-    let mut dmacs: Vec<u128> = vec![0; p_max];
+    let mut d = y1.0 ^ y2.0;
+    let mut dmacs: Vec<Option<Mac>> = vec![None; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        dmacs[p] = y1.macs[p] ^ y2.macs[p];
+        dmacs[p] = Some(y1.1.0[p].unwrap().0 ^ y2.1.0[p].unwrap().0);
         channel.send_to(p, "dvalue", &(d, dmacs[p])).await?;
     }
-    let mut dp: Vec<(bool, u128)> = vec![(false, 0); p_max];
+    let mut dp: Vec<(bool, Option<Mac>)> = vec![(false, None); p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        dp[p] = channel.recv_from(p, "dvalue").await?; //TOCHECK: is this how d should be "revealed"?
-        if (dp[p].0 && dp[p].1 != y1.keys[p] ^ y2.keys[p] ^ delta.0)
-            || (!dp[p].0 && dp[p].1 != y1.keys[p] ^ y2.keys[p])
+        dp[p] = channel.recv_from(p, "dvalue").await?;
+        if (dp[p].0 && dp[p].1.unwrap().0 != y1.1.0[p].unwrap().1.0 ^ y2.1.0[p].unwrap().1.0 ^ delta.0) //y1.keys[p] ^ y2.keys[p] ^ delta.0)
+            || (!dp[p].0 && dp[p].1.unwrap().0 != y1.1.0[p].unwrap().1.0 ^ y2.1.0[p].unwrap().1.0)
         {
             return Err(Error::AANDWrongDMAC);
         }
@@ -690,37 +663,19 @@ pub(crate) async fn combine_two_leaky_ands(
     }
 
     //Step (b)
-    let xbit = x1.bit ^ x2.bit;
-    let mut xmacs = x1.macs.clone();
-    let mut xkeys = x1.keys.clone();
+    let xbit = x1.0 ^ x2.0;
+    let mut xauth: Auth = Auth(vec![None; p_max]);
     for p in (0..p_max).filter(|p| *p != p_own) {
-        xmacs[p] ^= x2.macs[p];
-        xkeys[p] ^= x2.keys[p];
+        xauth.0[p] = Some((x1.1.0[p].unwrap().0 ^ x2.1.0[p].unwrap().0, x1.1.0[p].unwrap().1 ^ x2.1.0[p].unwrap().1)); //(Mac, Key)
     }
-    let xres: ABit = ABit {
-        bit: xbit,
-        keys: xkeys,
-        macs: xmacs,
-    };
+    let xres: Share = Share(xbit, xauth);
 
-    let zbit = z1.bit ^ z2.bit ^ d & x2.bit;
-    let mut zmacs = z1.macs.clone();
-    let mut zkeys = z1.keys.clone();
+    let zbit = z1.0 ^ z2.0 ^ d & x2.0;
+    let mut zauth: Auth = Auth(vec![None; p_max]);
     for p in (0..p_max).filter(|p| *p != p_own) {
-        zmacs[p] ^= z2.macs[p];
-        zkeys[p] ^= z2.keys[p];
+        zauth.0[p] = Some((z1.1.0[p].unwrap().0 ^ z2.1.0[p].unwrap().0 ^ Mac(d as u128 * x2.1.0[p].unwrap().0.0), z1.1.0[p].unwrap().1 ^ z2.1.0[p].unwrap().1 ^ Key(d as u128 * x2.1.0[p].unwrap().1.0))); //(Mac, Key)
     }
-    if d {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            zmacs[p] ^= x2.macs[p];
-            zkeys[p] ^= x2.keys[p];
-        }
-    }
-    let zres: ABit = ABit {
-        bit: zbit,
-        keys: zkeys,
-        macs: zmacs,
-    };
+    let zres: Share = Share(zbit, zauth);
 
     Ok((xres, y1.clone(), zres))
 }
@@ -731,8 +686,8 @@ mod tests {
 
     use crate::{
         channel::{Error, MsgChannel, SimpleChannel},
-        faand::{faand, fashare, fhaand, flaand, shared_rng, ABits, ABit},
-        fpre::Delta,
+        faand::{faand, fashare, fhaand, flaand, shared_rng, ABits},
+        fpre::{Delta, Share},
     };
 
     #[tokio::test]
@@ -942,11 +897,11 @@ mod tests {
         let length: usize = 2;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<
-            tokio::task::JoinHandle<Result<Vec<(ABit, ABit, ABit)>, crate::faand::Error>>,
+            tokio::task::JoinHandle<Result<Vec<(Share, Share, Share)>, crate::faand::Error>>,
         > = vec![];
         for i in 0..parties {
             let handle: tokio::task::JoinHandle<
-                Result<Vec<(ABit, ABit, ABit)>, crate::faand::Error>,
+                Result<Vec<(Share, Share, Share)>, crate::faand::Error>,
             > = tokio::spawn(faand(
                 channels.pop().unwrap(),
                 parties - i - 1,
@@ -959,7 +914,7 @@ mod tests {
         let mut xorx = vec![false; length];
         let mut xory = vec![false; length];
         let mut xorz = vec![false; length];
-        let mut combined_all: Vec<Vec<(ABit, ABit, ABit)>> = vec![vec![]; parties];
+        let mut combined_all: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; parties];
         for handle in handles {
             let out = handle.await.unwrap();
             match out {
@@ -968,9 +923,9 @@ mod tests {
                 }
                 Ok(combined) => {
                     for i in 0..length {
-                        xorx[i] ^= combined[i].0.bit;
-                        xory[i] ^= combined[i].1.bit;
-                        xorz[i] ^= combined[i].2.bit;
+                        xorx[i] ^= combined[i].0.0;
+                        xory[i] ^= combined[i].1.0;
+                        xorz[i] ^= combined[i].2.0;
                     }
                     combined_all.push(combined);
                 }
