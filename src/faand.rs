@@ -39,14 +39,6 @@ impl From<channel::Error> for Error {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Commitment(pub(crate) [u8; 32]);
 
-/// Authenticated bits with the bits, keys (for other's bits) and macs (for own bit).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ABits {
-    bits: Vec<bool>,
-    keys: Vec<Vec<u128>>,
-    macs: Vec<Vec<u128>>,
-}
-
 /// Commit to a u128 value using the BLAKE3 hash function.
 fn commit(value: &[u8]) -> Commitment {
     let mut hasher = Hasher::new();
@@ -144,7 +136,7 @@ pub(crate) async fn fabitn(
     length: usize,
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
-) -> Result<ABits, Error> {
+) -> Result<Vec<Share>, Error> {
     // Step 1 initialize random bitstring
     let len_abit = length + 2 * RHO;
     let mut x: Vec<bool> = (0..len_abit).map(|_| random()).collect();
@@ -210,11 +202,15 @@ pub(crate) async fn fabitn(
         xkeys[p].truncate(length);
         xmacs[p].truncate(length);
     }
-    Ok(ABits {
-        bits: x,
-        keys: xkeys,
-        macs: xmacs,
-    })
+    let mut res: Vec<Share> = vec![];
+    for (l, xx) in x.iter().enumerate().take(length) {
+        let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; p_max];
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            authvec[p] = Some((Mac(xmacs[p][l]), Key(xkeys[p][l])));
+        }
+        res.push(Share(*xx, Auth(authvec)));
+    }
+    Ok(res)
 }
 
 /// Protocol PI_aShare that performs F_aShare.
@@ -227,12 +223,12 @@ pub(crate) async fn fashare(
     length: usize,
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
-) -> Result<ABits, Error> {
+) -> Result<Vec<Share>, Error> {
     //Step 1
     let len_ashare = length + RHO;
 
     //Step 2
-    let mut abits: ABits = fabitn(channel, p_own, p_max, len_ashare, delta, shared_rng).await?;
+    let mut shares = fabitn(channel, p_own, p_max, len_ashare, delta, shared_rng).await?;
 
     // Protocol Pi_aShare
     // Input: bits of len_ashare length, authenticated bits
@@ -247,11 +243,11 @@ pub(crate) async fn fashare(
     // Step 3/(a)
     for r in 0..RHO {
         let mut dm_entry = Vec::with_capacity(p_max * 16);
-        dm_entry.push(abits.bits[length + r] as u8);
+        dm_entry.push(shares[length + r].0 as u8);
         for p in 0..p_max {
             if p != p_own {
-                d0[r] ^= abits.keys[p][length + r];
-                dm_entry.extend(&abits.macs[p][length + r].to_be_bytes());
+                d0[r] ^= shares[length + r].1.0[p].unwrap().1.0;
+                dm_entry.extend(&shares[length + r].1.0[p].unwrap().0.0.to_be_bytes());
             } else {
                 dm_entry.extend(&[0; 16]);
             }
@@ -334,35 +330,8 @@ pub(crate) async fn fashare(
     }
 
     // Step 4
-    abits.bits.truncate(length);
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        abits.keys[p].truncate(length);
-        abits.macs[p].truncate(length);
-    }
-    Ok(abits)
-}
-
-/// Protocol PI_aShare that performs F_aShare and returns Shares.
-///
-/// Random bit strings are picked and random authenticated shares are distributed to the parties.
-pub(crate) async fn fashare_fpre(
-    channel: &mut MsgChannel<impl Channel>,
-    p_own: usize,
-    p_max: usize,
-    length: usize,
-    delta: Delta,
-    shared_rng: &mut ChaCha20Rng,
-) -> Result<Vec<Share>, Error> {
-    let mut res: Vec<Share> = vec![];
-    let abits: ABits = fashare(channel, p_own, p_max, length, delta, shared_rng).await?;
-    for l in 0..length {
-        let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; p_max];
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            authvec[p] = Some((Mac(abits.macs[p][l]), Key(abits.keys[p][l])));
-        }
-        res.push(Share(abits.bits[l], Auth(authvec)));
-    }
-    Ok(res)
+    shares.truncate(length);
+    Ok(shares)
 }
 
 /// Protocol Pi_HaAND that performs F_HaAND.
@@ -452,9 +421,9 @@ pub(crate) async fn flaand(
 ) -> Result<(Vec<Share>, Vec<Share>, Vec<Share>), Error> {
     // Triple computation
     // Step 1
-    let xbits = fashare_fpre(channel, p_own, p_max, length, delta, shared_rng).await?;
-    let ybits = fashare_fpre(channel, p_own, p_max, length, delta, shared_rng).await?;
-    let rbits = fashare_fpre(channel, p_own, p_max, length, delta, shared_rng).await?;
+    let xbits = fashare(channel, p_own, p_max, length, delta, shared_rng).await?;
+    let ybits = fashare(channel, p_own, p_max, length, delta, shared_rng).await?;
+    let rbits = fashare(channel, p_own, p_max, length, delta, shared_rng).await?;
 
     let mut yvec: Vec<bool> = vec![false; length];
     for l in 0..length {
@@ -734,7 +703,7 @@ mod tests {
 
     use crate::{
         channel::{Error, MsgChannel, SimpleChannel},
-        faand::{faand, fashare, fhaand, flaand, shared_rng, ABits, fashare_fpre},
+        faand::{faand, fashare, fhaand, flaand, shared_rng},
         fpre::{Delta, Share, Auth},
     };
 
@@ -744,7 +713,7 @@ mod tests {
         let length = 2;
         let mut channels = SimpleChannel::channels(parties);
         let mut handles: Vec<
-            tokio::task::JoinHandle<Result<(usize, Delta, ABits), crate::faand::Error>>,
+            tokio::task::JoinHandle<Result<(usize, Delta, Vec<Share>), crate::faand::Error>>,
         > = vec![];
 
         for i in 0..parties {
@@ -777,14 +746,14 @@ mod tests {
                 Err(e) => {
                     eprintln!("Protocol failed {:?}", e);
                 }
-                Ok((p_own, delta, abits)) => {
+                Ok((p_own, delta, shares)) => {
                     party_num -= 1;
                     for l in 0..length {
                         for p in (0..parties).filter(|p| *p != p_own) {
                             deltas[party_num] = delta;
-                            bits[party_num][l] = abits.bits[l];
-                            macs_to_match[party_num][p][l] = abits.macs[p][l];
-                            keys_to_match[party_num][p][l] = abits.keys[p][l];
+                            bits[party_num][l] = shares[l].0;
+                            macs_to_match[party_num][p][l] = shares[l].1.0[p].unwrap().0.0;
+                            keys_to_match[party_num][p][l] = shares[l].1.0[p].unwrap().1.0;
                         }
                     }
                 }
@@ -826,7 +795,7 @@ mod tests {
                 let mut check: Vec<bool> = vec![false; length];
                 let mut msgchannel = MsgChannel(channel);
                 let mut shared_rng = shared_rng(&mut msgchannel, parties - i - 1, parties).await?;
-                let xbits: Vec<Share> = fashare_fpre(
+                let xbits: Vec<Share> = fashare(
                     &mut msgchannel,
                     p_own,
                     parties,
@@ -835,7 +804,7 @@ mod tests {
                     &mut shared_rng,
                 )
                 .await?;
-                let ybits: Vec<Share> = fashare_fpre(
+                let ybits: Vec<Share> = fashare(
                     &mut msgchannel,
                     p_own,
                     parties,
@@ -1003,7 +972,7 @@ mod tests {
             let handle = tokio::spawn(async move {
                 let mut msgchannel = MsgChannel(channel);
                 let mut shared_rng = shared_rng(&mut msgchannel, parties - i - 1, parties).await?;
-                fashare_fpre(
+                fashare(
                     &mut msgchannel,
                     parties - i - 1,
                     parties,
