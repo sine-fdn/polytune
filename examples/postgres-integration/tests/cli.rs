@@ -71,7 +71,7 @@ fn simulate() {
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line == "Output is 3u32" {
+            if line == "Output is 58u32" {
                 return s.send(()).unwrap();
             }
         }

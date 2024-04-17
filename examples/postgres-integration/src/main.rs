@@ -1,35 +1,41 @@
-use anyhow::anyhow;
-use anyhow::{Context, Error};
-use axum::Json;
+use anyhow::{anyhow, bail, Context, Error};
 use axum::{
     body::Bytes,
     extract::{Path, State},
     routing::post,
-    Router,
+    Json, Router,
 };
 use clap::Parser;
-use parlay::garble_lang::literal::Literal;
 use parlay::{
     channel::Channel,
     fpre::fpre,
-    garble_lang::compile,
+    garble_lang::{
+        compile,
+        literal::{Literal, VariantLiteral},
+        token::SignedNumType,
+    },
     protocol::{mpc, Preprocessor},
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::borrow::BorrowMut;
-use std::process::exit;
-use std::sync::Arc;
-use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
-use tokio::sync::Mutex;
-use tokio::time::timeout;
+use sqlx::{postgres::PgPoolOptions, Row};
+use std::{
+    borrow::BorrowMut, net::SocketAddr, path::PathBuf, process::exit, result::Result, sync::Arc,
+    time::Duration,
+};
 use tokio::{
     fs,
-    sync::mpsc::{channel, Receiver, Sender},
-    time::sleep,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Mutex,
+    },
+    time::{sleep, timeout},
 };
 use tower_http::trace::TraceLayer;
 use url::Url;
+
+const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(5);
+const DEFAULT_MAX_ROWS: usize = 10;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
@@ -54,8 +60,9 @@ struct Policy {
     program: PathBuf,
     leader: usize,
     party: usize,
-    // TODO: replace with db connection info
     input: String,
+    db: Option<String>,
+    max_rows: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -65,12 +72,40 @@ struct PolicyRequest {
     leader: usize,
 }
 
-const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(5);
-
 type MpcState = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    /*let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect("postgres://postgres:test@localhost:5555/postgres")
+        .await?;
+    match sqlx::query("SELECT * FROM residents")
+        .fetch_all(&pool)
+        .await
+    {
+        Ok(rows) => {
+            for row in rows {
+                for c in 0..row.len() {
+                    if let Ok(s) = row.try_get::<String, _>(c) {
+                        print!("\"{s}\",")
+                    } else if let Ok(n) = row.try_get::<i32, _>(c) {
+                        print!("{n},")
+                    } else if let Ok(n) = row.try_get::<i64, _>(c) {
+                        print!("...{n},")
+                    } else {
+                        eprintln!("Could not decode column {c}");
+                    }
+                }
+                println!("");
+            }
+        }
+        Err(e) => {
+            eprintln!("{e}")
+        }
+    }
+
+    exit(0);*/
     let Cli { port, config } = Cli::parse();
     let policies = load_policies(config).await?;
     if policies.accepted.len() == 1 {
@@ -201,14 +236,62 @@ async fn execute_mpc(
     policy: &Policy,
 ) -> Result<Option<Literal>, Error> {
     let Policy {
+        program: _program,
         leader,
         participants,
         party,
         input,
-        ..
+        db,
+        max_rows,
     } = policy;
     let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
-    let input = prg.parse_arg(*party, input)?.as_bits();
+    let input = if let Some(db) = db {
+        println!("Connecting to {db}...");
+        let pool = PgPoolOptions::new().max_connections(5).connect(db).await?;
+        let rows = sqlx::query(input).fetch_all(&pool).await?;
+        println!("'{input}' returned {} rows in {db}", rows.len());
+        let mut rows_as_literals = vec![];
+        let max_rows = max_rows.unwrap_or(DEFAULT_MAX_ROWS);
+        for _ in 0..max_rows {
+            rows_as_literals.push(Literal::Enum(
+                format!("Row{party}"),
+                "None".to_string(),
+                VariantLiteral::Unit,
+            ));
+        }
+        for (r, row) in rows.iter().enumerate() {
+            let mut row_as_literal = vec![];
+            for c in 0..row.len() {
+                let field = if let Ok(_) = row.try_get::<String, _>(c) {
+                    todo!("String literals are not yet implemented");
+                } else if let Ok(b) = row.try_get::<bool, _>(c) {
+                    Literal::from(b)
+                } else if let Ok(n) = row.try_get::<i32, _>(c) {
+                    Literal::NumSigned(n as i64, SignedNumType::I32)
+                } else if let Ok(n) = row.try_get::<i64, _>(c) {
+                    Literal::NumSigned(n as i64, SignedNumType::I64)
+                } else {
+                    bail!("Could not decode column {c}");
+                };
+                row_as_literal.push(field);
+            }
+            if r >= max_rows {
+                eprintln!("Dropping record {r}");
+            } else {
+                let literal = Literal::Enum(
+                    format!("Row{party}"),
+                    "Some".to_string(),
+                    VariantLiteral::Tuple(row_as_literal),
+                );
+                println!("rows[{r}] = {literal}");
+                rows_as_literals[r] = literal;
+            }
+        }
+        let literal = Literal::Array(rows_as_literals);
+        prg.literal_arg(*party, literal)?.as_bits()
+    } else {
+        prg.parse_arg(*party, input)?.as_bits()
+    };
     let fpre = Preprocessor::TrustedDealer(participants.len() - 1);
     let p_out: Vec<_> = vec![*leader];
     let channel = {

@@ -7,7 +7,7 @@
         "http://localhost:8002",
         "http://localhost:8003"
       ],
-      "program": ".add.garble.rs",
+      "program": ".example.garble.rs",
       "leader": 0,
       "party": 2,
       "input": "2u32"

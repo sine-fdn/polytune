@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  db0:
+    image: postgres:16.2
+    restart: always
+    shm_size: 128mb
+    volumes:
+      - ./seeds/db0:/docker-entrypoint-initdb.d
+    ports:
+      - 5550:5432
+    environment:
+      POSTGRES_PASSWORD: test
+
+  db1:
+    image: postgres:16.2
+    restart: always
+    shm_size: 128mb
+    volumes:
+      - ./seeds/db1:/docker-entrypoint-initdb.d
+    ports:
+      - 5551:5432
+    environment:
+      POSTGRES_PASSWORD: test
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080

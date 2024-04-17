@@ -7,10 +7,12 @@
         "http://localhost:8002",
         "http://localhost:8003"
       ],
-      "program": ".add.garble.rs",
+      "program": ".example.garble.rs",
       "leader": 0,
       "party": 1,
-      "input": "1u32"
+      "input": "SELECT id, disabled FROM insurance",
+      "db": "postgres://postgres:test@localhost:5551/postgres",
+      "max_rows": 10
     }
   ]
 }
