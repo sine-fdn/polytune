@@ -340,6 +340,29 @@ pub(crate) async fn fashare(
     Ok(abits)
 }
 
+/// Protocol PI_aShare that performs F_aShare and returns Shares.
+///
+/// Random bit strings are picked and random authenticated shares are distributed to the parties.
+pub(crate) async fn fashare_fpre(
+    channel: &mut MsgChannel<impl Channel>,
+    p_own: usize,
+    p_max: usize,
+    length: usize,
+    delta: Delta,
+    shared_rng: &mut ChaCha20Rng,
+) -> Result<Vec<Share>, Error> {
+    let mut res: Vec<Share> = vec![];
+    let abits: ABits = fashare(channel, p_own, p_max, length, delta, shared_rng).await?;
+    for l in 0..length {
+        let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; p_max];
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            authvec[p] = Some((Mac(abits.macs[p][l]), Key(abits.keys[p][l])));
+        }
+        res.push(Share(abits.bits[l], Auth(authvec)));
+    }
+    Ok(res)
+}
+
 /// Protocol Pi_HaAND that performs F_HaAND.
 ///
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
@@ -586,7 +609,7 @@ pub async fn faand(
     let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
 
     // Step 1
-    let alltriples = flaand(&mut channel, p_own, p_max, delta, lprime, &mut shared_rng).await?; //TODO implement combining and bucketing for these
+    let alltriples = flaand(&mut channel, p_own, p_max, delta, lprime, &mut shared_rng).await?;
     let triples = transform_abits(alltriples, lprime, p_max, p_own);
 
     // Step 2
@@ -686,8 +709,8 @@ mod tests {
 
     use crate::{
         channel::{Error, MsgChannel, SimpleChannel},
-        faand::{faand, fashare, fhaand, flaand, shared_rng, ABits},
-        fpre::{Delta, Share},
+        faand::{faand, fashare, fhaand, flaand, shared_rng, ABits, fashare_fpre},
+        fpre::{Delta, Share, Auth},
     };
 
     #[tokio::test]
@@ -934,6 +957,79 @@ mod tests {
         for i in 0..length {
             assert_eq!(xorx[i] & xory[i], xorz[i]);
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn xor_homomorphic_mac() -> Result<(), Error> {
+        let parties = 2;
+        let length = 2;
+        let mut channels = SimpleChannel::channels(parties);
+        let mut handles: Vec<
+            tokio::task::JoinHandle<Result<(Delta, Vec<Share>), crate::faand::Error>>,
+        > = vec![];
+        for i in 0..parties {
+            let delta: Delta = Delta(random());
+            let channel = channels.pop().unwrap();
+            let handle = tokio::spawn(async move {
+                let mut msgchannel = MsgChannel(channel);
+                let mut shared_rng = shared_rng(&mut msgchannel, parties - i - 1, parties).await?;
+                fashare_fpre(
+                    &mut msgchannel,
+                    parties - i - 1,
+                    parties,
+                    length,
+                    delta,
+                    &mut shared_rng,
+                )
+                .await
+                .map(|result| (delta, result))
+            });
+            handles.push(handle);
+        }
+        let mut deltas = vec![Delta(0); parties];
+        let mut party_num = parties;
+        let mut shares_all: Vec<Vec<Share>> = vec![vec![]; parties];
+        for handle in handles {
+            let out = handle.await.unwrap();
+            match out {
+                Err(e) => {
+                    eprintln!("Protocol failed {:?}", e);
+                }
+                Ok((delta, shares)) => {
+                    party_num -= 1;
+                    deltas[party_num] = delta;
+                    shares_all[party_num] = shares;
+                }
+            }
+        }
+        let mut r = shares_all[0].clone().into_iter();
+        let mut s = shares_all[1].clone().into_iter();
+
+        let (auth_r1, auth_r2) = (r.next().unwrap(), r.next().unwrap());
+        let (auth_s1, auth_s2) = (s.next().unwrap(), s.next().unwrap());
+        let (Share(r1, Auth(mac_r1_key_s1)), Share(r2, Auth(mac_r2_key_s2))) = (auth_r1, auth_r2);
+        let (Share(s1, Auth(mac_s1_key_r1)), Share(s2, Auth(mac_s2_key_r2))) = (auth_s1, auth_s2);
+        let (mac_r1, key_s1) = mac_r1_key_s1[1].unwrap();
+        let (mac_r2, key_s2) = mac_r2_key_s2[1].unwrap();
+        let (mac_s1, key_r1) = mac_s1_key_r1[0].unwrap();
+        let (mac_s2, key_r2) = mac_s2_key_r2[0].unwrap();
+
+        let (r3, mac_r3, key_s3) = {
+            let r3 = r1 ^ r2;
+            let mac_r3 = mac_r1 ^ mac_r2;
+            let key_s3 = key_s1 ^ key_s2;
+            (r3, mac_r3, key_s3)
+        };
+        let (s3, mac_s3, key_r3) = {
+            let s3 = s1 ^ s2;
+            let mac_s3 = mac_s1 ^ mac_s2;
+            let key_r3 = key_r1 ^ key_r2;
+            (s3, mac_s3, key_r3)
+        };
+        // verify that the MAC is XOR-homomorphic:
+        assert_eq!(mac_r3, key_r3 ^ (r3 & deltas[1]));
+        assert_eq!(mac_s3, key_s3 ^ (s3 & deltas[0]));
         Ok(())
     }
 }
