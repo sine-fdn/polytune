@@ -248,7 +248,7 @@ impl BitXor for Key {
 /// party holds bit + MAC, with the other holding key + global key for the corresponding half of the
 /// bit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Share(pub(crate) bool, pub(crate) Auth);
+pub struct Share(pub(crate) bool, pub(crate) Auth);
 
 impl BitXor for &Share {
     type Output = Share;
