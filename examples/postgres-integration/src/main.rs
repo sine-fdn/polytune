@@ -262,14 +262,14 @@ async fn execute_mpc(
         for (r, row) in rows.iter().enumerate() {
             let mut row_as_literal = vec![];
             for c in 0..row.len() {
-                let field = if let Ok(_) = row.try_get::<String, _>(c) {
-                    todo!("String literals are not yet implemented");
+                let field = if let Ok(s) = row.try_get::<String, _>(c) {
+                    todo!("String literals are not yet implemented: '{s}'");
                 } else if let Ok(b) = row.try_get::<bool, _>(c) {
                     Literal::from(b)
                 } else if let Ok(n) = row.try_get::<i32, _>(c) {
                     Literal::NumSigned(n as i64, SignedNumType::I32)
                 } else if let Ok(n) = row.try_get::<i64, _>(c) {
-                    Literal::NumSigned(n as i64, SignedNumType::I64)
+                    Literal::NumSigned(n, SignedNumType::I64)
                 } else {
                     bail!("Could not decode column {c}");
                 };
