@@ -8,6 +8,7 @@ use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
+    faand::{self, faand, shared_rng},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
 };
@@ -19,6 +20,8 @@ pub(crate) struct GarbledGate(pub(crate) [Vec<u8>; 4]);
 /// A label for a particular wire in the circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Label(pub(crate) u128);
+
+const TRUSTEDDEALER: bool = true;
 
 impl BitXor for Label {
     type Output = Self;
@@ -69,6 +72,8 @@ pub enum Error {
     CircuitError(CircuitError),
     /// A table row could not be encrypted or decrypted.
     GarblingError(garble::Error),
+    /// Caused by the preprocessing protocol without trusted dealer.
+    PreprocessingError(faand::Error),
     /// Caused by the core SMPC protocol computation.
     MpcError(MpcError),
     /// The specified party does not exist in the circuit.
@@ -94,6 +99,7 @@ impl std::fmt::Display for Error {
             Error::ChannelError(e) => write!(f, "Channel error: {e:?}"),
             Error::CircuitError(e) => write!(f, "Circuit error: {e:?}"),
             Error::GarblingError(e) => write!(f, "Garbling error: {e:?}"),
+            Error::PreprocessingError(e) => write!(f, "Preprocessing error: {e:?}"),
             Error::MpcError(e) => write!(f, "MPC error: {e:?}"),
             Error::PartyDoesNotExist => write!(f, "The specified party does not exist"),
             Error::WrongInputSize { expected, actual } => {
@@ -120,6 +126,12 @@ impl From<CircuitError> for Error {
 impl From<garble::Error> for Error {
     fn from(e: garble::Error) -> Self {
         Self::GarblingError(e)
+    }
+}
+
+impl From<faand::Error> for Error {
+    fn from(e: faand::Error) -> Self {
+        Self::PreprocessingError(e)
     }
 }
 
@@ -165,8 +177,13 @@ pub fn simulate_mpc(
         let p_eval = 0;
         let p_pre = inputs.len();
 
-        let mut channels = SimpleChannel::channels(inputs.len() + 1);
-        tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
+        let mut channels: Vec<SimpleChannel>;
+        if TRUSTEDDEALER {
+            channels = SimpleChannel::channels(inputs.len() + 1);
+            tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
+        } else {
+            channels = SimpleChannel::channels(inputs.len());
+        }
 
         let mut parties = channels.into_iter().zip(inputs).enumerate();
         let Some(evaluator) = parties.next() else {
@@ -278,56 +295,69 @@ pub async fn mpc(
 
     // fn-independent preprocessing:
 
-    channel.send_to(p_fpre, "delta", &()).await?;
-    let delta: Delta = channel.recv_from(p_fpre, "delta").await?;
+    let delta: Delta;
+    if TRUSTEDDEALER {
+        channel.send_to(p_fpre, "delta", &()).await?;
+        delta = channel.recv_from(p_fpre, "delta").await?;
+    } else {
+        delta = Delta(random());
+    }
 
     let num_input_gates: usize = circuit.input_gates.iter().sum();
     let num_and_gates = circuit.and_gates();
     let num_gates = num_input_gates + circuit.gates.len();
     let secret_bits = num_input_gates + num_and_gates;
-    channel
-        .send_to(p_fpre, "random shares", &(secret_bits as u32))
-        .await?;
 
-    let random_shares: Vec<Share> = channel.recv_from(p_fpre, "random shares").await?;
-    let mut random_shares = random_shares.into_iter();
+    let random_shares: Vec<Share>;
+    let auth_bits: Vec<Share>;
+    let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
+    let mut labels: Vec<Label> = vec![Label(0); num_gates];
+    if TRUSTEDDEALER {
+        channel
+            .send_to(p_fpre, "random shares", &(secret_bits as u32))
+            .await?;
+        random_shares = channel.recv_from(p_fpre, "random shares").await?;
 
-    //let mut wire_shares_and_labels = vec![(Share(false, Auth(vec![])), Label(0)); num_gates];
-    let mut shares = vec![Share(false, Auth(vec![])); num_gates];
-    let mut labels = vec![Label(0); num_gates];
-    for (w, gate) in circuit.wires().iter().enumerate() {
-        if let Wire::Input(_) | Wire::And(_, _) = gate {
-            let Some(share) = random_shares.next() else {
-                return Err(MpcError::MissingShareForWire(w).into());
-            };
-            shares[w] = share;
-            if is_contrib {
-                labels[w] = Label(random());
+        let mut random_shares = random_shares.into_iter();
+        for (w, gate) in circuit.wires().iter().enumerate() {
+            if let Wire::Input(_) | Wire::And(_, _) = gate {
+                let Some(share) = random_shares.next() else {
+                    return Err(MpcError::MissingShareForWire(w).into());
+                };
+                shares[w] = share;
+                if is_contrib {
+                    labels[w] = Label(random());
+                }
             }
         }
-    }
 
-    // fn-dependent preprocessing:
+        // fn-dependent preprocessing:
 
-    let mut and_shares = Vec::new();
-    for (w, gate) in circuit.wires().iter().enumerate() {
-        match gate {
-            Wire::Input(_) => {}
-            Wire::Not(x) => {
-                shares[w] = shares[*x].clone();
-                labels[w] = labels[*x] ^ delta;
-            }
-            Wire::Xor(x, y) => {
-                shares[w] = &shares[*x] ^ &shares[*y];
-                labels[w] = labels[*x] ^ labels[*y];
-            }
-            Wire::And(x, y) => {
-                and_shares.push((shares[*x].clone(), shares[*y].clone()));
+        let mut and_shares = Vec::new();
+        for (w, gate) in circuit.wires().iter().enumerate() {
+            match gate {
+                Wire::Input(_) => {}
+                Wire::Not(x) => {
+                    shares[w] = shares[*x].clone();
+                    labels[w] = labels[*x] ^ delta;
+                }
+                Wire::Xor(x, y) => {
+                    shares[w] = &shares[*x] ^ &shares[*y];
+                    labels[w] = labels[*x] ^ labels[*y];
+                }
+                Wire::And(x, y) => {
+                    and_shares.push((shares[*x].clone(), shares[*y].clone()));
+                }
             }
         }
+
+        channel.send_to(p_fpre, "AND shares", &and_shares).await?;
+        auth_bits = channel.recv_from(p_fpre, "AND shares").await?;
+    } else {
+        let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
+        auth_bits = faand(&mut channel, p_own, p_max, num_and_gates, 100, &mut shared_rng, delta).await?.2;
     }
-    channel.send_to(p_fpre, "AND shares", &and_shares).await?;
-    let auth_bits: Vec<Share> = channel.recv_from(p_fpre, "AND shares").await?;
+
     let mut auth_bits = auth_bits.into_iter();
     let mut table_shares = vec![None; num_gates];
     let mut garbled_gates: Vec<Vec<Option<GarbledGate>>> = vec![vec![None; num_gates]; p_max];
