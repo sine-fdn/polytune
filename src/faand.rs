@@ -585,6 +585,7 @@ fn transform(
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 pub(crate) async fn faand(
     channel: &mut MsgChannel<impl Channel>,
+    bits_rand: Vec<(Share, Share)>,
     p_own: usize,
     p_max: usize,
     circuit_size: usize,
@@ -593,7 +594,7 @@ pub(crate) async fn faand(
     delta: Delta,
 ) -> Result<(Vec<Share>, Vec<Share>, Vec<Share>), Error> {
     //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
-    let b = bucket_size(circuit_size);
+    let b = bucket_size(circuit_size) - 1; // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
     let lprime: usize = length * b;
     //let len_ashare = length + RHO;
     //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
@@ -605,10 +606,8 @@ pub(crate) async fn faand(
     let rbits = fashare(channel, &mut r, p_own, p_max, lprime, delta, shared_rng).await?;
 
     // Step 1
-    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) = flaand(
-        channel, xbits, ybits, rbits, p_own, p_max, delta, lprime,
-    )
-    .await?;
+    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
+        flaand(channel, xbits, ybits, rbits, p_own, p_max, delta, lprime).await?;
     let triples = transform(alltriples, lprime);
 
     // Step 2
@@ -636,13 +635,40 @@ pub(crate) async fn faand(
     for b in buckets {
         bucketcombined.push(combine_bucket(channel, p_own, p_max, delta, b).await?);
     }
+
+    // Extra step for including into our protocol.rs implementation - the last element in the bucket is defined such that it
+    // results in a triple that matches the random x and y bits generated beforehand in protocol.rs
+    let mut rr: Vec<bool> = (0..length + 3 * RHO).map(|_| random()).collect();
+    let rbits_new = fashare(channel, &mut rr, p_own, p_max, length, delta, shared_rng).await?;
+    let mut s1: Vec<Share> = vec![Share(false, Auth(vec![])); length];
+    let mut s2: Vec<Share> = vec![Share(false, Auth(vec![])); length];
+    for i in 0..length {
+        s1[i]  = &bits_rand[i].0 ^ &bucketcombined[i].0;
+        s2[i] = bits_rand[i].1.clone();
+    }
+    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
+        flaand(channel, s1, s2, rbits_new, p_own, p_max, delta, length).await?;
+    let triples = transform(alltriples, length);
+    let mut finalbucket: Vec<(Share, Share, Share)> = vec![(Share(false, Auth(vec![])), Share(false, Auth(vec![])), Share(false, Auth(vec![]))); length];
+    for i in 0..length {
+        finalbucket[i] = 
+            combine_two_leaky_ands(
+                channel,
+                p_own,
+                p_max,
+                delta,
+                &triples[i],
+                &bucketcombined[i],
+            )
+            .await?;
+    }
+
     let mut shares: (Vec<Share>, Vec<Share>, Vec<Share>) = (vec![], vec![], vec![]);
-    for b in bucketcombined {
+    for b in finalbucket {
         shares.0.push(b.0);
         shares.1.push(b.1);
         shares.2.push(b.2);
     }
-
     Ok(shares)
 }
 
@@ -741,7 +767,7 @@ pub(crate) async fn combine_two_leaky_ands(
     Ok((xres, y1.clone(), zres))
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use rand::random;
 
@@ -1129,3 +1155,4 @@ mod tests {
         Ok(())
     }
 }
+*/

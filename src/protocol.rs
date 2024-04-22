@@ -8,7 +8,7 @@ use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
-    faand::{self, faand, shared_rng},
+    faand::{self, faand, fashare, shared_rng, RHO},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
 };
@@ -21,7 +21,7 @@ pub(crate) struct GarbledGate(pub(crate) [Vec<u8>; 4]);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Label(pub(crate) u128);
 
-const TRUSTEDDEALER: bool = true;
+const TRUSTEDDEALER: bool = false;
 
 impl BitXor for Label {
     type Output = Self;
@@ -312,50 +312,75 @@ pub async fn mpc(
     let auth_bits: Vec<Share>;
     let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
+    let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
     if TRUSTEDDEALER {
         channel
             .send_to(p_fpre, "random shares", &(secret_bits as u32))
             .await?;
         random_shares = channel.recv_from(p_fpre, "random shares").await?;
+    } else {
+        let mut x: Vec<bool> = (0..secret_bits + 3 * RHO).map(|_| random()).collect();
+        random_shares = fashare(
+            &mut channel,
+            &mut x,
+            p_own,
+            p_max,
+            secret_bits,
+            delta,
+            &mut shared_rng,
+        )
+        .await?;
+    }
 
-        let mut random_shares = random_shares.into_iter();
-        for (w, gate) in circuit.wires().iter().enumerate() {
-            if let Wire::Input(_) | Wire::And(_, _) = gate {
-                let Some(share) = random_shares.next() else {
-                    return Err(MpcError::MissingShareForWire(w).into());
-                };
-                shares[w] = share;
-                if is_contrib {
-                    labels[w] = Label(random());
-                }
+    let mut random_shares = random_shares.into_iter();
+    for (w, gate) in circuit.wires().iter().enumerate() {
+        if let Wire::Input(_) | Wire::And(_, _) = gate {
+            let Some(share) = random_shares.next() else {
+                return Err(MpcError::MissingShareForWire(w).into());
+            };
+            shares[w] = share;
+            if is_contrib {
+                labels[w] = Label(random());
             }
         }
+    }
 
-        // fn-dependent preprocessing:
+    // fn-dependent preprocessing:
 
-        let mut and_shares = Vec::new();
-        for (w, gate) in circuit.wires().iter().enumerate() {
-            match gate {
-                Wire::Input(_) => {}
-                Wire::Not(x) => {
-                    shares[w] = shares[*x].clone();
-                    labels[w] = labels[*x] ^ delta;
-                }
-                Wire::Xor(x, y) => {
-                    shares[w] = &shares[*x] ^ &shares[*y];
-                    labels[w] = labels[*x] ^ labels[*y];
-                }
-                Wire::And(x, y) => {
-                    and_shares.push((shares[*x].clone(), shares[*y].clone()));
-                }
+    let mut and_shares = Vec::new();
+    for (w, gate) in circuit.wires().iter().enumerate() {
+        match gate {
+            Wire::Input(_) => {}
+            Wire::Not(x) => {
+                shares[w] = shares[*x].clone();
+                labels[w] = labels[*x] ^ delta;
+            }
+            Wire::Xor(x, y) => {
+                shares[w] = &shares[*x] ^ &shares[*y];
+                labels[w] = labels[*x] ^ labels[*y];
+            }
+            Wire::And(x, y) => {
+                and_shares.push((shares[*x].clone(), shares[*y].clone()));
             }
         }
+    }
 
+    if TRUSTEDDEALER {
         channel.send_to(p_fpre, "AND shares", &and_shares).await?;
         auth_bits = channel.recv_from(p_fpre, "AND shares").await?;
     } else {
-        let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
-        auth_bits = faand(&mut channel, p_own, p_max, num_and_gates, 100, &mut shared_rng, delta).await?.2;
+        auth_bits = faand(
+            &mut channel,
+            and_shares,
+            p_own,
+            p_max,
+            num_and_gates, //TODO figure this out
+            num_and_gates,
+            &mut shared_rng,
+            delta,
+        )
+        .await?
+        .2;
     }
 
     let mut auth_bits = auth_bits.into_iter();
