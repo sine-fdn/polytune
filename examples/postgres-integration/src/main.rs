@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Error};
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     routing::post,
     Json, Router,
 };
@@ -12,7 +12,7 @@ use parlay::{
     garble_lang::{
         compile,
         literal::{Literal, VariantLiteral},
-        token::SignedNumType,
+        token::{SignedNumType, UnsignedNumType},
     },
     protocol::{mpc, Preprocessor},
 };
@@ -34,8 +34,9 @@ use tokio::{
 use tower_http::trace::TraceLayer;
 use url::Url;
 
-const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(5);
+const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_ROWS: usize = 10;
+const STR_LEN_BYTES: usize = 16;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
@@ -76,36 +77,6 @@ type MpcState = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    /*let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect("postgres://postgres:test@localhost:5555/postgres")
-        .await?;
-    match sqlx::query("SELECT * FROM residents")
-        .fetch_all(&pool)
-        .await
-    {
-        Ok(rows) => {
-            for row in rows {
-                for c in 0..row.len() {
-                    if let Ok(s) = row.try_get::<String, _>(c) {
-                        print!("\"{s}\",")
-                    } else if let Ok(n) = row.try_get::<i32, _>(c) {
-                        print!("{n},")
-                    } else if let Ok(n) = row.try_get::<i64, _>(c) {
-                        print!("...{n},")
-                    } else {
-                        eprintln!("Could not decode column {c}");
-                    }
-                }
-                println!("");
-            }
-        }
-        Err(e) => {
-            eprintln!("{e}")
-        }
-    }
-
-    exit(0);*/
     let Cli { port, config } = Cli::parse();
     let policies = load_policies(config).await?;
     if policies.accepted.len() == 1 {
@@ -123,6 +94,7 @@ async fn main() -> Result<(), Error> {
         .route("/run", post(run))
         .route("/msg/:from", post(msg))
         .with_state((policies.clone(), Arc::clone(&state)))
+        .layer(DefaultBodyLimit::disable())
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -168,10 +140,52 @@ async fn main() -> Result<(), Error> {
                     }
                 }
                 println!("All participants have accepted the session, starting calculation now...");
-                match execute_mpc(Arc::clone(&state), code, policy).await {
-                    Ok(Some(output)) => {
-                        println!("Output is {output}")
+                fn decode_literal(l: Literal) -> Result<Vec<Vec<String>>, String> {
+                    let Literal::Array(rows) = l else {
+                        return Err(format!("Expected an array of rows, but found {l}"));
+                    };
+                    let mut records = vec![];
+                    for row in rows {
+                        let row = match row {
+                            Literal::Tuple(row) => row,
+                            record => vec![record],
+                        };
+                        let mut record = vec![];
+                        fn stringify(elements: &[Literal]) -> Option<String> {
+                            let mut bytes = vec![];
+                            for e in elements {
+                                if let Literal::NumUnsigned(n, UnsignedNumType::U8) = e {
+                                    if *n != 0 {
+                                        bytes.push(*n as u8);
+                                    }
+                                } else {
+                                    return None;
+                                }
+                            }
+                            String::from_utf8(bytes).ok()
+                        }
+                        for col in row {
+                            record.push(match col {
+                                Literal::True => "true".to_string(),
+                                Literal::False => "false".to_string(),
+                                Literal::NumUnsigned(n, _) => n.to_string(),
+                                Literal::NumSigned(n, _) => n.to_string(),
+                                Literal::Array(elements) => match stringify(&elements) {
+                                    Some(s) => format!("'{s}'"),
+                                    None => format!("'{}'", Literal::Array(elements)),
+                                },
+                                l => format!("'{l}'"),
+                            });
+                        }
+                        records.push(record);
                     }
+                    Ok(records)
+                }
+                match execute_mpc(Arc::clone(&state), code, policy).await {
+                    Ok(Some(output)) => match decode_literal(output) {
+                        Ok(rows) => println!("MPC Output: {rows:?}"),
+                        Err(e) => eprintln!("MPC Error: {e}"),
+                    },
                     Ok(None) => {}
                     Err(e) => {
                         eprintln!("Error while executing MPC: {e}")
@@ -200,6 +214,7 @@ async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
     let app = Router::new()
         .route("/msg/:from", post(msg))
         .with_state((policies, Arc::new(Mutex::new(senders))))
+        .layer(DefaultBodyLimit::disable())
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -245,25 +260,39 @@ async fn execute_mpc(
         max_rows,
     } = policy;
     let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
+    println!(
+        "Trying to execute circuit with {}K gates ({}K AND gates)",
+        prg.circuit.gates.len() / 1000,
+        prg.circuit.and_gates() / 1000
+    );
     let input = if let Some(db) = db {
         println!("Connecting to {db}...");
         let pool = PgPoolOptions::new().max_connections(5).connect(db).await?;
         let rows = sqlx::query(input).fetch_all(&pool).await?;
         println!("'{input}' returned {} rows in {db}", rows.len());
-        let mut rows_as_literals = vec![];
         let max_rows = max_rows.unwrap_or(DEFAULT_MAX_ROWS);
-        for _ in 0..max_rows {
-            rows_as_literals.push(Literal::Enum(
+        let mut rows_as_literals = vec![
+            Literal::Enum(
                 format!("Row{party}"),
                 "None".to_string(),
                 VariantLiteral::Unit,
-            ));
-        }
+            );
+            max_rows
+        ];
         for (r, row) in rows.iter().enumerate() {
             let mut row_as_literal = vec![];
             for c in 0..row.len() {
                 let field = if let Ok(s) = row.try_get::<String, _>(c) {
-                    todo!("String literals are not yet implemented: '{s}'");
+                    let mut fixed_str =
+                        vec![Literal::NumUnsigned(0, UnsignedNumType::U8); STR_LEN_BYTES];
+                    for (i, b) in s.as_bytes().into_iter().enumerate() {
+                        if i < STR_LEN_BYTES {
+                            fixed_str[i] = Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
+                        } else {
+                            bail!("String is longer than {STR_LEN_BYTES} bytes: '{s}'");
+                        }
+                    }
+                    Literal::Array(fixed_str)
                 } else if let Ok(b) = row.try_get::<bool, _>(c) {
                     Literal::from(b)
                 } else if let Ok(n) = row.try_get::<i32, _>(c) {
@@ -374,6 +403,8 @@ impl Channel for HttpChannel {
     async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), Self::SendError> {
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
+        let mb = msg.len() as f64 / 1024.0 / 1024.0;
+        println!("{} -> {} ({:.2}MB)", self.party, p, mb,);
         loop {
             match client.post(&url).body(msg.clone()).send().await?.status() {
                 StatusCode::OK => return Ok(()),
@@ -387,7 +418,7 @@ impl Channel for HttpChannel {
     }
 
     async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, Self::RecvError> {
-        Ok(timeout(Duration::from_secs(10), self.recv[p].recv())
+        Ok(timeout(Duration::from_secs(60), self.recv[p].recv())
             .await
             .context(format!("recv_bytes_from(p = {p})"))?
             .unwrap_or_default())

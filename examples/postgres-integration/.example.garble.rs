@@ -1,30 +1,28 @@
 enum Row0 {
     None,
-    Some(i32, i32),
+    Some(i32, [u8; 16], i32),
 }
 
 enum Row1 {
     None,
-    Some(i32, bool),
+    Some(i32, [u8; 16], bool),
 }
 
-pub fn main(residents: [Row0; 10], insurance: [Row1; 10], z: u32) -> u32 {
-    let mut result = 0u32;
-    for row in residents {
-        match row {
-            Row0::Some(id, age) => result = result + (age as u32),
-            Row0::None => {}
-        }
-    }
-    for row in insurance {
-        match row {
-            Row1::Some(id, disabled) => {
-                if disabled == true {
-                    result = result + 1u32;
+pub fn main(residents: [Row0; 4], insurance: [Row1; 4], age_threshold: u32) -> [[u8; 16]; 4] {
+    let mut result = [[0u8; 16]; 4];
+    let mut i = 0usize;
+    for resident in residents {
+        for insurance in insurance {
+            match (resident, insurance) {
+                (Row0::Some(_, name0, age), Row1::Some(_, name1, health_problems)) => {
+                    if name0 == name1 && health_problems == true && age > (age_threshold as i32) {
+                        result[i] = name0;
+                        i = i + 1usize;
+                    }
                 }
+                _ => {}
             }
-            Row1::None => {}
         }
     }
-    result + z
+    result
 }

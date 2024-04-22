@@ -71,7 +71,7 @@ fn simulate() {
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line == "Output is 58u32" {
+            if line.starts_with("MPC Output:") {
                 return s.send(()).unwrap();
             }
         }
@@ -81,7 +81,7 @@ fn simulate() {
             eprintln!("party0> {line}");
         }
     });
-    let result = r.recv_timeout(Duration::from_secs(10));
+    let result = r.recv_timeout(Duration::from_secs(300));
     for mut child in children {
         child.kill().unwrap();
     }

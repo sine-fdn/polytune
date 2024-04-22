@@ -10,9 +10,9 @@
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 0,
-      "input": "SELECT id, age FROM residents",
+      "input": "SELECT id, name, age FROM residents",
       "db": "postgres://postgres:test@localhost:5550/postgres",
-      "max_rows": 10
+      "max_rows": 4
     }
   ]
 }

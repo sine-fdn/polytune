@@ -10,9 +10,9 @@
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 1,
-      "input": "SELECT id, disabled FROM insurance",
+      "input": "SELECT id, name, disabled FROM insurance",
       "db": "postgres://postgres:test@localhost:5551/postgres",
-      "max_rows": 10
+      "max_rows": 4
     }
   ]
 }
