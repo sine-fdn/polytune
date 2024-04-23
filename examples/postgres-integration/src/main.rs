@@ -62,8 +62,10 @@ struct Policy {
     leader: usize,
     party: usize,
     input: String,
-    db: Option<String>,
+    input_db: Option<String>,
     max_rows: Option<usize>,
+    output: Option<String>,
+    output_db: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -183,7 +185,30 @@ async fn main() -> Result<(), Error> {
                 }
                 match execute_mpc(Arc::clone(&state), code, policy).await {
                     Ok(Some(output)) => match decode_literal(output) {
-                        Ok(rows) => println!("MPC Output: {rows:?}"),
+                        Ok(rows) => {
+                            let n_rows = rows.len();
+                            let Policy {
+                                output, output_db, ..
+                            } = policy;
+                            if let (Some(output_db), Some(output)) = (output_db, output) {
+                                println!("Connecting to {output_db}...");
+                                let pool = PgPoolOptions::new()
+                                    .max_connections(5)
+                                    .connect(output_db)
+                                    .await?;
+                                for row in rows {
+                                    let mut query = sqlx::query(output);
+                                    for field in row {
+                                        query = query.bind(field);
+                                    }
+                                    let rows = query.execute(&pool).await?.rows_affected();
+                                    println!("Inserted {rows} row(s)");
+                                }
+                            } else {
+                                println!("No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows");
+                            }
+                            println!("MPC Output: {n_rows} rows")
+                        }
                         Err(e) => eprintln!("MPC Error: {e}"),
                     },
                     Ok(None) => {}
@@ -256,8 +281,10 @@ async fn execute_mpc(
         participants,
         party,
         input,
-        db,
+        input_db: db,
         max_rows,
+        output: _output,
+        output_db: _output_db,
     } = policy;
     let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
     println!(

@@ -11,8 +11,10 @@
       "leader": 0,
       "party": 0,
       "input": "SELECT id, name, age FROM residents",
-      "db": "postgres://postgres:test@localhost:5550/postgres",
-      "max_rows": 4
+      "input_db": "postgres://postgres:test@localhost:5550/postgres",
+      "max_rows": 4,
+      "output": "INSERT INTO results (name) VALUES ($1)",
+      "output_db": "postgres://postgres:test@localhost:5555/postgres"
     }
   ]
 }

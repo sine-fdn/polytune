@@ -22,6 +22,17 @@ services:
     environment:
       POSTGRES_PASSWORD: test
 
+  db_out:
+    image: postgres:16.2
+    restart: always
+    shm_size: 128mb
+    volumes:
+      - ./seeds/db_out:/docker-entrypoint-initdb.d
+    ports:
+      - 5555:5432
+    environment:
+      POSTGRES_PASSWORD: test
+
   adminer:
     image: adminer
     restart: always
