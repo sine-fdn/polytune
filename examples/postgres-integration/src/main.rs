@@ -32,6 +32,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tower_http::trace::TraceLayer;
+use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
 const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(30);
@@ -64,6 +65,7 @@ struct Policy {
     input: String,
     input_db: Option<String>,
     max_rows: Option<usize>,
+    setup: Option<String>,
     output: Option<String>,
     output_db: Option<String>,
 }
@@ -79,16 +81,16 @@ type MpcState = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    tracing_subscriber::fmt::init();
     let Cli { port, config } = Cli::parse();
     let policies = load_policies(config).await?;
     if policies.accepted.len() == 1 {
         let policy = &policies.accepted[0];
         if policy.input.is_empty() {
-            println!("Running as preprocessor...");
+            info!("Running as preprocessor...");
             return run_fpre(port, policy.participants.clone()).await;
         }
     }
-    tracing_subscriber::fmt::init();
 
     let state = Arc::new(Mutex::new(vec![]));
 
@@ -100,20 +102,20 @@ async fn main() -> Result<(), Error> {
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    tracing::info!("listening on {}", addr);
+    info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    println!("Found {} active policies", policies.accepted.len());
+    info!("Found {} active policies", policies.accepted.len());
     loop {
         for policy in &policies.accepted {
             if policy.leader == policy.party {
-                println!(
+                info!(
                     "Acting as leader (party {}) for program {}",
                     policy.leader,
                     policy.program.display()
                 );
                 let Ok(code) = fs::read_to_string(&policy.program).await else {
-                    eprintln!("Could not load program {:?}", &policy.program);
+                    error!("Could not load program {:?}", &policy.program);
                     continue;
                 };
                 let hash = blake3::hash(code.as_bytes()).to_string();
@@ -125,7 +127,7 @@ async fn main() -> Result<(), Error> {
                 };
                 for party in policy.participants.iter().rev().skip(1).rev() {
                     if party != &policy.participants[policy.party] {
-                        println!("Waiting for confirmation from party {party}");
+                        info!("Waiting for confirmation from party {party}");
                         let url = format!("{party}run");
                         match client
                             .post(&url)
@@ -136,12 +138,12 @@ async fn main() -> Result<(), Error> {
                         {
                             StatusCode::OK => {}
                             code => {
-                                eprintln!("Unexpected response while trying to trigger execution for {url}: {code}");
+                                error!("Unexpected response while trying to trigger execution for {url}: {code}");
                             }
                         }
                     }
                 }
-                println!("All participants have accepted the session, starting calculation now...");
+                info!("All participants have accepted the session, starting calculation now...");
                 fn decode_literal(l: Literal) -> Result<Vec<Vec<String>>, String> {
                     let Literal::Array(rows) = l else {
                         return Err(format!("Expected an array of rows, but found {l}"));
@@ -188,32 +190,40 @@ async fn main() -> Result<(), Error> {
                         Ok(rows) => {
                             let n_rows = rows.len();
                             let Policy {
-                                output, output_db, ..
+                                setup,
+                                output,
+                                output_db,
+                                ..
                             } = policy;
                             if let (Some(output_db), Some(output)) = (output_db, output) {
-                                println!("Connecting to {output_db}...");
+                                info!("Connecting to output db at {output_db}...");
                                 let pool = PgPoolOptions::new()
                                     .max_connections(5)
                                     .connect(output_db)
                                     .await?;
+                                if let Some(setup) = setup {
+                                    let rows_affected =
+                                        sqlx::query(setup).execute(&pool).await?.rows_affected();
+                                    debug!("{rows_affected} rows affected by '{setup}'");
+                                }
                                 for row in rows {
                                     let mut query = sqlx::query(output);
                                     for field in row {
                                         query = query.bind(field);
                                     }
                                     let rows = query.execute(&pool).await?.rows_affected();
-                                    println!("Inserted {rows} row(s)");
+                                    debug!("Inserted {rows} row(s)");
                                 }
                             } else {
-                                println!("No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows");
+                                warn!("No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows");
                             }
-                            println!("MPC Output: {n_rows} rows")
+                            info!("MPC Output: {n_rows} rows")
                         }
-                        Err(e) => eprintln!("MPC Error: {e}"),
+                        Err(e) => error!("MPC Error: {e}"),
                     },
                     Ok(None) => {}
                     Err(e) => {
-                        eprintln!("Error while executing MPC: {e}")
+                        error!("Error while executing MPC: {e}")
                     }
                 }
             }
@@ -224,8 +234,6 @@ async fn main() -> Result<(), Error> {
 
 async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
     let parties = urls.len() - 1;
-
-    tracing_subscriber::fmt::init();
 
     let mut senders = vec![];
     let mut receivers = vec![];
@@ -243,7 +251,7 @@ async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    tracing::info!("listening on {}", addr);
+    info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
@@ -253,18 +261,18 @@ async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
         recv: receivers,
     };
     loop {
-        println!("Running FPre...");
+        info!("Running FPre...");
         channel = fpre(channel, parties).await.context("FPre")?;
     }
 }
 
 async fn load_policies(path: PathBuf) -> Result<Policies, Error> {
     let Ok(policies) = fs::read_to_string(&path).await else {
-        eprintln!("Could not find '{}', exiting...", path.display());
+        error!("Could not find '{}', exiting...", path.display());
         exit(-1);
     };
     let Ok(policies) = serde_json::from_str::<Policies>(&policies) else {
-        eprintln!("'{}' has an invalid format, exiting...", path.display());
+        error!("'{}' has an invalid format, exiting...", path.display());
         exit(-1);
     };
     Ok(policies)
@@ -283,20 +291,21 @@ async fn execute_mpc(
         input,
         input_db: db,
         max_rows,
+        setup: _setup,
         output: _output,
         output_db: _output_db,
     } = policy;
     let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
-    println!(
+    info!(
         "Trying to execute circuit with {}K gates ({}K AND gates)",
         prg.circuit.gates.len() / 1000,
         prg.circuit.and_gates() / 1000
     );
     let input = if let Some(db) = db {
-        println!("Connecting to {db}...");
+        info!("Connecting to input db at {db}...");
         let pool = PgPoolOptions::new().max_connections(5).connect(db).await?;
         let rows = sqlx::query(input).fetch_all(&pool).await?;
-        println!("'{input}' returned {} rows in {db}", rows.len());
+        info!("'{input}' returned {} rows from {db}", rows.len());
         let max_rows = max_rows.unwrap_or(DEFAULT_MAX_ROWS);
         let mut rows_as_literals = vec![
             Literal::Enum(
@@ -332,14 +341,14 @@ async fn execute_mpc(
                 row_as_literal.push(field);
             }
             if r >= max_rows {
-                eprintln!("Dropping record {r}");
+                warn!("Dropping record {r}");
             } else {
                 let literal = Literal::Enum(
                     format!("Row{party}"),
                     "Some".to_string(),
                     VariantLiteral::Tuple(row_as_literal),
                 );
-                println!("rows[{r}] = {literal}");
+                debug!("rows[{r}] = {literal}");
                 rows_as_literals[r] = literal;
             }
         }
@@ -385,27 +394,27 @@ async fn run(
     for policy in policies.accepted {
         if policy.participants == body.participants && policy.leader == body.leader {
             let Ok(code) = fs::read_to_string(&policy.program).await else {
-                eprintln!("Could not load program {:?}", &policy.program);
+                error!("Could not load program {:?}", &policy.program);
                 return;
             };
             let expected = blake3::hash(code.as_bytes()).to_string();
             if expected != body.program_hash {
-                eprintln!("Aborting due to different hashes for program in policy {policy:?}");
+                error!("Aborting due to different hashes for program in policy {policy:?}");
                 return;
             }
-            println!(
+            info!(
                 "Accepted policy for {}, starting execution",
                 policy.program.display()
             );
             tokio::spawn(async move {
                 if let Err(e) = execute_mpc(state, code, &policy).await {
-                    eprintln!("{e}");
+                    error!("{e}");
                 }
             });
             return;
         }
     }
-    eprintln!("Policy not accepted: {body:?}");
+    error!("Policy not accepted: {body:?}");
 }
 
 async fn msg(State((_, state)): State<(Policies, MpcState)>, Path(from): Path<u32>, body: Bytes) {
@@ -413,7 +422,7 @@ async fn msg(State((_, state)): State<(Policies, MpcState)>, Path(from): Path<u3
     if senders.len() > from as usize {
         senders[from as usize].send(body.to_vec()).await.unwrap();
     } else {
-        eprintln!("No sender for party {from}");
+        error!("No sender for party {from}");
     }
 }
 
@@ -431,12 +440,12 @@ impl Channel for HttpChannel {
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        println!("{} -> {} ({:.2}MB)", self.party, p, mb,);
+        trace!("sending msg from {} to {} ({:.2}MB)", self.party, p, mb,);
         loop {
             match client.post(&url).body(msg.clone()).send().await?.status() {
                 StatusCode::OK => return Ok(()),
                 StatusCode::NOT_FOUND => {
-                    println!("Could not reach party {p} at {url}...");
+                    error!("Could not reach party {p} at {url}...");
                     sleep(Duration::from_millis(1000)).await;
                 }
                 status => anyhow::bail!("Unexpected status code: {status}"),

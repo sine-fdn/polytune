@@ -23,12 +23,12 @@ fn simulate() {
     let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
-            println!("pre> {line}");
+            println!("   pre> {line}");
         }
     });
     thread::spawn(move || {
         while let Some(Ok(line)) = stderr.next() {
-            eprintln!("pre> {line}");
+            eprintln!("   pre> {line}");
         }
     });
     children.push(cmd);
@@ -71,7 +71,7 @@ fn simulate() {
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line.starts_with("MPC Output:") {
+            if line.contains("MPC Output: 4 rows") {
                 return s.send(()).unwrap();
             }
         }
