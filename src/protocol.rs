@@ -379,8 +379,7 @@ pub async fn mpc(
             &mut shared_rng,
             delta,
         )
-        .await?
-        .2;
+        .await?;
     }
 
     let mut auth_bits = auth_bits.into_iter();

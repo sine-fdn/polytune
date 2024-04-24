@@ -415,6 +415,7 @@ pub(crate) fn hash128(input: u128) -> u128 {
 ///
 /// Generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that the AND of the XORs of the
 /// x and y values equals to the XOR of the z values.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn flaand(
     channel: &mut MsgChannel<impl Channel>,
     xbits: Vec<Share>,
@@ -583,6 +584,7 @@ fn transform(
 /// Protocol Pi_aAND that performs F_aAND.
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand(
     channel: &mut MsgChannel<impl Channel>,
     bits_rand: Vec<(Share, Share)>,
@@ -592,9 +594,9 @@ pub(crate) async fn faand(
     length: usize,
     shared_rng: &mut ChaCha20Rng,
     delta: Delta,
-) -> Result<(Vec<Share>, Vec<Share>, Vec<Share>), Error> {
+) -> Result<Vec<Share>, Error> {
     //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
-    let b = bucket_size(circuit_size) - 1; // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
+    let b = bucket_size(circuit_size); // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
     let lprime: usize = length * b;
     //let len_ashare = length + RHO;
     //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
@@ -643,31 +645,35 @@ pub(crate) async fn faand(
     let mut s1: Vec<Share> = vec![Share(false, Auth(vec![])); length];
     let mut s2: Vec<Share> = vec![Share(false, Auth(vec![])); length];
     for i in 0..length {
-        s1[i]  = &bits_rand[i].0 ^ &bucketcombined[i].0;
+        s1[i] = &bits_rand[i].0 ^ &bucketcombined[i].0;
         s2[i] = bits_rand[i].1.clone();
     }
     let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
         flaand(channel, s1, s2, rbits_new, p_own, p_max, delta, length).await?;
     let triples = transform(alltriples, length);
-    let mut finalbucket: Vec<(Share, Share, Share)> = vec![(Share(false, Auth(vec![])), Share(false, Auth(vec![])), Share(false, Auth(vec![]))); length];
+    let mut finalbucket: Vec<(Share, Share, Share)> = vec![
+        (
+            Share(false, Auth(vec![])),
+            Share(false, Auth(vec![])),
+            Share(false, Auth(vec![]))
+        );
+        length
+    ];
     for i in 0..length {
-        finalbucket[i] = 
-            combine_two_leaky_ands(
-                channel,
-                p_own,
-                p_max,
-                delta,
-                &triples[i],
-                &bucketcombined[i],
-            )
-            .await?;
+        finalbucket[i] = combine_two_leaky_ands(
+            channel,
+            p_own,
+            p_max,
+            delta,
+            &triples[i],
+            &bucketcombined[i],
+        )
+        .await?;
     }
 
-    let mut shares: (Vec<Share>, Vec<Share>, Vec<Share>) = (vec![], vec![], vec![]);
+    let mut shares: Vec<Share> = vec![];
     for b in finalbucket {
-        shares.0.push(b.0);
-        shares.1.push(b.1);
-        shares.2.push(b.2);
+        shares.push(b.2);
     }
     Ok(shares)
 }
@@ -767,7 +773,7 @@ pub(crate) async fn combine_two_leaky_ands(
     Ok((xres, y1.clone(), zres))
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use rand::random;
 
@@ -1040,8 +1046,35 @@ mod tests {
             > = tokio::spawn(async move {
                 let mut msgchannel = MsgChannel(channel);
                 let mut shared_rng = shared_rng(&mut msgchannel, parties - i - 1, parties).await?;
+                let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
+                let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
+                let xbits = fashare(
+                    &mut msgchannel,
+                    &mut x,
+                    parties - i - 1,
+                    parties,
+                    lprime,
+                    delta,
+                    &mut shared_rng,
+                )
+                .await?;
+                let ybits = fashare(
+                    &mut msgchannel,
+                    &mut y,
+                    parties - i - 1,
+                    parties,
+                    lprime,
+                    delta,
+                    &mut shared_rng,
+                )
+                .await?;
+                let mut input: Vec<(Share, Share)> = vec![];
+                for l in 0..lprime {
+                    input.push((xbits[l].clone(), ybits[l].clone()));
+                }
                 faand(
                     &mut msgchannel,
+                    input,
                     parties - i - 1,
                     parties,
                     circuit_size,
@@ -1050,6 +1083,7 @@ mod tests {
                     delta,
                 )
                 .await
+                .map(|result| (xbits, ybits, result))
             });
             handles.push(handle);
         }
@@ -1155,4 +1189,3 @@ mod tests {
         Ok(())
     }
 }
-*/
