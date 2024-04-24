@@ -13,6 +13,7 @@
       "input": "SELECT id, name, age FROM residents",
       "input_db": "postgres://postgres:test@localhost:5550/postgres",
       "max_rows": 4,
+      "max_str_bytes": 6,
       "setup": "TRUNCATE results",
       "output": "INSERT INTO results (name) VALUES ($1)",
       "output_db": "postgres://postgres:test@localhost:5555/postgres"

@@ -1,15 +1,15 @@
 enum Row0 {
     None,
-    Some(i32, [u8; 16], i32),
+    Some(i32, [u8; 6], i32),
 }
 
 enum Row1 {
     None,
-    Some(i32, [u8; 16], bool),
+    Some(i32, [u8; 6], bool),
 }
 
-pub fn main(residents: [Row0; 4], insurance: [Row1; 4], age_threshold: u32) -> [[u8; 16]; 4] {
-    let mut result = [[0u8; 16]; 4];
+pub fn main(residents: [Row0; 4], insurance: [Row1; 4], age_threshold: u32) -> [[u8; 6]; 4] {
+    let mut result = [[0u8; 6]; 4];
     let mut i = 0usize;
     for resident in residents {
         for insurance in insurance {

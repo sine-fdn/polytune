@@ -8,7 +8,7 @@ use std::{
 
 #[test]
 fn simulate() {
-    let millis = 1000;
+    let millis = 2000;
     println!("\n\n--- {millis}ms ---\n\n");
     let mut children = vec![];
     let mut cmd = Command::new("cargo")

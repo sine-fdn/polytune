@@ -20,5 +20,5 @@ jobs:
         working-directory: ./examples/http-single-server-channels
       - run: cargo test -- --nocapture
         working-directory: ./examples/iroh-p2p-channels
-      - run: docker compose -f docker-compose.yml up -d && cargo test -- --nocapture
+      - run: docker compose -f docker-compose.yml up -d && cargo test --release -- --nocapture
         working-directory: ./examples/postgres-integration

@@ -12,7 +12,8 @@
       "party": 1,
       "input": "SELECT id, name, disabled FROM insurance",
       "input_db": "postgres://postgres:test@localhost:5551/postgres",
-      "max_rows": 4
+      "max_rows": 4,
+      "max_str_bytes": 6
     }
   ]
 }

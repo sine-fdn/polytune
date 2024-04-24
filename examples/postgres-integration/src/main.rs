@@ -40,7 +40,7 @@ use url::Url;
 
 const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_ROWS: usize = 10;
-const STR_LEN_BYTES: usize = 16;
+const DEFAULT_MAX_STR_BYTES: usize = 8;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
@@ -68,6 +68,7 @@ struct Policy {
     input: String,
     input_db: Option<String>,
     max_rows: Option<usize>,
+    max_str_bytes: Option<usize>,
     setup: Option<String>,
     output: Option<String>,
     output_db: Option<String>,
@@ -304,6 +305,7 @@ async fn execute_mpc(
         input,
         input_db: db,
         max_rows,
+        max_str_bytes,
         setup: _setup,
         output: _output,
         output_db: _output_db,
@@ -320,6 +322,7 @@ async fn execute_mpc(
         let rows = sqlx::query(input).fetch_all(&pool).await?;
         info!("'{input}' returned {} rows from {db}", rows.len());
         let max_rows = max_rows.unwrap_or(DEFAULT_MAX_ROWS);
+        let max_str_bytes = max_str_bytes.unwrap_or(DEFAULT_MAX_STR_BYTES);
         let mut rows_as_literals = vec![
             Literal::Enum(
                 format!("Row{party}"),
@@ -333,12 +336,16 @@ async fn execute_mpc(
             for c in 0..row.len() {
                 let field = if let Ok(s) = row.try_get::<String, _>(c) {
                     let mut fixed_str =
-                        vec![Literal::NumUnsigned(0, UnsignedNumType::U8); STR_LEN_BYTES];
+                        vec![Literal::NumUnsigned(0, UnsignedNumType::U8); max_str_bytes];
                     for (i, b) in s.as_bytes().iter().enumerate() {
-                        if i < STR_LEN_BYTES {
+                        if i < max_str_bytes {
                             fixed_str[i] = Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
                         } else {
-                            bail!("String is longer than {STR_LEN_BYTES} bytes: '{s}'");
+                            warn!(
+                                "String is longer than {max_str_bytes} bytes: '{s}', dropping '{}'",
+                                &s[i..]
+                            );
+                            break;
                         }
                     }
                     Literal::Array(fixed_str)
