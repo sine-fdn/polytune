@@ -32,13 +32,12 @@ use tokio::{
         mpsc::{channel, Receiver, Sender},
         Mutex,
     },
-    time::{sleep, timeout},
+    time::{self, sleep, timeout},
 };
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
-const TIME_BETWEEN_EXECUTIONS: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_ROWS: usize = 10;
 const DEFAULT_MAX_STR_BYTES: usize = 8;
 
@@ -52,6 +51,9 @@ struct Cli {
     /// The location of the file with the policy configuration.
     #[arg(long, short)]
     config: PathBuf,
+    /// The time in minutes to wait before executing policies again.
+    #[arg(long, short, default_value = "30")]
+    sleep: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +88,11 @@ type MpcState = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
-    let Cli { port, config } = Cli::parse();
+    let Cli {
+        port,
+        config,
+        sleep,
+    } = Cli::parse();
     let local_policies = load_policies(config).await?;
     if local_policies.accepted.len() == 1 {
         let policy = &local_policies.accepted[0];
@@ -242,7 +248,8 @@ async fn main() -> Result<(), Error> {
                 }
             }
         }
-        sleep(TIME_BETWEEN_EXECUTIONS).await;
+        info!("Waiting {sleep} minutes before checking MPC policies again...");
+        time::sleep(Duration::from_secs(60 * sleep)).await;
     }
 }
 
