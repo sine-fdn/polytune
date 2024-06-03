@@ -12,7 +12,7 @@ fn simulate() {
     println!("\n\n--- {millis}ms ---\n\n");
     let mut children = vec![];
     let mut cmd = Command::new("cargo")
-        .args(["run", "--", "--port=8003", "--config=preprocessor.json"])
+        .args(["run", "--", "--port=8002", "--config=preprocessor.json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -32,31 +32,31 @@ fn simulate() {
         }
     });
     children.push(cmd);
-    for p in [1, 2] {
-        let port = format!("--port=800{p}");
-        let config = format!("--config=policies{p}.json");
-        let args = vec!["run", "--", &port, &config];
-        let mut cmd = Command::new("cargo")
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines().skip(4);
-        let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
-        thread::spawn(move || {
-            while let Some(Ok(line)) = stdout.next() {
-                println!("party{p}> {line}");
-            }
-        });
-        thread::spawn(move || {
-            while let Some(Ok(line)) = stderr.next() {
-                eprintln!("party{p}> {line}");
-            }
-        });
-        children.push(cmd);
-    }
-    sleep(Duration::from_millis(500));
+
+    let port = format!("--port=8001");
+    let config = format!("--config=policies1.json");
+    let args = vec!["run", "--", &port, &config];
+    let mut cmd = Command::new("cargo")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines().skip(4);
+    let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
+    thread::spawn(move || {
+        while let Some(Ok(line)) = stdout.next() {
+            println!("party1> {line}");
+        }
+    });
+    thread::spawn(move || {
+        while let Some(Ok(line)) = stderr.next() {
+            eprintln!("party1> {line}");
+        }
+    });
+    children.push(cmd);
+
+    sleep(Duration::from_millis(millis));
     let args = vec!["run", "--", "--port=8000", "--config=policies0.json"];
     let mut cmd = Command::new("cargo")
         .args(args)
@@ -81,7 +81,7 @@ fn simulate() {
             eprintln!("party0> {line}");
         }
     });
-    let result = r.recv_timeout(Duration::from_secs(300));
+    let result = r.recv_timeout(Duration::from_secs(60));
     for mut child in children {
         child.kill().unwrap();
     }

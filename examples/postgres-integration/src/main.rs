@@ -12,8 +12,9 @@ use parlay::{
     channel::Channel,
     fpre::fpre,
     garble_lang::{
-        compile,
-        literal::{Literal, VariantLiteral},
+        ast::Type,
+        compile_with_constants,
+        literal::Literal,
         token::{SignedNumType, UnsignedNumType},
     },
     protocol::{mpc, Preprocessor},
@@ -23,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, Row};
 use std::{
-    borrow::BorrowMut, net::SocketAddr, path::PathBuf, process::exit, result::Result, sync::Arc,
-    time::Duration,
+    borrow::BorrowMut, collections::HashMap, net::SocketAddr, path::PathBuf, process::exit,
+    result::Result, sync::Arc, time::Duration,
 };
 use tokio::{
     fs,
@@ -37,9 +38,6 @@ use tokio::{
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
-
-const DEFAULT_MAX_ROWS: usize = 10;
-const DEFAULT_MAX_STR_BYTES: usize = 8;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
@@ -61,7 +59,7 @@ struct Policies {
     accepted: Vec<Policy>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Policy {
     participants: Vec<Url>,
     program: PathBuf,
@@ -69,11 +67,16 @@ struct Policy {
     party: usize,
     input: String,
     input_db: Option<String>,
-    max_rows: Option<usize>,
-    max_str_bytes: Option<usize>,
     setup: Option<String>,
     output: Option<String>,
     output_db: Option<String>,
+    constants: HashMap<String, Constant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct Constant {
+    query: String,
+    ty: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -83,7 +86,17 @@ struct PolicyRequest {
     leader: usize,
 }
 
-type MpcState = Arc<Mutex<Vec<Sender<Vec<u8>>>>>;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ConstsRequest {
+    consts: HashMap<String, Literal>,
+}
+
+struct MpcComms {
+    consts: HashMap<String, HashMap<String, Literal>>,
+    senders: Vec<Sender<Vec<u8>>>,
+}
+
+type MpcState = Arc<Mutex<MpcComms>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -102,10 +115,14 @@ async fn main() -> Result<(), Error> {
         }
     }
 
-    let state = Arc::new(Mutex::new(vec![]));
+    let state = Arc::new(Mutex::new(MpcComms {
+        consts: HashMap::new(),
+        senders: vec![],
+    }));
 
     let app = Router::new()
         .route("/run", post(run))
+        .route("/consts/:from", post(consts))
         .route("/msg/:from", post(msg))
         .route("/policies", get(policies))
         .route("/policies/:id", get(policy))
@@ -267,7 +284,13 @@ async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
     let policies = Policies { accepted: vec![] };
     let app = Router::new()
         .route("/msg/:from", post(msg))
-        .with_state((policies, Arc::new(Mutex::new(senders))))
+        .with_state((
+            policies,
+            Arc::new(Mutex::new(MpcComms {
+                consts: HashMap::new(),
+                senders,
+            })),
+        ))
         .layer(DefaultBodyLimit::disable())
         .layer(TraceLayer::new_for_http());
 
@@ -292,11 +315,13 @@ async fn load_policies(path: PathBuf) -> Result<Policies, Error> {
         error!("Could not find '{}', exiting...", path.display());
         exit(-1);
     };
-    let Ok(policies) = serde_json::from_str::<Policies>(&policies) else {
-        error!("'{}' has an invalid format, exiting...", path.display());
-        exit(-1);
-    };
-    Ok(policies)
+    match serde_json::from_str::<Policies>(&policies) {
+        Ok(policies) => Ok(policies),
+        Err(e) => {
+            error!("'{}' has an invalid format: {e}", path.display());
+            exit(-1);
+        }
+    }
 }
 
 async fn execute_mpc(
@@ -311,91 +336,210 @@ async fn execute_mpc(
         party,
         input,
         input_db: db,
-        max_rows,
-        max_str_bytes,
         setup: _setup,
         output: _output,
         output_db: _output_db,
+        constants,
     } = policy;
-    let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
-    info!(
-        "Trying to execute circuit with {}K gates ({}K AND gates)",
-        prg.circuit.gates.len() / 1000,
-        prg.circuit.and_gates() / 1000
-    );
-    let input = if let Some(db) = db {
+    let (prg, input) = if let Some(db) = db {
         info!("Connecting to input db at {db}...");
         let pool = PgPoolOptions::new().max_connections(5).connect(db).await?;
         let rows = sqlx::query(input).fetch_all(&pool).await?;
         info!("'{input}' returned {} rows from {db}", rows.len());
-        let max_rows = max_rows.unwrap_or(DEFAULT_MAX_ROWS);
-        let max_str_bytes = max_str_bytes.unwrap_or(DEFAULT_MAX_STR_BYTES);
-        let mut rows_as_literals = vec![
-            Literal::Enum(
-                format!("Row{party}"),
-                "None".to_string(),
-                VariantLiteral::Unit,
-            );
-            max_rows
-        ];
-        for (r, row) in rows.iter().enumerate() {
-            let mut row_as_literal = vec![];
-            for c in 0..row.len() {
-                let field = if let Ok(s) = row.try_get::<String, _>(c) {
-                    let mut fixed_str =
-                        vec![Literal::NumUnsigned(0, UnsignedNumType::U8); max_str_bytes];
-                    for (i, b) in s.as_bytes().iter().enumerate() {
-                        if i < max_str_bytes {
-                            fixed_str[i] = Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
-                        } else {
-                            warn!(
-                                "String is longer than {max_str_bytes} bytes: '{s}', dropping '{}'",
-                                &s[i..]
-                            );
-                            break;
-                        }
-                    }
-                    Literal::Array(fixed_str)
-                } else if let Ok(b) = row.try_get::<bool, _>(c) {
-                    Literal::from(b)
-                } else if let Ok(n) = row.try_get::<i32, _>(c) {
-                    Literal::NumSigned(n as i64, SignedNumType::I32)
-                } else if let Ok(n) = row.try_get::<i64, _>(c) {
-                    Literal::NumSigned(n, SignedNumType::I64)
-                } else {
-                    bail!("Could not decode column {c}");
-                };
-                row_as_literal.push(field);
-            }
-            if r >= max_rows {
-                warn!("Dropping record {r}");
-            } else {
-                let literal = Literal::Enum(
-                    format!("Row{party}"),
-                    "Some".to_string(),
-                    VariantLiteral::Tuple(row_as_literal),
+
+        let mut my_consts = HashMap::new();
+        for (k, c) in constants {
+            let row = sqlx::query(&c.query).fetch_one(&pool).await?;
+            if row.len() != 1 {
+                bail!(
+                    "Expected a single scalar value, but got {} from query '{}'",
+                    row.len(),
+                    c.query
                 );
-                debug!("rows[{r}] = {literal}");
-                rows_as_literals[r] = literal;
+            } else {
+                if let Ok(n) = row.try_get::<i32, _>(0) {
+                    if n >= 0 && c.ty == "usize" {
+                        my_consts.insert(
+                            k.clone(),
+                            Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                        );
+                        continue;
+                    }
+                } else if let Ok(n) = row.try_get::<i64, _>(0) {
+                    if n >= 0 && c.ty == "usize" {
+                        my_consts.insert(
+                            k.clone(),
+                            Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                        );
+                        continue;
+                    }
+                }
+                bail!("Could not decode scalar value as {} of '{}'", c.ty, c.query);
             }
         }
+        {
+            let mut locked = state.lock().await;
+            locked
+                .consts
+                .insert(format!("PARTY_{party}"), my_consts.clone());
+        }
+        let client = reqwest::Client::new();
+        for p in participants.iter().rev().skip(1).rev() {
+            if p != &participants[*party] {
+                info!("Sending constants to party {p}");
+                let url = format!("{p}consts/{party}");
+                let const_request = ConstsRequest {
+                    consts: my_consts.clone(),
+                };
+                let Ok(res) = client.post(&url).json(&const_request).send().await else {
+                    bail!("Could not reach {url}");
+                };
+                match res.status() {
+                    StatusCode::OK => {}
+                    code => {
+                        bail!("Unexpected response while trying to send consts to {url}: {code}");
+                    }
+                }
+            }
+        }
+        loop {
+            sleep(Duration::from_millis(500)).await;
+            let locked = state.lock().await;
+            if locked.consts.len() >= participants.len() - 1 {
+                break;
+            } else {
+                let missing = participants.len() - 1 - locked.consts.len();
+                info!(
+                    "Constants missing from {} parties, received constants from {:?}",
+                    missing,
+                    locked.consts.keys()
+                );
+            }
+        }
+
+        let prg = {
+            let locked = state.lock().await;
+            compile_with_constants(&code, locked.consts.clone())
+                .map_err(|e| anyhow!(e.prettify(&code)))?
+        };
+        let input_ty = &prg.main.params[*party].ty;
+        let Type::ArrayConst(row_type, _) = input_ty else {
+            bail!("Expected an array input type (with const size) for party {party}, but found {input_ty}");
+        };
+        let Type::Tuple(field_types) = row_type.as_ref() else {
+            bail!(
+                "Expected an array of tuples as input type for party {party}, but found {input_ty}"
+            );
+        };
+        info!(
+            "Trying to execute circuit with {}K gates ({}K AND gates)",
+            prg.circuit.gates.len() / 1000,
+            prg.circuit.and_gates() / 1000
+        );
+        let mut rows_as_literals = vec![];
+        for (r, row) in rows.iter().enumerate() {
+            let mut row_as_literal = vec![];
+            if field_types.len() != row.len() {
+                bail!(
+                    "The program expects a tuple with {} fields, but the query returned a row with {} fields",
+                    field_types.len(),
+                    row.len()
+                );
+            }
+            for c in 0..row.len() {
+                let mut literal = None;
+                match &field_types[c] {
+                    Type::Bool => {
+                        if let Ok(b) = row.try_get::<bool, _>(c) {
+                            literal = Some(Literal::from(b))
+                        }
+                    }
+                    Type::Signed(SignedNumType::I32) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            literal = Some(Literal::NumSigned(n as i64, SignedNumType::I32))
+                        }
+                    }
+                    Type::Signed(SignedNumType::I64) => {
+                        if let Ok(n) = row.try_get::<i64, _>(c) {
+                            literal = Some(Literal::NumSigned(n, SignedNumType::I64))
+                        }
+                    }
+                    Type::Array(ty, size)
+                        if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
+                    {
+                        if let Ok(s) = row.try_get::<String, _>(c) {
+                            let mut fixed_str =
+                                vec![Literal::NumUnsigned(0, UnsignedNumType::U8); *size];
+                            for (i, b) in s.as_bytes().iter().enumerate() {
+                                if i < *size {
+                                    fixed_str[i] =
+                                        Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
+                                } else {
+                                    warn!(
+                                        "String is longer than {size} bytes: '{s}', dropping '{}'",
+                                        &s[i..]
+                                    );
+                                    break;
+                                }
+                            }
+                            literal = Some(Literal::Array(fixed_str))
+                        }
+                    }
+                    Type::ArrayConst(ty, size)
+                        if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
+                    {
+                        let size = *prg.const_sizes.get(size).unwrap();
+                        if let Ok(s) = row.try_get::<String, _>(c) {
+                            let mut fixed_str =
+                                vec![Literal::NumUnsigned(0, UnsignedNumType::U8); size];
+                            for (i, b) in s.as_bytes().iter().enumerate() {
+                                if i < size {
+                                    fixed_str[i] =
+                                        Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
+                                } else {
+                                    warn!(
+                                        "String is longer than {size} bytes: '{s}', dropping '{}'",
+                                        &s[i..]
+                                    );
+                                    break;
+                                }
+                            }
+                            literal = Some(Literal::Array(fixed_str))
+                        }
+                    }
+                    _ => {}
+                }
+                if let Some(literal) = literal {
+                    row_as_literal.push(literal);
+                } else {
+                    bail!("Could not decode column {c} with type {}", field_types[c]);
+                }
+            }
+            let literal = Literal::Tuple(row_as_literal);
+            debug!("rows[{r}] = {literal}");
+            rows_as_literals.push(literal);
+        }
         let literal = Literal::Array(rows_as_literals);
-        prg.literal_arg(*party, literal)?.as_bits()
+        let input = prg.literal_arg(*party, literal)?.as_bits();
+        (prg, input)
     } else {
-        prg.parse_arg(*party, input)?.as_bits()
+        let consts = HashMap::new();
+        let prg = compile_with_constants(&code, consts).map_err(|e| anyhow!(e.prettify(&code)))?;
+        let input = prg.parse_arg(*party, input)?.as_bits();
+        (prg, input)
     };
     let fpre = Preprocessor::TrustedDealer(participants.len() - 1);
     let p_out: Vec<_> = vec![*leader];
     let channel = {
-        let mut state = state.lock().await;
-        let senders = state.borrow_mut();
-        if !senders.is_empty() {
+        let mut locked = state.lock().await;
+        let state = locked.borrow_mut();
+        if !state.senders.is_empty() {
             panic!("Cannot start a new MPC execution while there are still active senders!");
         }
         let mut receivers = vec![];
         for _ in 0..policy.participants.len() {
             let (s, r) = channel(1);
-            senders.push(s);
+            state.senders.push(s);
             receivers.push(r);
         }
 
@@ -406,7 +550,7 @@ async fn execute_mpc(
         }
     };
     let output = mpc(channel, &prg.circuit, &input, fpre, 0, *party, &p_out).await?;
-    state.lock().await.clear();
+    state.lock().await.senders.clear();
     if output.is_empty() {
         Ok(None)
     } else {
@@ -444,10 +588,22 @@ async fn run(
     error!("Policy not accepted: {body:?}");
 }
 
+async fn consts(
+    State((_, state)): State<(Policies, MpcState)>,
+    Path(from): Path<u32>,
+    Json(body): Json<ConstsRequest>,
+) {
+    let mut state = state.lock().await;
+    state.consts.insert(format!("PARTY_{from}"), body.consts);
+}
+
 async fn msg(State((_, state)): State<(Policies, MpcState)>, Path(from): Path<u32>, body: Bytes) {
-    let senders = state.lock().await;
-    if senders.len() > from as usize {
-        senders[from as usize].send(body.to_vec()).await.unwrap();
+    let state = state.lock().await;
+    if state.senders.len() > from as usize {
+        state.senders[from as usize]
+            .send(body.to_vec())
+            .await
+            .unwrap();
     } else {
         error!("No sender for party {from}");
     }

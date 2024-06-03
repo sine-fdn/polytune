@@ -4,16 +4,23 @@
       "participants": [
         "http://localhost:8000",
         "http://localhost:8001",
-        "http://localhost:8002",
-        "http://localhost:8003"
+        "http://localhost:8002"
       ],
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 1,
       "input": "SELECT id, name, disabled FROM insurance",
       "input_db": "postgres://postgres:test@localhost:5551/postgres",
-      "max_rows": 4,
-      "max_str_bytes": 6
+      "constants": {
+        "ROWS": {
+          "query": "SELECT COUNT(id) FROM insurance",
+          "ty": "usize"
+        },
+        "STR_LEN": {
+          "query": "SELECT MAX(LENGTH(name)) FROM insurance",
+          "ty": "usize"
+        }
+      }
     }
   ]
 }
