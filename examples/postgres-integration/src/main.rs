@@ -446,9 +446,9 @@ async fn execute_mpc(
                     row.len()
                 );
             }
-            for c in 0..row.len() {
+            for (c, field_type) in field_types.iter().enumerate() {
                 let mut literal = None;
-                match &field_types[c] {
+                match field_type {
                     Type::Bool => {
                         if let Ok(b) = row.try_get::<bool, _>(c) {
                             literal = Some(Literal::from(b))

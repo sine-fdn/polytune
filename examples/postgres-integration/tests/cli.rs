@@ -33,8 +33,8 @@ fn simulate() {
     });
     children.push(cmd);
 
-    let port = format!("--port=8001");
-    let config = format!("--config=policies1.json");
+    let port = "--port=8001".to_string();
+    let config = "--config=policies1.json".to_string();
     let args = vec!["run", "--", &port, &config];
     let mut cmd = Command::new("cargo")
         .args(args)
