@@ -1,3 +1,4 @@
-Id,Name,Disabled,Address
-0,"Max Doe",true,"Parkstraße 1, 12345 Berlin"
-1,"Bob Doe",false,"Schlossallee 2, 12345 Berlin"
+Id,Name,Status,Address
+0,"Max Doe","foo","Parkstraße 1, 12345 Berlin"
+1,"Bob Doe","bar","Schlossallee 2, 12345 Berlin"
+2,"Jane Doe","foobar","Schlossallee 2, 12345 Berlin"

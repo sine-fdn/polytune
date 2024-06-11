@@ -12,9 +12,9 @@ use parlay::{
     channel::Channel,
     fpre::fpre,
     garble_lang::{
-        ast::Type,
+        ast::{Type, Variant},
         compile_with_constants,
-        literal::Literal,
+        literal::{Literal, VariantLiteral},
         token::{SignedNumType, UnsignedNumType},
     },
     protocol::{mpc, Preprocessor},
@@ -505,6 +505,25 @@ async fn execute_mpc(
                                 }
                             }
                             literal = Some(Literal::Array(fixed_str))
+                        }
+                    }
+                    Type::Enum(name) => {
+                        let Some(enum_def) = prg.program.enum_defs.get(name) else {
+                            bail!("Could not find definition for enum {name} in program");
+                        };
+                        if let Ok(variant) = row.try_get::<String, _>(c) {
+                            for v in &enum_def.variants {
+                                if let Variant::Unit(variant_name) = v {
+                                    if variant_name.to_lowercase() == variant.to_lowercase() {
+                                        literal = Some(Literal::Enum(
+                                            name.clone(),
+                                            variant_name.clone(),
+                                            VariantLiteral::Unit,
+                                        ));
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
                     _ => {}

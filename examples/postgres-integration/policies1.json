@@ -9,7 +9,7 @@
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 1,
-      "input": "SELECT id, name, disabled FROM insurance",
+      "input": "SELECT id, name, status FROM insurance",
       "input_db": "postgres://postgres:test@localhost:5551/postgres",
       "constants": {
         "ROWS": {

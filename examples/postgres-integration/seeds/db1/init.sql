@@ -1,7 +1,7 @@
 CREATE TABLE insurance (
     id SERIAL PRIMARY KEY,
     name TEXT,
-    disabled BOOL,
+    status TEXT,
     address TEXT
 );
 
