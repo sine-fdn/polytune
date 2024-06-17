@@ -22,7 +22,10 @@ use parlay::{
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{postgres::PgPoolOptions, Row};
+use sqlx::{
+    any::{install_default_drivers, AnyQueryResult, AnyRow},
+    AnyPool, Pool, Row,
+};
 use std::{
     borrow::BorrowMut, collections::HashMap, net::SocketAddr, path::PathBuf, process::exit,
     result::Result, sync::Arc, time::Duration,
@@ -101,6 +104,7 @@ type MpcState = Arc<Mutex<MpcComms>>;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
+    install_default_drivers();
     let Cli {
         port,
         config,
@@ -234,13 +238,11 @@ async fn main() -> Result<(), Error> {
                             } = policy;
                             if let (Some(output_db), Some(output)) = (output_db, output) {
                                 info!("Connecting to output db at {output_db}...");
-                                let pool = PgPoolOptions::new()
-                                    .max_connections(5)
-                                    .connect(output_db)
-                                    .await?;
+                                let pool: AnyPool = Pool::connect(output_db).await?;
                                 if let Some(setup) = setup {
-                                    let rows_affected =
-                                        sqlx::query(setup).execute(&pool).await?.rows_affected();
+                                    let result: AnyQueryResult =
+                                        sqlx::query(setup).execute(&pool).await?;
+                                    let rows_affected = result.rows_affected();
                                     debug!("{rows_affected} rows affected by '{setup}'");
                                 }
                                 for row in rows {
@@ -248,7 +250,8 @@ async fn main() -> Result<(), Error> {
                                     for field in row {
                                         query = query.bind(field);
                                     }
-                                    let rows = query.execute(&pool).await?.rows_affected();
+                                    let result: AnyQueryResult = query.execute(&pool).await?;
+                                    let rows = result.rows_affected();
                                     debug!("Inserted {rows} row(s)");
                                 }
                             } else {
@@ -343,13 +346,13 @@ async fn execute_mpc(
     } = policy;
     let (prg, input) = if let Some(db) = db {
         info!("Connecting to input db at {db}...");
-        let pool = PgPoolOptions::new().max_connections(5).connect(db).await?;
-        let rows = sqlx::query(input).fetch_all(&pool).await?;
+        let pool: AnyPool = Pool::connect(db).await?;
+        let rows: Vec<AnyRow> = sqlx::query(input).fetch_all(&pool).await?;
         info!("'{input}' returned {} rows from {db}", rows.len());
 
         let mut my_consts = HashMap::new();
         for (k, c) in constants {
-            let row = sqlx::query(&c.query).fetch_one(&pool).await?;
+            let row: AnyRow = sqlx::query(&c.query).fetch_one(&pool).await?;
             if row.len() != 1 {
                 bail!(
                     "Expected a single scalar value, but got {} from query '{}'",
