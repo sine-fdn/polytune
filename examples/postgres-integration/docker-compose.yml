@@ -12,15 +12,16 @@ services:
       POSTGRES_PASSWORD: test
 
   db1:
-    image: postgres:16.2
+    image: mysql:8.4
     restart: always
     shm_size: 128mb
     volumes:
       - ./seeds/db1:/docker-entrypoint-initdb.d
+      - ./seeds/db1/insurance.csv:/var/lib/mysql-files/insurance.csv
     ports:
-      - 5551:5432
+      - 5551:3306
     environment:
-      POSTGRES_PASSWORD: test
+      MYSQL_ROOT_PASSWORD: test
 
   db_out:
     image: postgres:16.2

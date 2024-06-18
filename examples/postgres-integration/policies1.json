@@ -10,7 +10,7 @@
       "leader": 0,
       "party": 1,
       "input": "SELECT id, name, status FROM insurance",
-      "input_db": "postgres://postgres:test@localhost:5551/postgres",
+      "input_db": "mysql://root:test@localhost:5551/test",
       "constants": {
         "ROWS": {
           "query": "SELECT COUNT(id) FROM insurance",

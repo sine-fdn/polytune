@@ -1,3 +1,6 @@
+CREATE DATABASE test;
+USE test;
+
 CREATE TABLE insurance (
     id SERIAL PRIMARY KEY,
     name TEXT,
@@ -5,7 +8,9 @@ CREATE TABLE insurance (
     address TEXT
 );
 
-COPY insurance
-FROM '/docker-entrypoint-initdb.d/insurance.csv'
-DELIMITER ','
-CSV HEADER;
+LOAD DATA INFILE '/var/lib/mysql-files/insurance.csv'
+INTO TABLE insurance
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
