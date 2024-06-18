@@ -19,3 +19,5 @@ serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["full"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
+aes = "0.8.4"
+block-modes = "0.9.1"
