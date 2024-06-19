@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{
     any::{install_default_drivers, AnyQueryResult, AnyRow},
-    AnyPool, Pool, Row,
+    AnyPool, Pool, Row, ValueRef,
 };
 use std::{
     borrow::BorrowMut, collections::HashMap, net::SocketAddr, path::PathBuf, process::exit,
@@ -492,7 +492,15 @@ async fn execute_mpc(
                         if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
                     {
                         let size = *prg.const_sizes.get(size).unwrap();
+                        let mut str = None;
                         if let Ok(s) = row.try_get::<String, _>(c) {
+                            str = Some(s)
+                        } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
+                            if let Ok(s) = String::from_utf8(s) {
+                                str = Some(s)
+                            }
+                        }
+                        if let Some(s) = str {
                             let mut fixed_str =
                                 vec![Literal::NumUnsigned(0, UnsignedNumType::U8); size];
                             for (i, b) in s.as_bytes().iter().enumerate() {
@@ -514,7 +522,15 @@ async fn execute_mpc(
                         let Some(enum_def) = prg.program.enum_defs.get(name) else {
                             bail!("Could not find definition for enum {name} in program");
                         };
-                        if let Ok(variant) = row.try_get::<String, _>(c) {
+                        let mut str = None;
+                        if let Ok(s) = row.try_get::<String, _>(c) {
+                            str = Some(s)
+                        } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
+                            if let Ok(s) = String::from_utf8(s) {
+                                str = Some(s)
+                            }
+                        }
+                        if let Some(variant) = str {
                             for v in &enum_def.variants {
                                 if let Variant::Unit(variant_name) = v {
                                     if variant_name.to_lowercase() == variant.to_lowercase() {
@@ -533,6 +549,12 @@ async fn execute_mpc(
                 }
                 if let Some(literal) = literal {
                     row_as_literal.push(literal);
+                } else if let Ok(raw) = row.try_get_raw(c) {
+                    bail!(
+                        "Could not decode column {c} with type {}, column has type {}",
+                        field_types[c],
+                        raw.type_info()
+                    );
                 } else {
                     bail!("Could not decode column {c} with type {}", field_types[c]);
                 }
