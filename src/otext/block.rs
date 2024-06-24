@@ -18,17 +18,21 @@ pub const ZERO_BLOCK: Block = 0;
 pub const ALL_ONE_BLOCK: Block = u128::MAX;
 
 /// XOR blocks
-pub fn xor_blocks_arr(res: &mut [Block], x: &[Block], y: &[Block], nblocks: usize) {
+pub fn xor_blocks_arr(x: &[Block], y: &[Block], nblocks: usize) -> Vec<Block> {
+    let mut res: Vec<Block> = vec![ZERO_BLOCK; nblocks];
     for i in 0..nblocks {
         res[i] = x[i] ^ y[i];
     }
+    res
 }
 
 /// XOR single block
-pub fn xor_blocks_arr_single(res: &mut [Block], x: &[Block], y: Block, nblocks: usize) {
+pub fn xor_blocks_arr_single(x: &[Block], y: Block, nblocks: usize) -> Vec<Block> {
+    let mut res: Vec<Block> = vec![ZERO_BLOCK; nblocks];
     for i in 0..nblocks {
         res[i] = x[i] ^ y;
     }
+    res
 }
 
 /// Compare blocks
@@ -57,9 +61,7 @@ mod tests {
     fn test_xor_blocks_arr() {
         let x = vec![make_block(1, 2); 3];
         let y = vec![make_block(3, 4); 3];
-        let mut res = vec![ZERO_BLOCK; 3];
-
-        xor_blocks_arr(&mut res, &x, &y, 3);
+        let res = xor_blocks_arr(&x, &y, 3);
 
         for block in &res {
             assert_eq!(*block, make_block(1 ^ 3, 2 ^ 4));
@@ -70,9 +72,7 @@ mod tests {
     fn test_xor_blocks_arr_single() {
         let x = vec![make_block(1, 2); 3];
         let y = make_block(5, 6);
-        let mut res = vec![ZERO_BLOCK; 3];
-
-        xor_blocks_arr_single(&mut res, &x, y, 3);
+        let res = xor_blocks_arr_single(&x, y, 3);
 
         for block in &res {
             assert_eq!(*block, make_block(1 ^ 5, 2 ^ 6));
