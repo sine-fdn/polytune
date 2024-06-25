@@ -7,10 +7,10 @@ use super::crypto_utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red
 use super::twokeyprp::TwoKeyPRP;
 
 /// SPCOT Receiver
-struct SpcotRecver {
+pub struct SpcotRecver {
     ggm_tree: Vec<Block>,
     m: Vec<Block>,
-    b: Vec<bool>,
+    pub b: Vec<bool>,
     choice_pos: usize,
     depth: usize,
     leave_n: usize,
@@ -20,7 +20,7 @@ struct SpcotRecver {
 
 ///SPCOT Receiver
 impl SpcotRecver {
-    fn new(channel: SimpleChannel, depth: usize) -> Self {
+    pub fn new(channel: SimpleChannel, depth: usize) -> Self {
         let leave_n = 1 << (depth - 1);
         let m = vec![Block::default(); depth - 1];
         let b = vec![false; depth - 1];
@@ -38,7 +38,7 @@ impl SpcotRecver {
     }
 
     ///Get index
-    fn get_index(&mut self) -> usize {
+    pub fn get_index(&mut self) -> usize {
         self.choice_pos = 0;
         for &bi in self.b.iter() {
             self.choice_pos <<= 1;
@@ -52,7 +52,7 @@ impl SpcotRecver {
     // TODO OTs through channel
 
     // Receive the message and reconstruct the tree
-    fn compute(&mut self, ggm_tree_mem: Vec<Block>) {
+    pub fn compute(&mut self, ggm_tree_mem: Vec<Block>) {
         self.ggm_tree = ggm_tree_mem;
         self.ggm_tree_reconstruction();
         self.ggm_tree[self.choice_pos] = Block::default();
@@ -124,7 +124,7 @@ impl SpcotRecver {
     }
 
     //Check
-    fn consistency_check_msg_gen(&mut self, chi_alpha: &mut Block) -> Block {
+    pub fn consistency_check_msg_gen(&mut self, chi_alpha: &mut Block) -> Block {
         let mut chi = vec![Block::default(); self.leave_n];
         let mut digest: [u128; 2] = [Block::default(); 2];
         hash_once(&mut digest, &self.secret_sum_f2);

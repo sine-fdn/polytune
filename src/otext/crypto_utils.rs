@@ -93,6 +93,45 @@ pub fn vector_inn_prdt_sum_red(a: &[Block], b: &[Block], sz: usize) -> Block {
     r
 }
 
+pub struct GaloisFieldPacking {
+    base: [Block; 128],
+}
+
+impl GaloisFieldPacking {
+    pub fn new() -> Self {
+        let mut gfp = GaloisFieldPacking {
+            base: [0; 128],
+        };
+        gfp.packing_base_gen();
+        gfp
+    }
+
+    fn packing_base_gen(&mut self) {
+        let mut a: u64 = 0;
+        let mut b: u64 = 1;
+        for i in (0..64).step_by(4) {
+            self.base[i] = ((a as Block) << 64) | (b as Block);
+            self.base[i + 1] = ((a as Block) << 64) | ((b << 1) as Block);
+            self.base[i + 2] = ((a as Block) << 64) | ((b << 2) as Block);
+            self.base[i + 3] = ((a as Block) << 64) | ((b << 3) as Block);
+            b <<= 4;
+        }
+        a = 1;
+        b = 0;
+        for i in (64..128).step_by(4) {
+            self.base[i] = ((a as Block) << 64) | (b as Block);
+            self.base[i + 1] = (((a << 1) as Block) << 64) | (b as Block);
+            self.base[i + 2] = (((a << 2) as Block) << 64) | (b as Block);
+            self.base[i + 3] = (((a << 3) as Block) << 64) | (b as Block);
+            a <<= 4;
+        }
+    }
+
+    pub fn packing(&self, res: &mut Block, data: &[Block]) {
+        *res = vector_inn_prdt_sum_red(data, &self.base, 128);
+    }
+}
+
 pub struct PRP {
     aes_key: Aes128,
 }
@@ -158,7 +197,8 @@ impl CCRH {
         xor_blocks_arr(&tmp, input, N)
     }
 
-    pub fn hn(&self, out: &mut Vec<Block>, input: &[Block], length: usize, scratch: Option<&mut [Block]>) -> Vec<Block> {
+    pub fn hn(&self, input: &[Block], length: usize, scratch: Option<&mut [Block]>) -> Vec<Block> {
+        let mut out = vec![0u128; length];
         let mut local_scratch = vec![0u128; length];
         let scratch = scratch.unwrap_or(local_scratch.as_mut());
 
@@ -168,7 +208,7 @@ impl CCRH {
         }
 
         self.prp.permute_block(scratch, length);
-        xor_blocks_arr(scratch, out, length)
+        xor_blocks_arr(scratch, &out, length)
     }
 }
 
