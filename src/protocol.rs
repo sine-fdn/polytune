@@ -126,10 +126,16 @@ impl From<garble::Error> for Error {
 /// A custom error type for all MPC operations.
 #[derive(Debug)]
 pub enum MpcError {
-    /// No secret share was sent for the specified wire.
-    MissingShareForWire(usize),
+    /// No secret share was sent during preprocessing for the specified wire.
+    MissingPreprocessingShareForWire(usize),
+    /// No secret share was sent in the garbled table for the specified wire.
+    MissingTableShareForWire(usize),
+    /// No secret share was sent for the specified output wire.
+    MissingOutputShareForWire(usize),
     /// No AND share was sent for the specified wire.
     MissingAndShareForWire(usize),
+    /// No share was sent for the input wire, possibly because there are fewer parties than inputs.
+    MissingSharesForInput(usize),
     /// The input on the specified wire did not match the message authenatication code.
     InvalidInputMacOnWire(usize),
     /// Two different parties tried to provide an input mask for the wire.
@@ -292,13 +298,12 @@ pub async fn mpc(
     let random_shares: Vec<Share> = channel.recv_from(p_fpre, "random shares").await?;
     let mut random_shares = random_shares.into_iter();
 
-    //let mut wire_shares_and_labels = vec![(Share(false, Auth(vec![])), Label(0)); num_gates];
     let mut shares = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels = vec![Label(0); num_gates];
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(_) | Wire::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
-                return Err(MpcError::MissingShareForWire(w).into());
+                return Err(MpcError::MissingPreprocessingShareForWire(w).into());
             };
             shares[w] = share;
             if is_contrib {
@@ -415,8 +420,11 @@ pub async fn mpc(
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(i) = gate {
             let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
-            if let Some((mac, _)) = macs_and_keys[*i] {
-                wire_shares_for_others[*i][w] = Some((bit, mac));
+            let Some(mac_and_key) = macs_and_keys.get(*i) else {
+                return Err(MpcError::MissingSharesForInput(*i).into());
+            };
+            if let Some((mac, _)) = mac_and_key {
+                wire_shares_for_others[*i][w] = Some((bit, *mac));
             }
         }
     }
@@ -540,7 +548,7 @@ pub async fn mpc(
                     let label_y = &labels_eval[*y];
                     let i = 2 * (input_x as usize) + (input_y as usize);
                     let Some(table_shares) = &table_shares[w] else {
-                        return Err(MpcError::MissingShareForWire(w).into());
+                        return Err(MpcError::MissingTableShareForWire(w).into());
                     };
 
                     let mut label = vec![Label(0); p_max];
@@ -607,30 +615,36 @@ pub async fn mpc(
                 .await?;
         }
     }
-    let mut wires_and_labels: Vec<Option<(bool, Label)>> = vec![None; num_gates];
+    let mut input_wires: Vec<Option<bool>> = vec![None; num_gates];
     if !is_contrib {
         for p_out in p_out.iter().copied().filter(|p| *p != p_own) {
+            let mut wires_and_labels: Vec<Option<(bool, Label)>> = vec![None; num_gates];
             for w in circuit.output_gates.iter().copied() {
                 wires_and_labels[w] = Some((values[w], labels_eval[w][p_out]));
             }
             channel.send_to(p_out, "lambda", &wires_and_labels).await?;
         }
+        for w in circuit.output_gates.iter().copied() {
+            input_wires[w] = Some(values[w]);
+        }
     } else if p_out.contains(&p_own) {
-        wires_and_labels = channel.recv_vec_from(p_eval, "lambda", num_gates).await?;
+        let wires_and_labels: Vec<Option<(bool, Label)>> =
+            channel.recv_vec_from(p_eval, "lambda", num_gates).await?;
         for w in circuit.output_gates.iter().copied() {
             if !(wires_and_labels[w] == Some((true, labels[w] ^ delta))
                 || wires_and_labels[w] == Some((false, labels[w])))
             {
                 return Err(MpcError::InvalidOutputWireLabel(w).into());
             }
+            input_wires[w] = wires_and_labels[w].map(|(bit, _)| bit);
         }
     }
     let mut outputs: Vec<bool> = vec![];
     if p_out.contains(&p_own) {
         let mut output_wires: Vec<Option<bool>> = vec![None; num_gates];
         for w in circuit.output_gates.iter().copied() {
-            let Some((input, _)) = wires_and_labels.get(w).copied().flatten() else {
-                return Err(MpcError::MissingShareForWire(w).into());
+            let Some(input) = input_wires.get(w).copied().flatten() else {
+                return Err(MpcError::MissingOutputShareForWire(w).into());
             };
             let Share(bit, _) = &shares[w];
             output_wires[w] = Some(input ^ bit);
