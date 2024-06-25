@@ -1,6 +1,5 @@
 //! SPCOT sender implementation
 use super::block::{ALL_ONE_BLOCK, ZERO_BLOCK};
-use crate::channel::SimpleChannel;
 
 use super::block::{Block, make_block};
 use super::twokeyprp::TwoKeyPRP;
@@ -12,7 +11,6 @@ pub struct SpcotSender {
     delta: Block,
     ggm_tree: Vec<Block>,
     m: Vec<Block>,
-    channel: SimpleChannel,
     depth: usize,
     leave_n: usize,
     secret_sum_f2: Block,
@@ -21,8 +19,8 @@ pub struct SpcotSender {
 /// SPCOT Sender
 impl SpcotSender {
     /// Create SPCOT Sender
-    pub fn new(channel: SimpleChannel, depth: usize) -> Self {
-        let leave_n = 1 << (depth - 1);
+    pub fn new(depth: usize) -> Self {
+        let leave_n: usize = 1 << (depth - 1);
         let m = vec![Block::default(); (depth - 1) * 2];
 
         SpcotSender {
@@ -30,7 +28,6 @@ impl SpcotSender {
             delta: Block::default(),
             ggm_tree: Vec::new(),
             m,
-            channel,
             depth,
             leave_n,
             secret_sum_f2: ZERO_BLOCK,

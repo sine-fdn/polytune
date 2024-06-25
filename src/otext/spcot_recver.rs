@@ -2,7 +2,6 @@
 use super::block::ZERO_BLOCK;
 
 use super::block::{make_block, Block};
-use crate::channel::SimpleChannel;
 use super::crypto_utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red};
 use super::twokeyprp::TwoKeyPRP;
 
@@ -15,12 +14,11 @@ pub struct SpcotRecver {
     depth: usize,
     leave_n: usize,
     secret_sum_f2: Block,
-    channel: SimpleChannel,
 }
 
 ///SPCOT Receiver
 impl SpcotRecver {
-    pub fn new(channel: SimpleChannel, depth: usize) -> Self {
+    pub fn new(depth: usize) -> Self {
         let leave_n = 1 << (depth - 1);
         let m = vec![Block::default(); depth - 1];
         let b = vec![false; depth - 1];
@@ -33,7 +31,6 @@ impl SpcotRecver {
             depth,
             leave_n,
             secret_sum_f2: Block::default(),
-            channel,
         }
     }
 
