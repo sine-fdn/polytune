@@ -45,6 +45,17 @@ pub fn cmp_block(x: &[Block], y: &[Block], nblocks: usize) -> bool {
     true
 }
 
+pub fn get_lsb(x: Block) -> bool {
+    (x & 1) == 1
+}
+
+pub fn block_to_bool(data: &mut [bool], mut b: Block) {
+    for i in 0..128 {
+        data[i] = (b & 1) == 1;
+        b >>= 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

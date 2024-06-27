@@ -1,11 +1,11 @@
 use super::block::{xor_blocks_arr, Block, ZERO_BLOCK};
-use super::crypto_utils::CCRH;
+use super::utils::CCRH;
 use crate::channel::{Channel, MsgChannel};
 
 pub struct OTPre {
     pre_data: Vec<Block>,
     bits: Vec<bool>,
-    n: usize,
+    pub n: usize,
     ccrh: CCRH,
     length: usize,
     count: usize,

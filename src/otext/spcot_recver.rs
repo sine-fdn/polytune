@@ -1,8 +1,6 @@
 //! SPCOT receiver implementation
-use super::block::ZERO_BLOCK;
-
-use super::block::{make_block, Block};
-use super::crypto_utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red};
+use super::block::{make_block, Block, ZERO_BLOCK};
+use super::utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red};
 use super::twokeyprp::TwoKeyPRP;
 
 /// SPCOT Receiver

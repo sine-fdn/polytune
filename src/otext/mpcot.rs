@@ -2,17 +2,17 @@ use super::block::{Block, ZERO_BLOCK};
 use super::spcot_recver::SpcotRecver;
 use super::spcot_sender::SpcotSender;
 use super::preot::OTPre;
-use super::crypto_utils::{hash_once, GaloisFieldPacking};
+use super::utils::{hash_once, GaloisFieldPacking};
 
 pub struct MpcotReg {
     party: i32,
-    item_n: i32,
-    idx_max: i32,
-    m: i32,
-    tree_height: i32,
-    leave_n: i32,
-    tree_n: i32,
-    consist_check_cot_num: i32,
+    item_n: usize,
+    idx_max: usize,
+    m: i64,
+    pub tree_height: usize,
+    leave_n: i64,
+    pub tree_n: usize,
+    pub consist_check_cot_num: usize,
     is_malicious: bool,
     delta_f2k: Block,
     consist_check_chi_alpha: Option<Vec<Block>>,
@@ -22,15 +22,15 @@ pub struct MpcotReg {
 }
 
 impl MpcotReg {
-    pub fn new(party: i32, n: i32, t: i32, log_bin_sz: i32) -> Self {
+    pub fn new(party: i32, n: usize, t: usize, log_bin_sz: usize) -> Self {
         MpcotReg {
             party,
             item_n: t,
             idx_max: n,
             m: 0, //TODO Check
-            tree_height: log_bin_sz + 1,
+            tree_height: (log_bin_sz + 1) as usize,
             leave_n: 1 << (log_bin_sz as usize),
-            tree_n: t,
+            tree_n: t as usize,
             consist_check_cot_num: 128,
             is_malicious: false,
             delta_f2k: ZERO_BLOCK,
@@ -136,12 +136,12 @@ impl MpcotReg {
         }
     }
 
-    async fn consistency_check_f2k(&self, pre_cot_data: &mut [Block], num: i32) {
+    async fn consistency_check_f2k(&self, pre_cot_data: &mut [Block], num: usize) {
          if self.party == 1 { // ALICE
             let mut r1 = ZERO_BLOCK;
             let mut r2 = ZERO_BLOCK;
             self.consist_check_vw.as_ref().unwrap().iter().take(num as usize).for_each(|block| r1 ^= *block);
-            let mut x_prime = vec![false; 128];
+            let x_prime = vec![false; 128];
             //self.netio.recv(&mut x_prime).await;
             for (i, &x) in x_prime.iter().enumerate() {
                 if x {
@@ -159,7 +159,7 @@ impl MpcotReg {
             self.consist_check_chi_alpha.as_ref().unwrap().iter().take(num as usize).for_each(|block| chi_alpha ^= *block);
             self.consist_check_vw.as_ref().unwrap().iter().take(num as usize).for_each(|block| v ^= *block);
             //self.netio.send_bool_vec(&self.x_prime).await;
-            let mut dig = [ZERO_BLOCK; 2];
+            let dig = [ZERO_BLOCK; 2];
             //self.netio.recv(&mut dig).await;
             let mut digest = [ZERO_BLOCK; 2];
             hash_once(&mut digest, &(chi_alpha ^ v));

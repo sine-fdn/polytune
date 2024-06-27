@@ -1,9 +1,7 @@
 //! SPCOT sender implementation
-use super::block::{ALL_ONE_BLOCK, ZERO_BLOCK};
-
-use super::block::{Block, make_block};
+use super::block::{Block, make_block, ALL_ONE_BLOCK, ZERO_BLOCK};
 use super::twokeyprp::TwoKeyPRP;
-use super::crypto_utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red};
+use super::utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red};
 
 /// SPCOT Sender, removed PRG
 pub struct SpcotSender {
