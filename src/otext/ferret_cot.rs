@@ -2,6 +2,8 @@ use rand::Rng;
 use std::fs::File;
 use std::path::Path;
 
+use crate::channel::{MsgChannel, Channel};
+
 use super::base_cot::BaseCot;
 use super::block::{make_block, Block, ZERO_BLOCK};
 use super::constants::{PrimalLPNParameter, ALICE, BOB};
@@ -10,7 +12,7 @@ use super::mpcot::MpcotReg;
 use super::preot::OTPre;
 
 pub struct FerretCOT {
-    party: i32,
+    party: usize,
     m: usize,
     delta: Block,
     param: PrimalLPNParameter,
@@ -31,11 +33,12 @@ pub struct FerretCOT {
 
 impl FerretCOT {
     pub fn new(
-        party: i32,
+        party: usize,
         malicious: bool,
         run_setup: bool,
         param: PrimalLPNParameter,
         pre_file: String,
+        channel: &mut MsgChannel<impl Channel>
     ) -> Self {
         let base_cot = BaseCot::new(party, malicious);
         let one = make_block(0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFEu64);
@@ -65,9 +68,9 @@ impl FerretCOT {
                 let mut delta: Block = prg.gen();
                 delta &= cot.one;
                 delta ^= Block::from(1u128);
-                cot.setup(delta, pre_file.clone());
+                cot.setup(delta, pre_file.clone(), channel);
             } else {
-                cot.setup_internal(pre_file.clone());
+                cot.setup_internal(pre_file.clone(), channel);
             }
         }
 
@@ -108,13 +111,13 @@ impl FerretCOT {
         }
     }
 
-    pub fn setup(&mut self, delta: Block, pre_file: String) {
+    pub fn setup(&mut self, delta: Block, pre_file: String, channel: &mut MsgChannel<impl Channel>) {
         self.delta = delta;
-        self.setup_internal(pre_file);
+        self.setup_internal(pre_file, channel);
         self.ch[1] = delta;
     }
 
-    pub fn setup_internal(&mut self, pre_file: String) {
+    pub async fn setup_internal(&mut self, pre_file: String, channel: &mut MsgChannel<impl Channel>) {
         if pre_file != "" {
             self.pre_ot_filename = pre_file;
         } else {
@@ -172,6 +175,7 @@ impl FerretCOT {
                 &mut pre_ot_ini,
                 &mut lpn,
                 &mut pre_data_ini,
+                channel,
             );
 
             // Move ot_pre_data back into self
@@ -179,13 +183,14 @@ impl FerretCOT {
         }
     }
 
-    fn extend(
+    async fn extend(
         &mut self,
-        ot_output: &mut [Block],
+        ot_output: &mut Vec<Block>,
         mpcot: &mut MpcotReg,
         preot: &mut OTPre,
         lpn: &mut LpnF2,
-        ot_input: &mut [Block],
+        ot_input: &mut Vec<Block>,
+        channel: &mut MsgChannel<impl Channel>
     ) {
         if self.party == ALICE {
             mpcot.sender_init(self.delta);
@@ -193,16 +198,16 @@ impl FerretCOT {
             mpcot.recver_init();
         }
         mpcot.mpcot(ot_output, preot, ot_input);
-        lpn.compute(ot_output, &ot_input[mpcot.consist_check_cot_num..]);
+        lpn.compute(ot_output, ot_input[mpcot.consist_check_cot_num..].to_vec(), channel);
     }
 
-    fn extend_f2k(&mut self) {
+    fn extend_f2k(&mut self, channel: &mut MsgChannel<impl Channel>) {
         let mut ot_data = std::mem::take(&mut self.ot_data);
-        self.extend_f2k_base(&mut ot_data);
+        self.extend_f2k_base(&mut ot_data, channel);
         self.ot_data = ot_data;
     }
 
-    fn extend_f2k_base(&mut self, ot_buffer: &mut [Block]) {
+    async fn extend_f2k_base(&mut self, ot_buffer: &mut Vec<Block>, channel: &mut MsgChannel<impl Channel>) {
         let mut mpcot = self.mpcot.take().unwrap();
         let mut pre_ot = self.pre_ot.take().unwrap();
         let mut lpn_f2 = self.lpn_f2.take().unwrap();
@@ -220,6 +225,7 @@ impl FerretCOT {
             &mut pre_ot,
             &mut lpn_f2,
             &mut ot_pre_data,
+            channel
         );
 
         let offset = self.ot_limit as usize;
@@ -235,7 +241,7 @@ impl FerretCOT {
         self.ot_used = 0;
     }
 
-    pub fn rcot(&mut self, data: &mut [Block], num: usize) {
+    pub fn rcot(&mut self, data: &mut [Block], num: usize, channel: &mut MsgChannel<impl Channel>) {
         if self.ot_data.is_empty() {
             self.ot_data = vec![ZERO_BLOCK; self.param.n as usize];
         }
@@ -264,17 +270,17 @@ impl FerretCOT {
             last_round_ot -= self.ot_limit;
         }
         for _ in 0..round_inplace {
-            self.extend_f2k_base(pt);
+            self.extend_f2k_base(&mut pt.to_vec(), channel);
             self.ot_used = self.ot_limit;
             pt = &mut pt[self.ot_limit as usize..];
         }
         if round_memcpy {
-            self.extend_f2k();
+            self.extend_f2k(channel);
             pt[..self.ot_limit as usize].copy_from_slice(&self.ot_data[..self.ot_limit as usize]);
             pt = &mut pt[self.ot_limit as usize..];
         }
         if last_round_ot > 0 {
-            self.extend_f2k();
+            self.extend_f2k(channel);
             pt[..last_round_ot as usize].copy_from_slice(&self.ot_data[..last_round_ot as usize]);
             self.ot_used = last_round_ot;
         }
@@ -314,7 +320,7 @@ impl FerretCOT {
         let mut n_pre = 0;
         let mut index = 0;
 
-        party = i32::from_le_bytes(buffer[index..index + 8].try_into().unwrap());
+        party = usize::from_le_bytes(buffer[index..index + 8].try_into().unwrap());
         index += 8;
         if party != self.party {
             panic!("wrong party");
@@ -357,9 +363,13 @@ mod tests {
     use crate::otext::constants::FERRET_B13;
     use crate::otext::ferret_cot::FerretCOT;
 
+    use crate::channel::{SimpleChannel, MsgChannel};
+
     #[test]
     fn test_ferret() {
         let party = 1; // Example party value
-        FerretCOT::new(party, true, true, FERRET_B13, "file.txt".to_string());
+        let mut channels = SimpleChannel::channels(2);
+        let mut msgchannel1 = MsgChannel(channels.pop().unwrap());
+        FerretCOT::new(party, true, true, FERRET_B13, "file.txt".to_string(), &mut msgchannel1);
     }
 }

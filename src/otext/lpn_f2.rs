@@ -1,11 +1,12 @@
 use rand::{thread_rng, Rng};
 
-use super::utils::PRP;
-use super::block::{Block, make_block};
-use super::constants::ALICE;
+use super::utils::{PRP, aes_ecb_encrypt_blks};
+use super::block::{make_block, Block, ZERO_BLOCK};
+use super::constants::{ALICE, BOB, D};
+use crate::channel::{MsgChannel, Channel};
 
 pub struct LpnF2 {
-    party: i32,
+    party: usize,
     n: usize,
     k: usize,
     mask: usize,
@@ -13,7 +14,7 @@ pub struct LpnF2 {
 }
 
 impl LpnF2 {
-    pub fn new(party: i32, n: usize, k: usize) -> LpnF2 {
+    pub fn new(party: usize, n: usize, k: usize) -> LpnF2 {
         let mut mask = 1;
         while mask < k {
             mask = (mask << 1) | 0x1;
@@ -24,24 +25,19 @@ impl LpnF2 {
             n,
             k,
             mask,
-            seed: 0,
+            seed: ZERO_BLOCK,
         }
     }
 
-    fn __compute4(&self, nn: &mut [Block], kk: &[Block], i: usize, prp: &PRP) {
-        let mut tmp = vec![0; 10];
-        for m in 0..10 {
+    fn __compute4(&self, nn: &mut Vec<Block>, kk: Vec<Block>, i: usize, prp: &PRP) {
+        let mut tmp = vec![ZERO_BLOCK; D];
+        for m in 0..D {
             tmp[m] = make_block(i as u64, m as u64);
         }
-        prp.permute_block(&mut tmp, 10);
-        let r: Vec<u32> = tmp.iter().flat_map(|&block| {
-            block.to_le_bytes().chunks(4).map(|chunk| {
-                u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
-            }).collect::<Vec<_>>()  // Specify the type for the inner collect
-        }).collect();
+        let out = aes_ecb_encrypt_blks(tmp, D, prp.aes_key);
         for m in 0..4 {
-            for j in 0..10 {
-                let mut index = (r[m * 10 + j] as usize) & (self.mask as usize);
+            for j in 0..D {
+                let mut index = (out[m * D + j] as usize) & (self.mask as usize);
                 if index >= self.k as usize {
                     index -= self.k as usize;
                 }
@@ -50,59 +46,76 @@ impl LpnF2 {
         }
     }
 
-    fn __compute1(&self, nn: &mut [Block], kk: &[Block], i: usize, prp: &PRP) {
-        let nr_blocks = 10 / 4 + if 10 % 4 != 0 { 1 } else { 0 };
+    fn __compute1(&self, nn: &mut Vec<Block>, kk: Vec<Block>, i: usize, prp: &PRP) {
+        let nr_blocks = D / 4 + if D % 4 != 0 { 1 } else { 0 };
         let mut tmp = vec![0; nr_blocks];
         for m in 0..nr_blocks {
             tmp[m] = make_block(i as u64, m as u64);
         }
-        prp.permute_block(&mut tmp, nr_blocks);
-        let r: Vec<u32> = tmp
-        .iter()
-        .flat_map(|&block| {
-            block.to_le_bytes().chunks(4).map(|chunk| {
-                u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
-            }).collect::<Vec<_>>()  // Specify the type for the inner collect
-        })
-        .collect();
-        for j in 0..10 {
-            nn[i as usize] ^= kk[(r[j] % self.k as u32) as usize];
+        let r: Vec<u128> = prp.permute_block(tmp, nr_blocks);
+        for j in 0..D {
+            nn[i as usize] ^= kk[(r[j] % self.k as u128) as usize];
         }
     }
 
-    fn task(&self, nn: &mut [Block], kk: &[Block], start: usize, end: usize) {
+    fn task(&self, nn: &mut Vec<Block>, kk: Vec<Block>, start: usize, end: usize) {
         let prp = PRP::with_key(self.seed);
         let mut j = start;
         while j < end - 4 {
-            self.__compute4(nn, kk, j, &prp);
+            self.__compute4(nn, kk.clone(), j, &prp);
             j += 4;
         }
         while j < end {
-            self.__compute1(nn, kk, j, &prp);
+            self.__compute1(nn, kk.clone(), j, &prp);
             j += 1;
         }
     }
 
-    pub fn compute(&mut self, nn: &mut [Block], kk: &[Block]) {
-        self.seed = self.seed_gen();
+    pub async fn compute(&mut self, nn: &mut Vec<Block>, kk: Vec<Block>, channel: &mut MsgChannel<impl Channel>) {
+        self.seed = self.seed_gen(channel).await;
         self.task(nn, kk, 0, self.n);
     }
 
-    fn seed_gen(&mut self) -> Block {
-        let mut seed = 0;
+    async fn seed_gen(&mut self, channel: &mut MsgChannel<impl Channel>) -> Block {
+        let seed: Block;
         if self.party == ALICE {
             let mut prg = thread_rng();
             seed = prg.gen();
-            //self.io.send_data(&seed.to_le_bytes());
+            channel.send_to(BOB, "seed_gen", &seed).await.unwrap();
         } else {
-            let mut buf = [0u8; 16];
-            //self.io.recv_data(&mut buf);
-            seed = u128::from_le_bytes(buf);
+            seed = channel.recv_from(ALICE, "seed_gen").await.unwrap();
         }
         seed
     }
 
-    pub fn bench(&self, nn: &mut [Block], kk: &[Block]) {
-        self.task(nn, kk, 0, self.n);
+    pub fn _bench(&mut self, nn: &mut Vec<Block>, kk: Vec<Block>){
+        self.task(nn, kk, 0, nn.len());
     }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        channel::Error,
+        otext::constants::FERRET_B13,
+        otext::lpn_f2::LpnF2,
+        otext::block::Block,
+    };
+
+    use rand::Rng;
+
+    #[tokio::test]
+    async fn test_lpn_f2() -> Result<(), Error> {
+        //let mut channels = SimpleChannel::channels(2);
+        //let mut msgchannel1 = MsgChannel(channels.pop().unwrap());
+        //let mut msgchannel2 = MsgChannel(channels.pop().unwrap());
+        let mut lpnf2: LpnF2 = LpnF2::new(1, FERRET_B13.n, FERRET_B13.k);
+        let mut prg = rand::thread_rng();
+        let mut nn: Vec<Block> = vec![prg.gen(); 20];
+        let kk: Vec<Block> = vec![prg.gen(); 20];
+        lpnf2._bench(&mut nn, kk);
+        Ok(())
+    }
+
 }

@@ -2,11 +2,9 @@
 use blake3::Hasher;
 use super::block::ZERO_BLOCK;
 use aes::Aes128;
-use aes::cipher::{BlockEncrypt, KeyInit};
-
+use aes::cipher::{BlockEncrypt, BlockCipher, KeyInit};
 use super::block::{Block, xor_blocks_arr};
-
-pub const AES_BATCH_SIZE: usize = 8;
+use super::constants::AES_BATCH_SIZE;
 
 /// Function to hash data using BLAKE3 and store the result in a Block[2] array
 pub fn hash_once(dgst: &mut [Block; 2], data: &Block) {
@@ -132,47 +130,71 @@ impl GaloisFieldPacking {
     }
 }
 
-pub struct PRP {
-    aes_key: Aes128,
+#[derive(Debug, Clone, Copy)]
+pub struct AesKey {
+    userkey: Block,
+}
+
+/// Encrypts multiple blocks using AES-128 in ECB mode
+pub fn aes_ecb_encrypt_blks(blocks: Vec<Block>, nblks: usize, key: AesKey) -> Vec<Block> {
+    let aes_key: [u8; 16] = key.userkey.to_le_bytes();
+    let cipher = Aes128::new_from_slice(&aes_key).unwrap();
+    let mut out: Vec<Block> = vec![ZERO_BLOCK; nblks];
+
+    // Iterate over each block and encrypt it
+    for i in 0..nblks {
+        let mut block_bytes = blocks[i].to_be_bytes();
+        let block_array: &mut [u8; 16] = &mut block_bytes;
+
+        let mut block_cipher = aes::Block::clone_from_slice(block_array);
+        cipher.encrypt_block(&mut block_cipher);
+
+        out[i] = u128::from_be_bytes(block_cipher.into());
+    }
+    out
+}
+
+pub struct PRP{
+    pub aes_key: AesKey,
 }
 
 impl PRP {
     // Constructor with no key
-    pub fn new() -> PRP {
+    fn new() -> PRP {
         PRP {
-            aes_key: Aes128::new(&ZERO_BLOCK.to_le_bytes().into()),
+            aes_key: AesKey{ userkey:ZERO_BLOCK },
         }
     }
 
     // Constructor with a key
     pub fn with_key(key: Block) -> PRP {
         PRP {
-            aes_key: Aes128::new(&key.to_le_bytes().into()),
+            aes_key: AesKey{ userkey:key },
         }
     }
 
     // Permute blocks
-    pub fn permute_block(&self, data: &mut [Block], nblocks: usize) {
-        for chunk in data.chunks_exact_mut(AES_BATCH_SIZE) {
-            for block in chunk.iter_mut() {
-                let mut block_bytes = block.to_le_bytes();
-                self.aes_key.encrypt_block((&mut block_bytes).into());
-                *block = u128::from_le_bytes(block_bytes);
-            }
+    pub fn permute_block(&self, data: Vec<Block>, nblocks: usize) -> Vec<Block>{
+        let mut out: Vec<Block> = vec![ZERO_BLOCK; data.len()];
+        for i in 0..nblocks / AES_BATCH_SIZE {
+            let start = i * AES_BATCH_SIZE;
+            let end = start + AES_BATCH_SIZE;
+            let batch = &data[start..end];
+            let encrypted_batch = aes_ecb_encrypt_blks(batch.to_vec(), AES_BATCH_SIZE, self.aes_key);
+            out[start..end].copy_from_slice(&encrypted_batch);
         }
-
-        let remainder = nblocks % AES_BATCH_SIZE;
-        if remainder > 0 {
-            let start = nblocks - remainder;
-            for i in start..nblocks {
-                let mut block_bytes = data[i].to_le_bytes();
-                self.aes_key.encrypt_block((&mut block_bytes).into());
-                data[i] = u128::from_le_bytes(block_bytes);
-            }
+        let remain = nblocks % AES_BATCH_SIZE;
+        if remain > 0 {
+            let start = nblocks - remain;
+            let end = nblocks;
+            let batch = &data[start..end];
+            let encrypted_batch = aes_ecb_encrypt_blks(batch.to_vec(), remain, self.aes_key);
+            out[start..end].copy_from_slice(&encrypted_batch);
         }
+        out
     }
 }
-
+    
 pub struct CCRH {
     prp: PRP,
 }
@@ -184,31 +206,32 @@ impl CCRH {
 
     pub fn h(&self, input: Block) -> Block {
         let t = sigma(input);
-        self.prp.permute_block(&mut [t], 1);
+        let tt:Vec<Block> = vec![t; 1];
+        let mut out = self.prp.permute_block( tt, 1);
         t ^ input
     }
 
     pub fn h_fixed<const N: usize>(&self, input: &[Block; N]) -> Vec<Block> {
-        let mut tmp = [0u128; N];
+        let mut tmp = vec![ZERO_BLOCK; N];
         for i in 0..N {
             tmp[i] = sigma(input[i]);
         }
-        self.prp.permute_block(&mut tmp, N);
-        xor_blocks_arr(&tmp, input, N)
+        let mut out = self.prp.permute_block(tmp, N);
+        xor_blocks_arr(&mut out, input, N)
     }
 
     pub fn hn(&self, input: &[Block], length: usize, scratch: Option<&mut [Block]>) -> Vec<Block> {
         let mut out = vec![0u128; length];
-        let mut local_scratch = vec![0u128; length];
-        let scratch = scratch.unwrap_or(local_scratch.as_mut());
+        let local_scratch = vec![ZERO_BLOCK; length];
+        let mut scratch = local_scratch;
 
         for i in 0..length {
             scratch[i] = sigma(input[i]);
             out[i] = scratch[i];
         }
 
-        self.prp.permute_block(scratch, length);
-        xor_blocks_arr(scratch, &out, length)
+        let mut res = self.prp.permute_block(scratch, length);
+        xor_blocks_arr(&mut res, &out, length)
     }
 }
 

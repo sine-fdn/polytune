@@ -5,7 +5,7 @@ use super::preot::OTPre;
 use super::utils::{hash_once, GaloisFieldPacking};
 
 pub struct MpcotReg {
-    party: i32,
+    party: usize,
     item_n: usize,
     idx_max: usize,
     m: i64,
@@ -22,7 +22,7 @@ pub struct MpcotReg {
 }
 
 impl MpcotReg {
-    pub fn new(party: i32, n: usize, t: usize, log_bin_sz: usize) -> Self {
+    pub fn new(party: usize, n: usize, t: usize, log_bin_sz: usize) -> Self {
         MpcotReg {
             party,
             item_n: t,

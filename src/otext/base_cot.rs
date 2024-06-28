@@ -30,7 +30,7 @@ impl Iknp {
 }
 
 pub struct BaseCot {
-    party: i32,
+    party: usize,
     one: Block,
     minusone: Block,
     ot_delta: Block,
@@ -39,7 +39,7 @@ pub struct BaseCot {
 }
 
 impl BaseCot {
-    pub fn new(party: i32, malicious: bool) -> Self {
+    pub fn new(party: usize, malicious: bool) -> Self {
         let iknp = Iknp::new(malicious);
         let minusone = make_block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFE);
         let one = make_block(0, 1);
