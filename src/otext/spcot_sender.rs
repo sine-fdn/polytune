@@ -88,9 +88,8 @@ impl SpcotSender {
     /// Consistency check for malicious security
     pub fn consistency_check_msg_gen(&mut self) -> Block {
         let mut chi = vec![Block::default(); self.leave_n];
-        let mut digest = [Block::default(); 2];
-        hash_once(&mut digest, &self.secret_sum_f2);
-        uni_hash_coeff_gen(&mut chi, digest[0], self.leave_n);
-        vector_inn_prdt_sum_red(&chi, &self.ggm_tree, self.leave_n)
+        let digest = hash_once(self.secret_sum_f2);
+        uni_hash_coeff_gen(&mut chi, digest, self.leave_n);
+        vector_inn_prdt_sum_red(chi, &mut self.ggm_tree, self.leave_n)
     }
 }

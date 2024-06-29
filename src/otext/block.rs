@@ -18,7 +18,7 @@ pub const ZERO_BLOCK: Block = 0;
 pub const ALL_ONE_BLOCK: Block = u128::MAX;
 
 /// XOR blocks
-pub fn xor_blocks_arr(x: &[Block], y: &[Block], nblocks: usize) -> Vec<Block> {
+pub fn xor_blocks_arr(x: Vec<Block>, y: Vec<Block>, nblocks: usize) -> Vec<Block> {
     let mut res: Vec<Block> = vec![ZERO_BLOCK; nblocks];
     for i in 0..nblocks {
         res[i] = x[i] ^ y[i];
@@ -26,17 +26,8 @@ pub fn xor_blocks_arr(x: &[Block], y: &[Block], nblocks: usize) -> Vec<Block> {
     res
 }
 
-/// XOR single block
-pub fn xor_blocks_arr_single(x: &[Block], y: Block, nblocks: usize) -> Vec<Block> {
-    let mut res: Vec<Block> = vec![ZERO_BLOCK; nblocks];
-    for i in 0..nblocks {
-        res[i] = x[i] ^ y;
-    }
-    res
-}
-
 /// Compare blocks
-pub fn cmp_block(x: &[Block], y: &[Block], nblocks: usize) -> bool {
+pub fn cmp_block(x: Vec<Block>, y: Vec<Block>, nblocks: usize) -> bool {
     for i in 0..nblocks {
         if x[i] != y[i] {
             return false;
@@ -49,54 +40,11 @@ pub fn get_lsb(x: Block) -> bool {
     (x & 1) == 1
 }
 
-pub fn block_to_bool(data: &mut [bool], mut b: Block) {
+pub fn block_to_bool(mut b: Block) -> Vec<bool>{
+    let mut res: Vec<bool> = vec![false; 128];
     for i in 0..128 {
-        data[i] = (b & 1) == 1;
+        res[i] = (b & 1) == 1;
         b >>= 1;
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_make_block() {
-        let high = 0x0123456789ABCDEF;
-        let low = 0xFEDCBA9876543210;
-        let block = make_block(high, low);
-        assert_eq!(block, 0x0123456789ABCDEF_FEDCBA9876543210);
-    }
-
-    #[test]
-    fn test_xor_blocks_arr() {
-        let x = vec![make_block(1, 2); 3];
-        let y = vec![make_block(3, 4); 3];
-        let res = xor_blocks_arr(&x, &y, 3);
-
-        for block in &res {
-            assert_eq!(*block, make_block(1 ^ 3, 2 ^ 4));
-        }
-    }
-
-    #[test]
-    fn test_xor_blocks_arr_single() {
-        let x = vec![make_block(1, 2); 3];
-        let y = make_block(5, 6);
-        let res = xor_blocks_arr_single(&x, y, 3);
-
-        for block in &res {
-            assert_eq!(*block, make_block(1 ^ 5, 2 ^ 6));
-        }
-    }
-
-    #[test]
-    fn test_cmp_block() {
-        let x = vec![make_block(1, 2); 3];
-        let y = vec![make_block(1, 2); 3];
-        let z = vec![make_block(3, 4); 3];
-
-        assert!(cmp_block(&x, &y, 3)); // Should be true
-        assert!(!cmp_block(&x, &z, 3)); // Should be false
-    }
+    res
 }

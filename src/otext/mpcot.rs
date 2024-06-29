@@ -53,7 +53,7 @@ impl MpcotReg {
         self.item_pos_recver.resize(self.item_n as usize, 0);
     }
 
-    pub async fn mpcot(&mut self, sparse_vector: &mut [Block], ot: &mut OTPre, pre_cot_data: &mut [Block]) {
+    pub async fn mpcot(&mut self, sparse_vector: &mut [Block], ot: &mut OTPre, pre_cot_data: &mut Vec<Block>) {
         if self.party == 2 { // BOB
             self.consist_check_chi_alpha = Some(vec![ZERO_BLOCK; self.item_n as usize]);
         }
@@ -136,10 +136,9 @@ impl MpcotReg {
         }
     }
 
-    async fn consistency_check_f2k(&self, pre_cot_data: &mut [Block], num: usize) {
+    async fn consistency_check_f2k(&self, pre_cot_data: &mut Vec<Block>, num: usize) {
          if self.party == 1 { // ALICE
             let mut r1 = ZERO_BLOCK;
-            let mut r2 = ZERO_BLOCK;
             self.consist_check_vw.as_ref().unwrap().iter().take(num as usize).for_each(|block| r1 ^= *block);
             let x_prime = vec![false; 128];
             //self.netio.recv(&mut x_prime).await;
@@ -148,10 +147,9 @@ impl MpcotReg {
                     pre_cot_data[i] ^= self.delta_f2k;
                 }
             }
-            self.pack.packing(&mut r2, pre_cot_data);
+            let r2 = self.pack.packing(pre_cot_data.to_vec());
             r1 ^= r2;
-            let mut dig = [ZERO_BLOCK; 2];
-            hash_once(&mut dig, &r1);
+            let dig = hash_once(r1);
             //self.netio.send(&dig).await;
         } else { // BOB
             let mut chi_alpha = ZERO_BLOCK;
@@ -159,10 +157,10 @@ impl MpcotReg {
             self.consist_check_chi_alpha.as_ref().unwrap().iter().take(num as usize).for_each(|block| chi_alpha ^= *block);
             self.consist_check_vw.as_ref().unwrap().iter().take(num as usize).for_each(|block| v ^= *block);
             //self.netio.send_bool_vec(&self.x_prime).await;
-            let dig = [ZERO_BLOCK; 2];
+            let dig = ZERO_BLOCK;
             //self.netio.recv(&mut dig).await;
             let mut digest = [ZERO_BLOCK; 2];
-            hash_once(&mut digest, &(chi_alpha ^ v));
+            let digest = hash_once((chi_alpha ^ v));
             if digest != dig {
                 panic!("Consistency check failed");
             }

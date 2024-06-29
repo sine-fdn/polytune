@@ -60,8 +60,7 @@ impl BaseCot {
                 let delta: Block = prg.gen();
                 delta & self.minusone ^ self.one
             });
-            let mut delta_bool = [false; 128];
-            block_to_bool(&mut delta_bool, self.ot_delta);
+            let delta_bool = block_to_bool(self.ot_delta);
             self.iknp.setup_send(&delta_bool);
         } else {
             self.iknp.setup_recv();
@@ -105,7 +104,7 @@ impl BaseCot {
         }
     }
 
-    pub fn check_cot(&self, data: &[Block], len: i64) -> bool {
+    pub fn check_cot(&self, data: Vec<Block>, len: i64) -> bool {
         if self.party == ALICE {
             //self.io.send_block(&self.ot_delta, 1);
             //self.io.send_block(data, len as usize);
@@ -118,7 +117,7 @@ impl BaseCot {
             for i in 0..len as usize {
                 tmp[i] ^= ch[get_lsb(data[i]) as usize];
             }
-            cmp_block(&tmp, data, len as usize)
+            cmp_block(tmp, data, len as usize)
         }
     }
 }

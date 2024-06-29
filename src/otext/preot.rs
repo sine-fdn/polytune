@@ -26,25 +26,25 @@ impl OTPre {
         }
     }
 
-    pub fn send_pre(&mut self, data: &[Block], in_delta: Block) {
+    pub fn send_pre(&mut self, data: Vec<Block>, in_delta: Block) {
         self.delta = in_delta;
 
         // Process with hn and update pre_data
-        let hn_first_half = self.ccrh.hn(data, self.n, Some(&mut self.pre_data[self.n..]));
+        let hn_first_half = self.ccrh.hn(data, self.n, &mut self.pre_data[self.n..].to_vec());
         self.pre_data[..self.n].copy_from_slice(&hn_first_half);
 
         // Perform XOR with delta
         let delta_vec = vec![in_delta; self.n];
         let mut xor_result = vec![0u128; self.n];
-        xor_result = xor_blocks_arr(&hn_first_half, &delta_vec, self.n);
+        xor_result = xor_blocks_arr(hn_first_half, delta_vec, self.n);
         self.pre_data[self.n..2 * self.n].copy_from_slice(&xor_result);
 
         // Process the second half with hn
-        let hn_second_half = self.ccrh.hn(&self.pre_data[self.n..2 * self.n], self.n, None);
+        let hn_second_half = self.ccrh.hn_null(self.pre_data[self.n..2 * self.n].to_vec(), self.n);
         self.pre_data[self.n..2 * self.n].copy_from_slice(&hn_second_half);
     }
 
-    pub fn recv_pre(&mut self, data: &[Block], b: Option<&[bool]>) {
+    pub fn recv_pre(&mut self, data: Vec<Block>, b: Option<&[bool]>) {
         if let Some(b) = b {
             self.bits.copy_from_slice(b);
         } else {
@@ -52,7 +52,7 @@ impl OTPre {
                 self.bits[i] = block & 1 == 1;
             }
         }
-        self.pre_data[..self.n].copy_from_slice(&self.ccrh.hn(data, self.n, None));
+        self.pre_data[..self.n].copy_from_slice(&self.ccrh.hn_null(data, self.n));
     }
 
     pub fn choices_sender(&mut self) {

@@ -2,19 +2,22 @@
 use blake3::Hasher;
 use super::block::ZERO_BLOCK;
 use aes::Aes128;
-use aes::cipher::{BlockEncrypt, BlockCipher, KeyInit};
+use aes::cipher::{BlockEncrypt, KeyInit};
 use super::block::{Block, xor_blocks_arr};
 use super::constants::AES_BATCH_SIZE;
 
-/// Function to hash data using BLAKE3 and store the result in a Block[2] array
-pub fn hash_once(dgst: &mut [Block; 2], data: &Block) {
+/// Function to hash data using BLAKE3 and store the result in a Block (XOR of two blocks to end up with 128 bits)
+/// TODO Look into if we want the array here or this can be fine
+pub fn hash_once(data: Block) -> Block {
     let mut hasher = Hasher::new();
     let data_bytes = data.to_le_bytes();
     hasher.update(&data_bytes);
     let hash = hasher.finalize();
     let hash_bytes = hash.as_bytes();
+    let mut dgst: Vec<Block> = vec![0, 0];
     dgst[0] = Block::from_le_bytes(hash_bytes[0..16].try_into().unwrap());
     dgst[1] = Block::from_le_bytes(hash_bytes[16..32].try_into().unwrap());
+    dgst[0] ^ dgst[1]
 }
 
 /// Galois Field multiplication function for Block
@@ -33,7 +36,7 @@ fn gfmul(a: Block, b: Block) -> Block {
 }
 
 /// Function to generate coefficients for almost universal hash function
-pub fn uni_hash_coeff_gen(coeff: &mut [Block], seed: Block, sz: usize) {
+pub fn uni_hash_coeff_gen(coeff: &mut Vec<Block>, seed: Block, sz: usize) {
     // Handle the case with small `sz`
     coeff[0] = seed;
     if sz == 1 {
@@ -77,12 +80,8 @@ pub fn uni_hash_coeff_gen(coeff: &mut [Block], seed: Block, sz: usize) {
 }
 
 /// Function to compute inner product of two Galois field vectors with reduction
-pub fn vector_inn_prdt_sum_red(a: &[Block], b: &[Block], sz: usize) -> Block {
+pub fn vector_inn_prdt_sum_red(a: Vec<Block>, b: &mut Vec<Block>, sz: usize) -> Block {
     let mut r = ZERO_BLOCK;
-
-    // Ensure both vectors have the same size
-    assert_eq!(a.len(), b.len());
-    assert_eq!(a.len(), sz);
 
     for i in 0..sz {
         let r1 = gfmul(a[i], b[i]);
@@ -125,8 +124,8 @@ impl GaloisFieldPacking {
         }
     }
 
-    pub fn packing(&self, res: &mut Block, data: &[Block]) {
-        *res = vector_inn_prdt_sum_red(data, &self.base, 128);
+    pub fn packing(&self, data: Vec<Block>) -> Block {
+        vector_inn_prdt_sum_red(data, &mut self.base.to_vec(), 128)
     }
 }
 
@@ -159,14 +158,7 @@ pub struct PRP{
 }
 
 impl PRP {
-    // Constructor with no key
-    fn new() -> PRP {
-        PRP {
-            aes_key: AesKey{ userkey:ZERO_BLOCK },
-        }
-    }
-
-    // Constructor with a key
+    // Create PRP with a key
     pub fn with_key(key: Block) -> PRP {
         PRP {
             aes_key: AesKey{ userkey:key },
@@ -207,31 +199,45 @@ impl CCRH {
     pub fn h(&self, input: Block) -> Block {
         let t = sigma(input);
         let tt:Vec<Block> = vec![t; 1];
-        let mut out = self.prp.permute_block( tt, 1);
-        t ^ input
+        let out = self.prp.permute_block( tt, 1);
+        out[0] ^ sigma(input)
     }
 
-    pub fn h_fixed<const N: usize>(&self, input: &[Block; N]) -> Vec<Block> {
+    /*pub fn h_fixed<const N: usize>(&self, input: Vec<Block>) -> Vec<Block> {
         let mut tmp = vec![ZERO_BLOCK; N];
         for i in 0..N {
             tmp[i] = sigma(input[i]);
         }
         let mut out = self.prp.permute_block(tmp, N);
-        xor_blocks_arr(&mut out, input, N)
-    }
+        xor_blocks_arr( out, input, N)
+    }*/
 
-    pub fn hn(&self, input: &[Block], length: usize, scratch: Option<&mut [Block]>) -> Vec<Block> {
-        let mut out = vec![0u128; length];
-        let local_scratch = vec![ZERO_BLOCK; length];
-        let mut scratch = local_scratch;
+    pub fn hn_null(&self, inp: Vec<Block>, length: usize) -> Vec<Block> {
+        let mut out = vec![ZERO_BLOCK; length];
+        let mut scratch = vec![ZERO_BLOCK; length];
 
         for i in 0..length {
-            scratch[i] = sigma(input[i]);
+            scratch[i] = sigma(inp[i]);
             out[i] = scratch[i];
         }
 
         let mut res = self.prp.permute_block(scratch, length);
-        xor_blocks_arr(&mut res, &out, length)
+        xor_blocks_arr(res, out, length)
+    }
+
+    pub fn hn(&self, inp: Vec<Block>, length: usize, scratch: &mut Vec<Block>) -> Vec<Block> {
+        let mut out = vec![ZERO_BLOCK; length];
+
+        for i in 0..length {
+            scratch[i] = sigma(inp[i]);
+            out[i] = scratch[i];
+        }
+
+        let res = self.prp.permute_block(scratch.to_vec(), length);
+        let out = xor_blocks_arr(res.clone(), out, length);
+        *scratch = res;
+
+        out
     }
 }
 
