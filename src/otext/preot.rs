@@ -68,7 +68,7 @@ impl OTPre {
         self.count = 0;
     }
 
-    pub fn send(&self, m0: &[Block], m1: &[Block], length: usize, channel2: &mut MsgChannel<impl Channel>, s: usize) {
+    pub fn send(&self, m0: Vec<Block>, m1: Vec<Block>, length: usize, channel2: &mut MsgChannel<impl Channel>, s: usize) {
         let mut pad = [0u128; 2];
         let mut k = s * length;
         let party = 1; //TODO party

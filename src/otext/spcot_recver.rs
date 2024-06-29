@@ -1,7 +1,14 @@
 //! SPCOT receiver implementation
-use super::block::{make_block, Block, ZERO_BLOCK};
-use super::utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red};
-use super::twokeyprp::TwoKeyPRP;
+use crate::{
+    channel::{Channel, MsgChannel},
+    otext::{
+        block::{make_block, Block, ZERO_BLOCK},
+        constants::ALICE,
+        preot::OTPre,
+        twokeyprp::TwoKeyPRP,
+        utils::{hash_once, uni_hash_coeff_gen, vector_inn_prdt_sum_red},
+    },
+};
 
 /// SPCOT Receiver
 pub struct SpcotRecver {
@@ -18,17 +25,17 @@ pub struct SpcotRecver {
 impl SpcotRecver {
     pub fn new(depth: usize) -> Self {
         let leave_n = 1 << (depth - 1);
-        let m = vec![Block::default(); depth - 1];
+        let m = vec![ZERO_BLOCK; depth - 1];
         let b = vec![false; depth - 1];
 
         SpcotRecver {
-            ggm_tree: vec![],
+            ggm_tree: Vec::new(),
             m,
             b,
             choice_pos: 0,
             depth,
             leave_n,
-            secret_sum_f2: Block::default(),
+            secret_sum_f2: ZERO_BLOCK,
         }
     }
 
@@ -44,15 +51,19 @@ impl SpcotRecver {
         self.choice_pos
     }
 
-    // TODO OTs through channel
+    // TODO ALICE or BOB?
+    pub async fn recv_f2k(&mut self, ot: OTPre, channel: &mut MsgChannel<impl Channel>, s: usize) {
+        ot.recv(&mut self.m, &mut self.b, self.depth - 1, channel, s);
+        self.secret_sum_f2 = channel.recv_from(ALICE, "secret_sum").await.unwrap();
+    }
 
     // Receive the message and reconstruct the tree
     pub fn compute(&mut self, ggm_tree_mem: Vec<Block>) {
         self.ggm_tree = ggm_tree_mem;
         self.ggm_tree_reconstruction();
-        self.ggm_tree[self.choice_pos] = Block::default();
+        self.ggm_tree[self.choice_pos] = ZERO_BLOCK;
 
-        let mut nodes_sum = Block::default();
+        let mut nodes_sum = ZERO_BLOCK;
         let one = make_block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFE);
         for i in 0..self.leave_n {
             self.ggm_tree[i] &= one;
@@ -120,7 +131,7 @@ impl SpcotRecver {
 
     //Check
     pub fn consistency_check_msg_gen(&mut self, chi_alpha: &mut Block) -> Block {
-        let mut chi = vec![Block::default(); self.leave_n];
+        let mut chi = vec![ZERO_BLOCK; self.leave_n];
         let digest = hash_once(self.secret_sum_f2);
         uni_hash_coeff_gen(&mut chi, digest, self.leave_n);
         *chi_alpha = chi[self.choice_pos];

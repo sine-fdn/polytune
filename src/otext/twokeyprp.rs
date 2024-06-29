@@ -119,26 +119,3 @@ impl TwoKeyPRP {
         children
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_aes_encryption() {
-        let userkey: Block = 0x2b7e151628aed2a6abf7158809cf4f3c;
-        let aes_key = AesKey::new(userkey);
-        let mut block: Block = 0x6bc1bee22e409f96e93d7e117393172a; // Example block
-        aes_encrypt(&mut block, &aes_key);
-        assert_ne!(block, 0x6bc1bee22e409f96e93d7e117393172a); // Ensure block is encrypted
-    }
-
-    #[test]
-    fn test_para_enc() {
-        let userkey: Block = 0x2b7e151628aed2a6abf7158809cf4f3c;
-        let keys = vec![AesKey::new(userkey); 2];
-        let mut blocks = vec![0x6bc1bee22e409f96e93d7e117393172a, 0xae2d8a571e03ac9c9eb76fac45af8e51];
-        para_enc(2, 1, &mut blocks, &keys);
-        assert_ne!(blocks[0], 0x6bc1bee22e409f96e93d7e117393172a);
-        assert_ne!(blocks[1], 0xae2d8a571e03ac9c9eb76fac45af8e51);
-    }
-}

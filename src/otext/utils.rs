@@ -1,10 +1,12 @@
 //! Smaller crypto utilities
-use blake3::Hasher;
-use super::block::ZERO_BLOCK;
-use aes::Aes128;
 use aes::cipher::{BlockEncrypt, KeyInit};
-use super::block::{Block, xor_blocks_arr};
-use super::constants::AES_BATCH_SIZE;
+use aes::Aes128;
+use blake3::Hasher;
+
+use crate::otext::{
+    block::{xor_blocks_arr, Block, ZERO_BLOCK},
+    constants::AES_BATCH_SIZE,
+};
 
 /// Function to hash data using BLAKE3 and store the result in a Block (XOR of two blocks to end up with 128 bits)
 /// TODO Look into if we want the array here or this can be fine
@@ -96,9 +98,7 @@ pub struct GaloisFieldPacking {
 
 impl GaloisFieldPacking {
     pub fn new() -> Self {
-        let mut gfp = GaloisFieldPacking {
-            base: [0; 128],
-        };
+        let mut gfp = GaloisFieldPacking { base: [0; 128] };
         gfp.packing_base_gen();
         gfp
     }
@@ -131,7 +131,7 @@ impl GaloisFieldPacking {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AesKey {
-    userkey: Block,
+    pub userkey: Block,
 }
 
 /// Encrypts multiple blocks using AES-128 in ECB mode
@@ -153,7 +153,7 @@ pub fn aes_ecb_encrypt_blks(blocks: Vec<Block>, nblks: usize, key: AesKey) -> Ve
     out
 }
 
-pub struct PRP{
+pub struct PRP {
     pub aes_key: AesKey,
 }
 
@@ -161,18 +161,19 @@ impl PRP {
     // Create PRP with a key
     pub fn with_key(key: Block) -> PRP {
         PRP {
-            aes_key: AesKey{ userkey:key },
+            aes_key: AesKey { userkey: key },
         }
     }
 
     // Permute blocks
-    pub fn permute_block(&self, data: Vec<Block>, nblocks: usize) -> Vec<Block>{
+    pub fn permute_block(&self, data: Vec<Block>, nblocks: usize) -> Vec<Block> {
         let mut out: Vec<Block> = vec![ZERO_BLOCK; data.len()];
         for i in 0..nblocks / AES_BATCH_SIZE {
             let start = i * AES_BATCH_SIZE;
             let end = start + AES_BATCH_SIZE;
             let batch = &data[start..end];
-            let encrypted_batch = aes_ecb_encrypt_blks(batch.to_vec(), AES_BATCH_SIZE, self.aes_key);
+            let encrypted_batch =
+                aes_ecb_encrypt_blks(batch.to_vec(), AES_BATCH_SIZE, self.aes_key);
             out[start..end].copy_from_slice(&encrypted_batch);
         }
         let remain = nblocks % AES_BATCH_SIZE;
@@ -186,31 +187,24 @@ impl PRP {
         out
     }
 }
-    
+
 pub struct CCRH {
     prp: PRP,
 }
 
 impl CCRH {
     pub fn new(key: Block) -> Self {
-        CCRH { prp: PRP::with_key(key) }
+        CCRH {
+            prp: PRP::with_key(key),
+        }
     }
 
     pub fn h(&self, input: Block) -> Block {
         let t = sigma(input);
-        let tt:Vec<Block> = vec![t; 1];
-        let out = self.prp.permute_block( tt, 1);
+        let tt: Vec<Block> = vec![t; 1];
+        let out = self.prp.permute_block(tt, 1);
         out[0] ^ sigma(input)
     }
-
-    /*pub fn h_fixed<const N: usize>(&self, input: Vec<Block>) -> Vec<Block> {
-        let mut tmp = vec![ZERO_BLOCK; N];
-        for i in 0..N {
-            tmp[i] = sigma(input[i]);
-        }
-        let mut out = self.prp.permute_block(tmp, N);
-        xor_blocks_arr( out, input, N)
-    }*/
 
     pub fn hn_null(&self, inp: Vec<Block>, length: usize) -> Vec<Block> {
         let mut out = vec![ZERO_BLOCK; length];
@@ -221,7 +215,7 @@ impl CCRH {
             out[i] = scratch[i];
         }
 
-        let mut res = self.prp.permute_block(scratch, length);
+        let res = self.prp.permute_block(scratch, length);
         xor_blocks_arr(res, out, length)
     }
 

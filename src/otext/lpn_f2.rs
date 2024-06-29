@@ -1,9 +1,13 @@
 use rand::{thread_rng, Rng};
 
-use super::utils::{PRP, aes_ecb_encrypt_blks};
-use super::block::{make_block, Block, ZERO_BLOCK};
-use super::constants::{ALICE, BOB, D};
-use crate::channel::{MsgChannel, Channel};
+use crate::{
+    channel::{Channel, MsgChannel},
+    otext::{
+        block::{make_block, Block, ZERO_BLOCK},
+        constants::{ALICE, BOB, D},
+        utils::{aes_ecb_encrypt_blks, PRP},
+    },
+};
 
 pub struct LpnF2 {
     party: usize,
@@ -71,7 +75,12 @@ impl LpnF2 {
         }
     }
 
-    pub async fn compute(&mut self, nn: &mut Vec<Block>, kk: Vec<Block>, channel: &mut MsgChannel<impl Channel>) {
+    pub async fn compute(
+        &mut self,
+        nn: &mut Vec<Block>,
+        kk: Vec<Block>,
+        channel: &mut MsgChannel<impl Channel>,
+    ) {
         self.seed = self.seed_gen(channel).await;
         self.task(nn, kk, 0, self.n);
     }
@@ -88,19 +97,15 @@ impl LpnF2 {
         seed
     }
 
-    pub fn _bench(&mut self, nn: &mut Vec<Block>, kk: Vec<Block>){
+    pub fn _bench(&mut self, nn: &mut Vec<Block>, kk: Vec<Block>) {
         self.task(nn, kk, 0, nn.len());
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::Error,
-        otext::constants::FERRET_B13,
-        otext::lpn_f2::LpnF2,
-        otext::block::Block,
+        channel::Error, otext::block::Block, otext::constants::FERRET_B13, otext::lpn_f2::LpnF2,
     };
 
     use rand::Rng;
@@ -117,5 +122,4 @@ mod tests {
         lpnf2._bench(&mut nn, kk);
         Ok(())
     }
-
 }

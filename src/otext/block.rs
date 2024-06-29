@@ -40,7 +40,7 @@ pub fn get_lsb(x: Block) -> bool {
     (x & 1) == 1
 }
 
-pub fn block_to_bool(mut b: Block) -> Vec<bool>{
+pub fn block_to_bool(mut b: Block) -> Vec<bool> {
     let mut res: Vec<bool> = vec![false; 128];
     for i in 0..128 {
         res[i] = (b & 1) == 1;
