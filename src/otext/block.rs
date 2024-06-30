@@ -26,6 +26,15 @@ pub fn xor_blocks_arr(x: Vec<Block>, y: Vec<Block>, nblocks: usize) -> Vec<Block
     res
 }
 
+///XOR Blocks
+pub fn xor_blocks_arr_single(x: Vec<Block>, y: Block, nblocks: usize) -> Vec<Block> {
+    let mut res: Vec<Block> = vec![ZERO_BLOCK; nblocks];
+    for i in 0..nblocks {
+        res[i] = x[i] ^ y;
+    }
+    res
+}
+
 /// Compare blocks
 pub fn cmp_block(x: Vec<Block>, y: Vec<Block>, nblocks: usize) -> bool {
     for i in 0..nblocks {

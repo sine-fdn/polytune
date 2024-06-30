@@ -141,9 +141,9 @@ impl FerretCOT {
             self.delta = self.read_pre_data128_from_file(&self.pre_ot_filename);
         } else {
             if self.party == BOB {
-                self.base_cot.cot_gen_pre(None);
+                self.base_cot.cot_gen_pre();
             } else {
-                self.base_cot.cot_gen_pre(Some(self.delta));
+                self.base_cot.cot_gen_pre_delta(self.delta);
             }
 
             let mut mpcot_ini = MpcotReg::new(
@@ -160,7 +160,8 @@ impl FerretCOT {
 
             let mut pre_data_ini =
                 vec![ZERO_BLOCK; (self.param.k_pre + mpcot_ini.consist_check_cot_num) as usize];
-            self.base_cot.cot_gen_pre_ot(pre_ot_ini.n);
+            let n = pre_ot_ini.n;
+            self.base_cot.cot_gen_pre_ot(&mut pre_ot_ini, n);
             self.base_cot.cot_gen(
                 &mut pre_data_ini,
                 self.param.k_pre + mpcot_ini.consist_check_cot_num,
@@ -176,7 +177,7 @@ impl FerretCOT {
                 &mut lpn,
                 &mut pre_data_ini,
                 channel,
-            );
+            ).await;
 
             // Move ot_pre_data back into self
             self.ot_pre_data = ot_pre_data;
@@ -226,7 +227,7 @@ impl FerretCOT {
             &mut lpn_f2,
             &mut ot_pre_data,
             channel
-        );
+        ).await;
 
         let offset = self.ot_limit as usize;
         let len = self.m as usize;

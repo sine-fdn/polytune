@@ -106,7 +106,7 @@ impl MpcotReg {
         let sparse_vector_slice = sparse_vector;
     
         for (i, sender) in sender_slice.iter_mut().enumerate() {
-            self.exec_f2k_sender(sender, ot, &mut sparse_vector_slice[i * self.leave_n as usize..], i).await;
+            self.exec_f2k_sender(sender, ot, &mut sparse_vector_slice[i * self.leave_n as usize..].to_vec(), i).await;
         }
     }
 
@@ -120,7 +120,7 @@ impl MpcotReg {
         }
     }
 
-    async fn exec_f2k_sender(&mut self, sender: &mut SpcotSender, ot: &mut OTPre, ggm_tree_mem: &mut [Block], i: usize) {
+    async fn exec_f2k_sender(&mut self, sender: &mut SpcotSender, ot: &mut OTPre, ggm_tree_mem: &mut Vec<Block>, i: usize) {
         sender.compute(ggm_tree_mem, self.delta_f2k);
         //sender.send_f2k(ot, io, i).await;
         if self.is_malicious {
