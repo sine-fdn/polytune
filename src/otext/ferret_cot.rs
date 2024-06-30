@@ -32,7 +32,7 @@ pub struct FerretCOT {
 }
 
 impl FerretCOT {
-    pub fn new(
+    pub async fn new(
         party: usize,
         malicious: bool,
         run_setup: bool,
@@ -68,9 +68,9 @@ impl FerretCOT {
                 let mut delta: Block = prg.gen();
                 delta &= cot.one;
                 delta ^= Block::from(1u128);
-                cot.setup(delta, pre_file.clone(), channel);
+                cot.setup(delta, pre_file.clone(), channel).await;
             } else {
-                cot.setup_internal(pre_file.clone(), channel);
+                cot.setup_internal(pre_file.clone(), channel).await;
             }
         }
 
@@ -111,9 +111,9 @@ impl FerretCOT {
         }
     }
 
-    pub fn setup(&mut self, delta: Block, pre_file: String, channel: &mut MsgChannel<impl Channel>) {
+    pub async fn setup(&mut self, delta: Block, pre_file: String, channel: &mut MsgChannel<impl Channel>) {
         self.delta = delta;
-        self.setup_internal(pre_file, channel);
+        self.setup_internal(pre_file, channel).await;
         self.ch[1] = delta;
     }
 
@@ -198,13 +198,13 @@ impl FerretCOT {
         } else {
             mpcot.recver_init();
         }
-        mpcot.mpcot(ot_output, preot, ot_input);
-        lpn.compute(ot_output, ot_input[mpcot.consist_check_cot_num..].to_vec(), channel);
+        mpcot.mpcot(ot_output, preot, ot_input).await;
+        lpn.compute(ot_output, ot_input[mpcot.consist_check_cot_num..].to_vec(), channel).await;
     }
 
-    fn extend_f2k(&mut self, channel: &mut MsgChannel<impl Channel>) {
+    async fn extend_f2k(&mut self, channel: &mut MsgChannel<impl Channel>) {
         let mut ot_data = std::mem::take(&mut self.ot_data);
-        self.extend_f2k_base(&mut ot_data, channel);
+        self.extend_f2k_base(&mut ot_data, channel).await;
         self.ot_data = ot_data;
     }
 
@@ -242,7 +242,7 @@ impl FerretCOT {
         self.ot_used = 0;
     }
 
-    pub fn rcot(&mut self, data: &mut [Block], num: usize, channel: &mut MsgChannel<impl Channel>) {
+    pub async fn rcot(&mut self, data: &mut [Block], num: usize, channel: &mut MsgChannel<impl Channel>) {
         if self.ot_data.is_empty() {
             self.ot_data = vec![ZERO_BLOCK; self.param.n as usize];
         }
@@ -271,17 +271,17 @@ impl FerretCOT {
             last_round_ot -= self.ot_limit;
         }
         for _ in 0..round_inplace {
-            self.extend_f2k_base(&mut pt.to_vec(), channel);
+            self.extend_f2k_base(&mut pt.to_vec(), channel).await;
             self.ot_used = self.ot_limit;
             pt = &mut pt[self.ot_limit as usize..];
         }
         if round_memcpy {
-            self.extend_f2k(channel);
+            self.extend_f2k(channel).await;
             pt[..self.ot_limit as usize].copy_from_slice(&self.ot_data[..self.ot_limit as usize]);
             pt = &mut pt[self.ot_limit as usize..];
         }
         if last_round_ot > 0 {
-            self.extend_f2k(channel);
+            self.extend_f2k(channel).await;
             pt[..last_round_ot as usize].copy_from_slice(&self.ot_data[..last_round_ot as usize]);
             self.ot_used = last_round_ot;
         }

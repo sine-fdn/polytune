@@ -124,10 +124,9 @@ impl BaseCot {
             channel.send_to(BOB, "data", &data).await.unwrap();
             true
         } else {
-            let mut tmp = vec![ZERO_BLOCK; len as usize];
             let mut ch: [Block; 2]  = [ZERO_BLOCK, ZERO_BLOCK];
             ch[1] = channel.recv_from(ALICE, "ot_delta").await.unwrap();
-            tmp = channel.recv_from(ALICE, "data").await.unwrap();
+            let mut tmp: Vec<Block> = channel.recv_from(ALICE, "data").await.unwrap();
             for i in 0..len as usize {
                 tmp[i] ^= ch[get_lsb(data[i]) as usize];
             }

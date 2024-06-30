@@ -57,7 +57,7 @@ impl SpcotSender {
             self.depth - 1,
             channel,
             s,
-        );
+        ).await;
         channel.send_to(BOB, "secret_sum", &self.secret_sum_f2).await.unwrap();
     }
 

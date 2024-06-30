@@ -159,8 +159,7 @@ impl MpcotReg {
             //self.netio.send_bool_vec(&self.x_prime).await;
             let dig = ZERO_BLOCK;
             //self.netio.recv(&mut dig).await;
-            let mut digest = [ZERO_BLOCK; 2];
-            let digest = hash_once((chi_alpha ^ v));
+            let digest = hash_once(chi_alpha ^ v);
             if digest != dig {
                 panic!("Consistency check failed");
             }

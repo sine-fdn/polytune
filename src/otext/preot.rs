@@ -109,10 +109,9 @@ impl OTPre {
         s: usize,
     ) {
         let mut k = s * length;
-        let mut pad = [0u128; 2];
         let party = BOB; //TODO party
         for i in 0..length {
-            pad = channel2.recv_from(party, "spcot").await.unwrap();
+            let pad: [Block; 2] = channel2.recv_from(party, "spcot").await.unwrap();
             let ind = if b[i] { 1 } else { 0 };
             data[i] = self.pre_data[k] ^ pad[ind];
             k += 1;
