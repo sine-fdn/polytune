@@ -32,7 +32,7 @@ impl OTPre {
     }
 
     //TODO CHECK
-    pub fn send_pre(&mut self, data: Vec<Block>, in_delta: Block) {
+    pub fn send_pre(&mut self, data: Vec<Block>, in_delta: Block){
         self.delta = in_delta;
 
         //self.pre_data = self.ccrh.hn(data, self.n, &mut self.pre_data[self.n..].to_vec());
@@ -61,7 +61,7 @@ impl OTPre {
         self.pre_data[..self.n].copy_from_slice(&self.ccrh.hn_null(data, self.n));
     }
 
-    fn recv_pre_data(&mut self, data: Vec<Block>) {    
+    pub fn recv_pre_data(&mut self, data: Vec<Block>) {    
         for i in 0..self.n {
             self.bits[i] = get_lsb(data[i]);
         }

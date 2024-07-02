@@ -199,13 +199,6 @@ impl CCRH {
         }
     }
 
-    pub fn h(&self, input: Block) -> Block {
-        let t = sigma(input);
-        let tt: Vec<Block> = vec![t; 1];
-        let out = self.prp.permute_block(tt, 1);
-        out[0] ^ sigma(input)
-    }
-
     pub fn hn_null(&self, inp: Vec<Block>, length: usize) -> Vec<Block> {
         let mut out = vec![ZERO_BLOCK; length];
         let mut scratch = vec![ZERO_BLOCK; length];

@@ -1,4 +1,6 @@
-use rand::{thread_rng, Rng};
+use rand::{rngs::StdRng, SeedableRng};
+use rand::rngs::OsRng;
+use rand::Rng;
 
 use crate::{
     channel::{Channel, MsgChannel},
@@ -88,7 +90,7 @@ impl LpnF2 {
     async fn seed_gen(&mut self, channel: &mut MsgChannel<impl Channel>) -> Block {
         let seed: Block;
         if self.party == ALICE {
-            let mut prg = thread_rng();
+            let mut prg = StdRng::from_rng(OsRng).expect("Failed to create StdRng"); //TODO Change this!!!
             seed = prg.gen();
             channel.send_to(BOB, "seed_gen", &seed).await.unwrap();
         } else {

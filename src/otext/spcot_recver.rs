@@ -52,7 +52,7 @@ impl SpcotRecver {
     }
 
     // TODO ALICE or BOB?
-    pub async fn recv_f2k(&mut self, ot: OTPre, channel: &mut MsgChannel<impl Channel>, s: usize) {
+    pub async fn recv_f2k(&mut self, ot: &mut OTPre, channel: &mut MsgChannel<impl Channel>, s: usize) {
         ot.recv(&mut self.m, &mut self.b, self.depth - 1, channel, s).await;
         self.secret_sum_f2 = channel.recv_from(ALICE, "secret_sum").await.unwrap();
     }

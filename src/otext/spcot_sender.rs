@@ -49,7 +49,7 @@ impl SpcotSender {
     }
 
     //TODO BOB or ALICE?
-    pub async fn send_f2k(&mut self, ot: OTPre, channel: &mut MsgChannel<impl Channel>, s: usize) {
+    pub async fn send_f2k(&mut self, ot: &mut OTPre, channel: &mut MsgChannel<impl Channel>, s: usize) {
         //TODO check here the second arguments's length
         ot.send(
             self.m[0..self.depth - 1].to_vec(),

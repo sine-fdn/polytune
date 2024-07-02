@@ -15,7 +15,7 @@ pub fn make_block(high: u64, low: u64) -> u128 {
 pub const ZERO_BLOCK: Block = 0;
 
 /// All one block
-pub const ALL_ONE_BLOCK: Block = u128::MAX;
+//pub const ALL_ONE_BLOCK: Block = u128::MAX;
 
 /// XOR blocks
 pub fn xor_blocks_arr(x: Vec<Block>, y: Vec<Block>, nblocks: usize) -> Vec<Block> {
