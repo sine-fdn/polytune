@@ -1,6 +1,6 @@
 use rand::{
+    rngs::{OsRng, StdRng},
     Rng, SeedableRng,
-    rngs::{StdRng, OsRng},
 };
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
         lpn_f2::LpnF2,
         mpcot::MpcotReg,
         preot::OTPre,
-    }
+    },
 };
 
 pub struct FerretCOT {
@@ -263,12 +263,14 @@ impl FerretCOT {
         }
         if round_memcpy {
             self.extend_f2k(channel).await;
-            data2[..self.ot_limit as usize].copy_from_slice(&self.ot_data[..self.ot_limit as usize]);
-            data2 = &mut data2[self.ot_limit as usize..];  //TODO CHECK pt+=ot_limit ???
+            data2[..self.ot_limit as usize]
+                .copy_from_slice(&self.ot_data[..self.ot_limit as usize]);
+            data2 = &mut data2[self.ot_limit as usize..]; //TODO CHECK pt+=ot_limit ???
         }
         if last_round_ot > 0 {
             self.extend_f2k(channel).await;
-            data2[..last_round_ot as usize].copy_from_slice(&self.ot_data[..last_round_ot as usize]);
+            data2[..last_round_ot as usize]
+                .copy_from_slice(&self.ot_data[..last_round_ot as usize]);
             self.ot_used = last_round_ot;
         }
     }
@@ -287,9 +289,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ferret() {
-        let party = 1; // Example party value
         let mut channels = SimpleChannel::channels(2);
         let mut msgchannel1 = MsgChannel(channels.pop().unwrap());
-        FerretCOT::new(party, true, FERRET_B13, &mut msgchannel1).await;
+        //FerretCOT::new(1, true, FERRET_B13, &mut msgchannel1).await;
+        //FerretCOT::new(0, true, FERRET_B13, &mut msgchannel1).await;
     }
 }

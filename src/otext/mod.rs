@@ -9,5 +9,7 @@ pub mod spcot_sender;
 pub mod preot;
 pub mod mpcot;
 
+pub mod baseot;
+pub mod iknp;
 pub mod base_cot;
 pub mod ferret_cot;

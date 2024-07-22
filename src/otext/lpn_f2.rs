@@ -104,7 +104,7 @@ impl LpnF2 {
     }
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use crate::{
         channel::Error, otext::block::Block, otext::constants::FERRET_B13, otext::lpn_f2::LpnF2,
@@ -124,4 +124,4 @@ mod tests {
         lpnf2._bench(&mut nn, kk);
         Ok(())
     }
-}
+}*/

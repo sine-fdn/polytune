@@ -1,7 +1,8 @@
 //! Smaller crypto utilities
-use aes::cipher::{BlockEncrypt, KeyInit};
-use aes::Aes128;
+use aes::{Aes128, cipher::{BlockEncrypt, KeyInit}};
 use blake3::Hasher;
+use curve25519_dalek::ristretto::RistrettoPoint;
+use std::convert::TryInto;
 
 use crate::otext::{
     block::{xor_blocks_arr, Block, ZERO_BLOCK},
@@ -11,15 +12,33 @@ use crate::otext::{
 /// Function to hash data using BLAKE3 and store the result in a Block (XOR of two blocks to end up with 128 bits)
 /// TODO Look into if we want the array here or this can be fine
 pub fn hash_once(data: Block) -> Block {
-    let mut hasher = Hasher::new();
     let data_bytes = data.to_le_bytes();
-    hasher.update(&data_bytes);
+    hash_bytes(&data_bytes)
+}
+
+fn hash_bytes(data: &[u8]) -> Block {
+    let mut hasher = Hasher::new();
+    hasher.update(data);
     let hash = hasher.finalize();
     let hash_bytes = hash.as_bytes();
+
     let mut dgst: Vec<Block> = vec![0, 0];
     dgst[0] = Block::from_le_bytes(hash_bytes[0..16].try_into().unwrap());
     dgst[1] = Block::from_le_bytes(hash_bytes[16..32].try_into().unwrap());
     dgst[0] ^ dgst[1]
+}
+
+/// KDF TODO check!!!
+pub fn kdf(in_point: &RistrettoPoint, id: usize) -> Block {
+    let mut tmp = [0u8; 32 + 8]; // Buffer for serialized point + id
+
+    // Serialize the point into tmp
+    tmp[0..32].copy_from_slice(in_point.compress().as_bytes());
+
+    // Append the id to tmp
+    tmp[32..40].copy_from_slice(&id.to_le_bytes());
+
+    hash_bytes(&tmp)
 }
 
 /// Galois Field multiplication function for Block
@@ -90,6 +109,43 @@ pub fn vector_inn_prdt_sum_red(a: Vec<Block>, b: &mut Vec<Block>, sz: usize) -> 
         r ^= r1;
     }
     r
+}
+
+/// Function to compute inner product of two Galois field vectors without reduction
+pub fn vector_inn_prdt_sum_no_red(a: Vec<Block>, b: &mut Vec<Block>, sz: usize) -> [Block; 2] {
+    let mut r1 = ZERO_BLOCK;
+    let mut r2 = ZERO_BLOCK;
+
+    for i in 0..sz {
+        let (r11, r12) = mul128(a[i], b[i]);
+        r1 ^= r11;
+		r2 ^= r12;
+    }
+    [r1, r2]
+}
+
+//TODO fix with overflow
+fn mul128(a: Block, b: Block) -> (Block, Block) {
+    let a_lo = a as u64;
+    let a_hi = (a >> 64) as u64;
+    let b_lo = b as u64;
+    let b_hi = (b >> 64) as u64;
+
+    let lo = a_lo.wrapping_mul(b_lo);
+    let mid1 = a_lo.wrapping_mul(b_hi);
+    let mid2 = a_hi.wrapping_mul(b_lo);
+    let hi = a_hi.wrapping_mul(b_hi);
+
+    //let mid_hi = (mid1 >> 64) + (mid2 >> 64) + (lo >> 64);
+    //let mid_lo = (mid1 << 64) + (mid2 << 64) + (lo << 64);
+    let mid_hi: u64 = 0;
+    let mid_lo: u64 = 0;
+
+    let res1 = mid_lo.wrapping_add(mid_hi);
+    //let res2 = hi.wrapping_add(mid_hi >> 64);
+    let res2 = hi.wrapping_add(mid_hi);
+
+    (res1 as u128, res2 as u128)
 }
 
 pub struct GaloisFieldPacking {

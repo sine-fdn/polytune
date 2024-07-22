@@ -3,37 +3,12 @@ use rand::Rng;
 use crate::{
     channel::{MsgChannel, Channel},
     otext::{
-        block::{make_block, Block, ZERO_BLOCK, cmp_block, block_to_bool, get_lsb},
+        block::{make_block, Block, ZERO_BLOCK, cmp_block, get_lsb},
         constants::{ALICE, BOB},
         preot::OTPre,
+        iknp::Iknp,
     }
 };
-
-pub struct Iknp {
-    malicious: bool,
-}
-
-impl Iknp {
-    pub fn new(malicious: bool) -> Self {
-        Self { malicious }
-    }
-
-    pub fn setup_send(&self, delta_bool: &[bool]) {
-        // Implement setup_send logic
-    }
-
-    pub fn setup_recv(&self) {
-        // Implement setup_recv logic
-    }
-
-    pub fn send_cot(&self, ot_data: &mut [Block], size: usize) {
-        // Implement send_cot logic
-    }
-
-    pub fn recv_cot(&self, ot_data: &mut [Block], pre_bool_ini: &[bool], size: usize) {
-        // Implement recv_cot logic
-    }
-}
 
 pub struct BaseCot {
     party: usize,
@@ -46,7 +21,7 @@ pub struct BaseCot {
 
 impl BaseCot {
     pub fn new(party: usize, malicious: bool) -> Self {
-        let iknp = Iknp::new(malicious);
+        let iknp = Iknp::new(ZERO_BLOCK, malicious); //TODO Set this delta right later???
         let minusone = make_block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFE);
         let one = make_block(0, 1);
         Self {
@@ -62,10 +37,10 @@ impl BaseCot {
     pub fn cot_gen_pre_delta(&mut self, deltain: Block) {
         if self.party == ALICE {
             self.ot_delta = deltain;
-            let delta_bool = block_to_bool(self.ot_delta);
-            self.iknp.setup_send(&delta_bool);
+            //let delta_bool = block_to_bool(self.ot_delta);
+            //self.iknp.setup_send(&delta_bool);
         } else {
-            self.iknp.setup_recv();
+            //self.iknp.setup_recv();
         }
     }
     
@@ -74,10 +49,10 @@ impl BaseCot {
             let mut prg = rand::thread_rng();
             let delta: Block = prg.gen();
             self.ot_delta = delta & self.minusone ^ self.one;
-            let delta_bool = block_to_bool(self.ot_delta);
-            self.iknp.setup_send(&delta_bool);
+            //let delta_bool = block_to_bool(self.ot_delta);
+            //self.iknp.setup_send(&delta_bool); //TODO If the implementation we take for IKNP includes the setup, this is not needed
         } else {
-            self.iknp.setup_recv();
+            //self.iknp.setup_recv();
         }
     }
 
@@ -90,7 +65,7 @@ impl BaseCot {
         } else {
             let mut prg = rand::thread_rng();
             let pre_bool_ini = vec![prg.gen(); size as usize];
-            self.iknp.recv_cot(ot_data, &pre_bool_ini, size);
+            self.iknp.recv_cot(ot_data, pre_bool_ini.clone(), size); //TODO Check: Is it ok to clone?
             let ch = [ZERO_BLOCK, make_block(0, 1)];
             for i in 0..size as usize {
                 ot_data[i] = (ot_data[i] & self.minusone) ^ ch[pre_bool_ini[i] as usize];
@@ -109,7 +84,7 @@ impl BaseCot {
         } else {
             let mut prg = rand::thread_rng();
             let pre_bool_ini = vec![prg.gen(); size];
-            self.iknp.recv_cot(&mut ot_data, &pre_bool_ini, size);
+            self.iknp.recv_cot(&mut ot_data, pre_bool_ini.clone(), size); //TODO Check: Is it ok to clone?
             let ch = [ZERO_BLOCK, make_block(0, 1)];
             for i in 0..size as usize {
                 ot_data[i] = (ot_data[i] & self.minusone) ^ ch[pre_bool_ini[i] as usize];

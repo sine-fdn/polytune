@@ -1,6 +1,9 @@
 //! Block
 //Later look into replacing this to __m128i, e.g., using https://docs.rs/safe_arch/latest/src/safe_arch/x86_x64/m128i_.rs.html#19
 
+use rand::rngs::OsRng;
+use rand::RngCore;
+
 /// Block type
 pub type Block = u128;
 
@@ -56,4 +59,31 @@ pub fn block_to_bool(mut b: Block) -> Vec<bool> {
         b >>= 1;
     }
     res
+}
+
+fn bool_to_int(data: &[bool]) -> u64 {
+    let mut ret: u64 = 0;
+
+    for i in 0..std::mem::size_of::<u64>() * 8 {
+        let s: u64 = (data[i] as u8).into();
+        let s = s << i;
+        ret |= s;
+    }
+
+    ret
+}
+
+pub fn bool_to_block(data: &[bool]) -> Block {
+    assert_eq!(data.len(), 128); // Ensure data has exactly 128 elements
+
+    let lo = bool_to_int(&data[64..]);
+    let hi = bool_to_int(&data[..64]);
+
+    make_block(hi, lo)
+}
+
+pub fn random_block(rng: &mut OsRng) -> Block {
+    let upper = rng.next_u64() as u128;
+    let lower = rng.next_u64() as u128;
+    (upper << 64) | lower
 }
