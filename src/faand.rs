@@ -3,11 +3,11 @@ use blake3::Hasher;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
-use mpz_core::Block;
 
 use crate::{
     channel::{self, Channel, MsgChannel},
     fpre::{Auth, Delta, Key, Mac, Share},
+    ot::generate_ot,
 };
 
 pub(crate) const RHO: usize = 40;
@@ -95,8 +95,8 @@ pub(crate) async fn shared_rng(
 
 /// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
 ///
-/// The sender sends bit x, the receiver inputs delta, and the receiver receives a random key,
-/// whereas the sender receives a MAC, which is the key XOR the bit times delta. This protocol
+/// The receiver sends bit x, the sender inputs delta, and the sender receives a random key,
+/// whereas the receiver receives a MAC, which is the key XOR the bit times delta. This protocol
 /// performs multiple of these at once.
 pub(crate) async fn fabit(
     channel: &mut MsgChannel<impl Channel>,
@@ -676,6 +676,7 @@ pub(crate) async fn faand(
     for b in finalbucket {
         shares.push(b.2);
     }
+    generate_ot().await;
     Ok(shares)
 }
 
@@ -775,7 +776,7 @@ pub(crate) async fn combine_two_leaky_ands(
 }
 
 #[cfg(test)]
-mod pre_tests {
+mod tests {
     use rand::random;
 
     use crate::{
@@ -1188,105 +1189,5 @@ mod pre_tests {
         assert_eq!(mac_r3, key_r3 ^ (r3 & deltas[1]));
         assert_eq!(mac_s3, key_s3 ^ (s3 & deltas[0]));
         Ok(())
-    }
-}
-
-/// Transform Block to u128
-pub fn block_to_u128(inp: Block) -> u128 {
-    u128::from_le_bytes(inp.to_bytes())
-}
-
-/// Transform u128 to Block
-pub fn u128_to_block(inp: u128) -> Block {
-    Block::new(inp.to_le_bytes())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::faand::block_to_u128;
-
-    use futures::TryFutureExt as _;
-    use mpz_core::lpn::LpnParameters;
-    use mpz_ot_core::{ferret::LpnType, test::assert_cot, RCOTReceiverOutput, RCOTSenderOutput};
-    use rstest::*;
-
-    use mpz_ot::{Correlation, OTError, RandomCOTReceiver, RandomCOTSender};
-    use mpz_ot::ideal::cot::ideal_rcot;
-    use mpz_ot::ferret::FerretConfig;
-    use mpz_ot::ferret::{Sender, Receiver};
-
-    use mpz_common::executor::test_st_executor;
-
-    // l = n - k = 8380
-    const LPN_PARAMETERS_TEST: LpnParameters = LpnParameters {
-        n: 9600,
-        k: 1220,
-        t: 600,
-    };
-
-    #[rstest]
-    #[case::uniform(LpnType::Uniform)]
-    #[case::regular(LpnType::Regular)]
-    #[tokio::test]
-    async fn test_ferret(#[case] lpn_type: LpnType) {
-        let (mut ctx_sender, mut ctx_receiver) = test_st_executor(8);
-
-        let (rcot_sender, rcot_receiver) = ideal_rcot();
-
-        let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-
-        let mut sender = Sender::new(config.clone(), rcot_sender);
-        let mut receiver = Receiver::new(config, rcot_receiver);
-
-        tokio::try_join!(
-            sender.setup(&mut ctx_sender).map_err(OTError::from),
-            receiver.setup(&mut ctx_receiver).map_err(OTError::from)
-        )
-        .unwrap();
-
-        // extend once.
-        let count = LPN_PARAMETERS_TEST.k;
-        tokio::try_join!(
-            sender.extend(&mut ctx_sender, count).map_err(OTError::from),
-            receiver
-                .extend(&mut ctx_receiver, count)
-                .map_err(OTError::from)
-        )
-        .unwrap();
-
-        // extend twice
-        let count = 10;
-        tokio::try_join!(
-            sender.extend(&mut ctx_sender, count).map_err(OTError::from),
-            receiver
-                .extend(&mut ctx_receiver, count)
-                .map_err(OTError::from)
-        )
-        .unwrap();
-
-        let (
-            RCOTSenderOutput {
-                id: sender_id,
-                msgs: u,
-            },
-            RCOTReceiverOutput {
-                id: receiver_id,
-                choices: b,
-                msgs: w,
-            },
-        ) = tokio::try_join!(
-            sender.send_random_correlated(&mut ctx_sender, count),
-            receiver.receive_random_correlated(&mut ctx_receiver, count)
-        )
-        .unwrap();
-
-        assert_eq!(sender_id, receiver_id);
-        assert_cot(sender.delta(), &b, &u, &w);
-
-        for i in 0..count {
-            println!("b     {:?}", b[i]);
-            println!("u     {:?}", block_to_u128(u[i]));
-            println!("w     {:?}", block_to_u128(w[i]));
-        }
     }
 }
