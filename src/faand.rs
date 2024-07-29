@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     channel::{self, Channel, MsgChannel},
     fpre::{Auth, Delta, Key, Mac, Share},
-    ot::generate_ot,
+    ot::generate_ots,
 };
 
 pub(crate) const RHO: usize = 40;
@@ -676,7 +676,7 @@ pub(crate) async fn faand(
     for b in finalbucket {
         shares.push(b.2);
     }
-    generate_ot().await;
+    generate_ots(100).await;
     Ok(shares)
 }
 

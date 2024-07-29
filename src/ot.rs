@@ -8,7 +8,8 @@ use mpz_core::{lpn::LpnParameters, Block};
 use mpz_ot::{
     ferret::{FerretConfig, Receiver, Sender},
     ideal::cot::{ideal_rcot, IdealCOTReceiver, IdealCOTSender},
-    OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver, RandomCOTSender, TransferId,
+    Correlation, OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver, RandomCOTSender,
+    TransferId,
 };
 use mpz_ot_core::ferret::LpnType;
 
@@ -33,7 +34,7 @@ pub(crate) async fn mpz_ot_sender(
     count: usize,
     ctx_sender: &mut STExecutor<MemoryDuplex>,
     rcot_sender: IdealCOTSender,
-) -> Result<(TransferId, Vec<Block>), OTError> {
+) -> Result<(TransferId, Vec<Block>, u128), OTError> {
     let lpn_type: LpnType = LpnType::Regular;
 
     let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
@@ -69,7 +70,7 @@ pub(crate) async fn mpz_ot_sender(
         .await
         .unwrap();
 
-    Ok((sender_id, u))
+    Ok((sender_id, u, block_to_u128(sender.delta())))
 }
 
 pub(crate) async fn mpz_ot_receiver(
@@ -171,23 +172,53 @@ pub(crate) async fn _mpz_ot(count: usize) -> Result<bool, OTError> {
     Ok(true)
 }
 
-pub(crate) async fn generate_ot() -> bool {
+pub(crate) async fn generate_ots(count: usize) -> bool {
     let (io0, io1) = duplex(8);
     let mut ctx_receiver = STExecutor::new(io0);
     let mut ctx_sender = STExecutor::new(io1);
 
-    //let (mut ctx_sender, mut ctx_receiver) = test_st_executor(8);
     let (rcot_sender, rcot_receiver) = ideal_rcot();
 
-    let count = 100;
-    let ((sender_id, u), (receiver_id, b, w)) = tokio::try_join!(
-        mpz_ot_sender(count, &mut ctx_sender, rcot_sender),
-        mpz_ot_receiver(count, &mut ctx_receiver, rcot_receiver)
-    )
-    .unwrap();
+    let sender_task = tokio::spawn(async move {
+        mpz_ot_sender(count, &mut ctx_sender, rcot_sender).await
+    });
+
+    let receiver_task = tokio::spawn(async move {
+        mpz_ot_receiver(count, &mut ctx_receiver, rcot_receiver).await
+    });
+
+    // Await the results of both tasks
+    let sender_result = sender_task.await;
+    let receiver_result = receiver_task.await;
+
+    // Handle errors from task execution
+    let (sender_id, u, delta) = match sender_result {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
+            eprintln!("Sender task error: {:?}", e);
+            return false;
+        }
+        Err(e) => {
+            eprintln!("Sender task join error: {:?}", e);
+            return false;
+        }
+    };
+
+    let (receiver_id, b, w) = match receiver_result {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
+            eprintln!("Receiver task error: {:?}", e);
+            return false;
+        }
+        Err(e) => {
+            eprintln!("Receiver task join error: {:?}", e);
+            return false;
+        }
+    };
 
     for i in 0..count {
         println!("ids   {:?}   {:?}", sender_id, receiver_id);
+        println!("delta {:?}", delta);
         println!("b     {:?}", b[i]);
         println!("u     {:?}", block_to_u128(u[i]));
         println!("w     {:?}", block_to_u128(w[i]));
@@ -198,16 +229,16 @@ pub(crate) async fn generate_ot() -> bool {
 #[cfg(test)]
 mod tests {
     use futures::TryFutureExt as _;
-    use std::time::Instant;
     use rstest::*;
+    use std::time::Instant;
 
     use mpz_common::executor::test_st_executor;
     use mpz_core::lpn::LpnParameters;
     use mpz_ot::{
         ferret::{FerretConfig, Receiver, Sender},
         ideal::cot::ideal_rcot,
-        OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver, RandomCOTSender,
-        Correlation,
+        Correlation, OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver,
+        RandomCOTSender,
     };
     use mpz_ot_core::{ferret::LpnType, test::assert_cot};
 

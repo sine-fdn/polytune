@@ -19,8 +19,11 @@ serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["full"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
+
+# mpz-ot
 futures = "0.3"
 rstest = "0.12"
+serio = "0.1"
 
 mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz.git", branch = "ferret-sinu", features = ["test-utils"] }
 mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz.git", branch = "ferret-sinu", features = ["ideal"] }
