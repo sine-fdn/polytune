@@ -9,38 +9,21 @@
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 0,
-      "input": "SELECT id, name, age FROM residents",
+      "input": "SELECT first_name || last_name || date_of_birth FROM early_detection_screening WHERE screening_status = 'missing'",
       "input_db": "postgres://postgres:test@localhost:5550/postgres",
       "setup": "TRUNCATE results",
-      "output": "INSERT INTO results (name) VALUES ($1)",
+      "output": "INSERT INTO results (joined, total) VALUES (CAST($1 AS INT), CAST($2 AS INT))",
       "output_db": "postgres://postgres:test@localhost:5555/postgres",
       "constants": {
         "ROWS": {
-          "query": "SELECT COUNT(id) FROM residents",
+          "query": "SELECT COUNT(id) FROM early_detection_screening WHERE screening_status = 'missing'",
           "ty": "usize"
         },
-        "STR_LEN": {
-          "query": "SELECT MAX(LENGTH(name)) FROM residents",
+        "ID_LEN": {
+          "query": "SELECT MAX(LENGTH(first_name || last_name || date_of_birth)) FROM early_detection_screening WHERE screening_status = 'missing'",
           "ty": "usize"
         }
       }
-    },
-    {
-      "participants": [
-        "http://localhost:8000",
-        "http://localhost:8001",
-        "http://localhost:8002"
-      ],
-      "program": "does_not_exist.garble.rs",
-      "leader": 1,
-      "party": 0,
-      "input": "SELECT id, name, age FROM residents",
-      "input_db": "postgres://postgres:test@localhost:5550/postgres",
-      "max_rows": 4,
-      "setup": "TRUNCATE results",
-      "output": "INSERT INTO results (name) VALUES ($1)",
-      "output_db": "postgres://postgres:test@localhost:5555/postgres",
-      "constants": {}
     }
   ]
 }

@@ -9,15 +9,15 @@
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 1,
-      "input": "SELECT id, name, status FROM insurance",
+      "input": "SELECT CONCAT(first_name, last_name, date_of_birth) FROM school_entry_examination WHERE special_educational_needs = 1",
       "input_db": "mysql://root:test@localhost:5551/test",
       "constants": {
         "ROWS": {
-          "query": "SELECT COUNT(id) FROM insurance",
+          "query": "SELECT COUNT(id) FROM school_entry_examination WHERE special_educational_needs = 1",
           "ty": "usize"
         },
-        "STR_LEN": {
-          "query": "SELECT MAX(LENGTH(name)) FROM insurance",
+        "ID_LEN": {
+          "query": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM school_entry_examination WHERE special_educational_needs = true",
           "ty": "usize"
         }
       }

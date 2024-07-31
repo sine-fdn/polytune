@@ -1,15 +1,17 @@
 CREATE DATABASE test;
 USE test;
 
-CREATE TABLE insurance (
+CREATE TABLE school_entry_examination (
     id SERIAL PRIMARY KEY,
-    name TEXT,
-    status TEXT,
-    address TEXT
+    first_name TEXT,
+    last_name TEXT,
+    date_of_birth TEXT,
+    sufficiently_vaccinated BOOLEAN,
+    special_educational_needs BOOLEAN
 );
 
-LOAD DATA INFILE '/var/lib/mysql-files/insurance.csv'
-INTO TABLE insurance
+LOAD DATA INFILE '/var/lib/mysql-files/school_entry_examination.csv'
+INTO TABLE school_entry_examination
 FIELDS TERMINATED BY ','
 OPTIONALLY ENCLOSED BY '"'
 LINES TERMINATED BY '\n'
