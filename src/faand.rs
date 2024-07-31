@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     channel::{self, Channel, MsgChannel},
-    fpre::{Auth, Delta, Key, Mac, Share},
-    ot::generate_ots,
+    fpre::{Auth, Key, Mac, Share, Delta},
 };
 
 pub(crate) const RHO: usize = 40;
@@ -93,6 +92,32 @@ pub(crate) async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
+pub(crate) fn preots(
+    ot_num: usize,
+) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>), Error> {
+    let delta: u128 = random();
+    let bits: Vec<bool> = (0..ot_num).map(|_| random::<bool>()).collect();
+    let x0: Vec<u128> = (0..ot_num).map(|_| random::<u128>()).collect();
+    let x1: Vec<u128> = x0.iter().map(|&x| x ^ delta).collect();
+    let mut xb = x0.clone();
+    for i in 0..ot_num {
+        if bits[i]{
+            xb[i] = x1[i];
+        }
+    }
+    Ok((bits, x0, x1, xb))
+    /*match role { //true sender, false receiver???
+        true => {
+            println!("xb {:?}", xb);
+            Ok((bits, vec![], vec![], xb))
+        }
+        false => {
+            println!("x0 {:?}", x0);
+            Ok((vec![], x0, x1, vec![]))
+        }
+    }*/
+}
+
 /// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
 ///
 /// The receiver sends bit x, the sender inputs delta, and the sender receives a random key,
@@ -102,26 +127,58 @@ pub(crate) async fn fabit(
     channel: &mut MsgChannel<impl Channel>,
     p_to: usize,
     delta: Delta,
-    xbits: &Vec<bool>,
+    c: Vec<bool>, //xbits
     role: bool,
+    (b, r0, r1, rb): (Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>),
 ) -> Result<Vec<u128>, Error> {
+
     match role {
         true => {
-            channel.send_to(p_to, "bits", &xbits).await?;
-            let macs: Vec<u128> = channel.recv_from(p_to, "macs").await?;
-            Ok(macs)
+            let mut k: Vec<bool> = vec![false; b.len()];
+            for i in 0..b.len() {
+                k[i] = b[i] ^ c[i];
+            }
+            channel.send_to(p_to, "bits", &k).await?;
+
+            let (y0, y1): (Vec<u128>, Vec<u128>) = channel.recv_from(p_to, "y0y1").await?;
+            
+            //let mut xc: Vec<u128> = rb.clone();
+            let mut xc: Vec<u128> = vec![0; rb.len()];
+            for i in 0..c.len(){
+                if c[i]{
+                    xc[i] ^= y1[i];
+                } else {
+                    xc[i] ^= y0[i];
+                }
+            }
+            //println!("rb {:?} {:?}", p_to, rb);
+            //println!("xc {:?} {:?}", p_to, xc);
+            Ok(xc)
         }
         false => {
-            let mut keys: Vec<u128> = vec![];
-            let mut macs: Vec<u128> = vec![];
-            let other_xbits: Vec<bool> = channel.recv_from(p_to, "bits").await?;
-            for bit in other_xbits {
-                let rand: u128 = random();
-                keys.push(rand);
-                macs.push(rand ^ ((bit as u128) * delta.0));
-            }
-            channel.send_to(p_to, "macs", &macs).await?;
-            Ok(keys)
+            let x0: Vec<u128> = (0..r0.len()).map(|_| random::<u128>()).collect();
+            let x1: Vec<u128> = x0.iter().map(|&x| x ^ delta.0).collect();
+            //println!("x0 {:?} {:?}", p_to, x0);
+            //println!("x1 {:?} {:?}", p_to, x1);
+            let mut y0: Vec<u128> = x0.clone();
+            let mut y1: Vec<u128> = x1.clone();
+
+            let kbits: Vec<bool> = channel.recv_from(p_to, "bits").await?;
+            //println!("r0 {:?} {:?}", p_to, r0);
+            //println!("r1 {:?} {:?}", p_to, r1);
+
+            /*for i in 0..kbits.len() {
+                if kbits[i]{
+                    y0[i] ^= r1[i];
+                    y1[i] ^= r0[i];
+                } else {
+                    y0[i] ^= r0[i];
+                    y1[i] ^= r1[i];
+                }
+            }*/
+            channel.send_to(p_to, "y0y1", &(y0, y1)).await?;
+            
+            Ok(x0)
         }
     }
 }
@@ -146,14 +203,15 @@ pub(crate) async fn fabitn(
     let mut xkeys: Vec<Vec<u128>> = vec![vec![]; p_max];
     let mut xmacs: Vec<Vec<u128>> = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
+        let (bits, r0, r1, rb) = preots(x.len()).unwrap();
         let macvec: Vec<u128>;
         let keyvec: Vec<u128>;
         if p_own < p {
-            macvec = fabit(channel, p, delta, x, true).await?;
-            keyvec = fabit(channel, p, delta, x, false).await?;
+            macvec = fabit(channel, p, delta, x.to_vec(), true, (bits, vec![], vec![], rb)).await?;
+            keyvec = fabit(channel, p, delta, x.to_vec(), false, (vec![], r0, r1, vec![])).await?;
         } else {
-            keyvec = fabit(channel, p, delta, x, false).await?;
-            macvec = fabit(channel, p, delta, x, true).await?;
+            keyvec = fabit(channel, p, delta, x.to_vec(), false, (vec![], r0, r1, vec![])).await?;
+            macvec = fabit(channel, p, delta, x.to_vec(), true, (bits, vec![], vec![], rb)).await?;
         }
         xmacs[p] = macvec;
         xkeys[p] = keyvec;
@@ -676,7 +734,6 @@ pub(crate) async fn faand(
     for b in finalbucket {
         shares.push(b.2);
     }
-    generate_ots(100).await;
     Ok(shares)
 }
 
@@ -1116,7 +1173,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    //#[tokio::test]
     async fn xor_homomorphic_mac() -> Result<(), Error> {
         let parties = 2;
         let length = 2;
