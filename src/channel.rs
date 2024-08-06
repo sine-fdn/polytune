@@ -173,7 +173,7 @@ impl Channel for SimpleChannel {
 
     async fn recv_bytes_from(&mut self, party: usize) -> Result<Vec<u8>, AsyncRecvError> {
         match timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(5),
             self.r[party]
                 .as_mut()
                 .unwrap_or_else(|| panic!("No receiver for party {party}"))

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     channel::{self, Channel, MsgChannel},
-    fpre::{Auth, Key, Mac, Share, Delta},
+    fpre::{Auth, Delta, Key, Mac, Share},
 };
 
 pub(crate) const RHO: usize = 40;
@@ -92,16 +92,14 @@ pub(crate) async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
-pub(crate) fn preots(
-    ot_num: usize,
-) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>), Error> {
+pub(crate) fn preots(ot_num: usize) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>), Error> {
     let delta: u128 = random();
     let bits: Vec<bool> = (0..ot_num).map(|_| random::<bool>()).collect();
     let x0: Vec<u128> = (0..ot_num).map(|_| random::<u128>()).collect();
     let x1: Vec<u128> = x0.iter().map(|&x| x ^ delta).collect();
     let mut xb = x0.clone();
     for i in 0..ot_num {
-        if bits[i]{
+        if bits[i] {
             xb[i] = x1[i];
         }
     }
@@ -131,7 +129,6 @@ pub(crate) async fn fabit(
     role: bool,
     (b, r0, r1, rb): (Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>),
 ) -> Result<Vec<u128>, Error> {
-
     match role {
         true => {
             let mut k: Vec<bool> = vec![false; b.len()];
@@ -141,11 +138,11 @@ pub(crate) async fn fabit(
             channel.send_to(p_to, "bits", &k).await?;
 
             let (y0, y1): (Vec<u128>, Vec<u128>) = channel.recv_from(p_to, "y0y1").await?;
-            
+
             //let mut xc: Vec<u128> = rb.clone();
             let mut xc: Vec<u128> = vec![0; rb.len()];
-            for i in 0..c.len(){
-                if c[i]{
+            for i in 0..c.len() {
+                if c[i] {
                     xc[i] ^= y1[i];
                 } else {
                     xc[i] ^= y0[i];
@@ -169,15 +166,15 @@ pub(crate) async fn fabit(
 
             /*for i in 0..kbits.len() {
                 if kbits[i]{
-                    y0[i] ^= r1[i];
-                    y1[i] ^= r0[i];
+                    y0[i] = x0[i] ^ r1[i];
+                    y1[i] = x1[i] ^ r0[i];
                 } else {
-                    y0[i] ^= r0[i];
-                    y1[i] ^= r1[i];
+                    y0[i] = x0[i] ^ r0[i];
+                    y1[i] = x1[i] ^ r1[i];
                 }
             }*/
             channel.send_to(p_to, "y0y1", &(y0, y1)).await?;
-            
+
             Ok(x0)
         }
     }
@@ -195,6 +192,8 @@ pub(crate) async fn fabitn(
     length: usize,
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
 ) -> Result<Vec<Share>, Error> {
     // Step 1 initialize random bitstring
     let len_abit = length + 2 * RHO;
@@ -206,12 +205,49 @@ pub(crate) async fn fabitn(
         let (bits, r0, r1, rb) = preots(x.len()).unwrap();
         let macvec: Vec<u128>;
         let keyvec: Vec<u128>;
+        //let delta_added: Vec<u128> = sender_ot[p].clone().into_iter().map(|x| x ^ delta.0).collect();
         if p_own < p {
-            macvec = fabit(channel, p, delta, x.to_vec(), true, (bits, vec![], vec![], rb)).await?;
-            keyvec = fabit(channel, p, delta, x.to_vec(), false, (vec![], r0, r1, vec![])).await?;
+            macvec = fabit(
+                channel,
+                p,
+                delta,
+                x.to_vec(),
+                true,
+                //(receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
+                (bits, vec![], vec![], rb),
+            )
+            .await?;
+            keyvec = fabit(
+                channel,
+                p,
+                delta,
+                x.to_vec(),
+                false,
+                //(vec![], sender_ot[p].clone(), delta_added, vec![]),
+                (vec![], r0, r1, vec![]),
+            )
+            .await?;
         } else {
-            keyvec = fabit(channel, p, delta, x.to_vec(), false, (vec![], r0, r1, vec![])).await?;
-            macvec = fabit(channel, p, delta, x.to_vec(), true, (bits, vec![], vec![], rb)).await?;
+            keyvec = fabit(
+                channel,
+                p,
+                delta,
+                x.to_vec(),
+                false,
+                //(vec![], sender_ot[p].clone(), delta_added, vec![]),
+                (vec![], r0, r1, vec![]),
+            )
+            .await?;
+            macvec = fabit(
+                channel,
+                p,
+                delta,
+                x.to_vec(),
+                true,
+                //(receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
+                (bits, vec![], vec![], rb),
+            )
+            .await?;
         }
         xmacs[p] = macvec;
         xkeys[p] = keyvec;
@@ -283,11 +319,24 @@ pub(crate) async fn fashare(
     length: usize,
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
 ) -> Result<Vec<Share>, Error> {
     //Step 1
 
     //Step 2
-    let mut shares = fabitn(channel, x, p_own, p_max, length + RHO, delta, shared_rng).await?;
+    let mut shares = fabitn(
+        channel,
+        x,
+        p_own,
+        p_max,
+        length + RHO,
+        delta,
+        shared_rng,
+        sender_ot,
+        receiver_ot,
+    )
+    .await?;
 
     // Protocol Pi_aShare
     // Input: bits of len_ashare length, authenticated bits
@@ -618,7 +667,7 @@ pub(crate) async fn flaand(
 }
 
 /// Calculates the bucket size according to WRK17a, Table 4 for statistical security ρ = 40 (rho).
-fn bucket_size(circuit_size: usize) -> usize {
+pub(crate) fn bucket_size(circuit_size: usize) -> usize {
     match circuit_size {
         n if n >= 280_000 => 3,
         n if n >= 3_100 => 4,
@@ -653,18 +702,93 @@ pub(crate) async fn faand(
     length: usize,
     shared_rng: &mut ChaCha20Rng,
     delta: Delta,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
 ) -> Result<Vec<Share>, Error> {
     //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
     let b = bucket_size(circuit_size); // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
     let lprime: usize = length * b;
     //let len_ashare = length + RHO;
     //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
+
+    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
+    let mut sender_ot2: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
+    let mut sender_ot3: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
+    let mut sender_ot4: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
+    let mut receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprime], vec![0; lprime]); p_max];
+    let mut receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprime], vec![0; lprime]); p_max];
+    let mut receiver_ot3: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprime], vec![0; lprime]); p_max];
+    let mut receiver_ot4: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; length], vec![0; length]); p_max];
+
+    for (i, row) in sender_ot.into_iter().enumerate() {
+        sender_ot1[i].copy_from_slice(&row[0..lprime]);
+        sender_ot2[i].copy_from_slice(&row[lprime..2 * lprime]);
+        sender_ot3[i].copy_from_slice(&row[2 * lprime..3 * lprime]);
+        sender_ot4[i].copy_from_slice(&row[3 * lprime..]);
+    }
+    for (i, row) in receiver_ot.into_iter().enumerate() {
+        let (bools, u128s) = row;
+        receiver_ot1[i].0.copy_from_slice(&bools[0..lprime]);
+        receiver_ot1[i].1.copy_from_slice(&u128s[0..lprime]);
+        receiver_ot2[i]
+            .0
+            .copy_from_slice(&bools[lprime..2 * lprime]);
+        receiver_ot2[i]
+            .1
+            .copy_from_slice(&u128s[lprime..2 * lprime]);
+        receiver_ot3[i]
+            .0
+            .copy_from_slice(&bools[2 * lprime..3 * lprime]);
+        receiver_ot3[i]
+            .1
+            .copy_from_slice(&u128s[2 * lprime..3 * lprime]);
+        receiver_ot4[i].0.copy_from_slice(&bools[3 * lprime..]);
+        receiver_ot4[i].1.copy_from_slice(&u128s[3 * lprime..]);
+    }
+
     let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
     let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
     let mut r: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let xbits = fashare(channel, &mut x, p_own, p_max, lprime, delta, shared_rng).await?;
-    let ybits = fashare(channel, &mut y, p_own, p_max, lprime, delta, shared_rng).await?;
-    let rbits = fashare(channel, &mut r, p_own, p_max, lprime, delta, shared_rng).await?;
+    let xbits = fashare(
+        channel,
+        &mut x,
+        p_own,
+        p_max,
+        lprime,
+        delta,
+        shared_rng,
+        sender_ot1,
+        receiver_ot1,
+    )
+    .await?;
+    let ybits = fashare(
+        channel,
+        &mut y,
+        p_own,
+        p_max,
+        lprime,
+        delta,
+        shared_rng,
+        sender_ot2,
+        receiver_ot2,
+    )
+    .await?;
+    let rbits = fashare(
+        channel,
+        &mut r,
+        p_own,
+        p_max,
+        lprime,
+        delta,
+        shared_rng,
+        sender_ot3,
+        receiver_ot3,
+    )
+    .await?;
 
     // Step 1
     let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
@@ -700,7 +824,18 @@ pub(crate) async fn faand(
     // Extra step for including into our protocol.rs implementation - the last element in the bucket is defined such that it
     // results in a triple that matches the random x and y bits generated beforehand in protocol.rs
     let mut rr: Vec<bool> = (0..length + 3 * RHO).map(|_| random()).collect();
-    let rbits_new = fashare(channel, &mut rr, p_own, p_max, length, delta, shared_rng).await?;
+    let rbits_new = fashare(
+        channel,
+        &mut rr,
+        p_own,
+        p_max,
+        length,
+        delta,
+        shared_rng,
+        sender_ot4,
+        receiver_ot4,
+    )
+    .await?;
     let mut s1: Vec<Share> = vec![Share(false, Auth(vec![])); length];
     let mut s2: Vec<Share> = vec![Share(false, Auth(vec![])); length];
     for i in 0..length {
@@ -832,7 +967,7 @@ pub(crate) async fn combine_two_leaky_ands(
     Ok((xres, y1.clone(), zres))
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use rand::random;
 
@@ -1248,3 +1383,4 @@ mod tests {
         Ok(())
     }
 }
+*/

@@ -8,9 +8,10 @@ use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, Channel, MsgChannel, SimpleChannel},
-    faand::{self, faand, fashare, shared_rng, RHO},
+    faand::{self, bucket_size, faand, fashare, shared_rng, RHO},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
+    ot::generate_ots,
 };
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
@@ -313,12 +314,44 @@ pub async fn mpc(
     let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
     let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
+    let faand_len = 3 * bucket_size(num_and_gates) * num_and_gates + num_and_gates;
+    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; secret_bits]; p_max];
+    let mut sender_ot2: Vec<Vec<u128>> = vec![vec![0; faand_len]; p_max];
+    let mut receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; secret_bits], vec![0; secret_bits]); p_max];
+    let mut receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; faand_len], vec![0; faand_len]); p_max];
     if TRUSTEDDEALER {
         channel
             .send_to(p_fpre, "random shares", &(secret_bits as u32))
             .await?;
         random_shares = channel.recv_from(p_fpre, "random shares").await?;
     } else {
+        let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits + faand_len]; p_max];
+        let mut receiver_ot: Vec<(Vec<bool>, Vec<u128>)> = vec![(vec![false; secret_bits + faand_len], vec![0; secret_bits + faand_len]); p_max];
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            let (u, b, w) = generate_ots(
+                secret_bits + faand_len,
+            )
+            .await
+            .unwrap();
+            sender_ot[p] = u; //sender is p_own, receiver p
+            channel.send_to(p, "ot", &(b, w)).await?;
+            receiver_ot[p] = channel.recv_from(p, "ot").await?;
+        }
+
+        for (i, row) in sender_ot.into_iter().enumerate() {
+            sender_ot1[i].copy_from_slice(&row[0..secret_bits]);
+            sender_ot2[i].copy_from_slice(&row[secret_bits..]);
+        }
+        for (i, row) in receiver_ot.into_iter().enumerate() {
+            let (bools, u128s) = row;
+            receiver_ot1[i].0.copy_from_slice(&bools[0..secret_bits]);
+            receiver_ot1[i].1.copy_from_slice(&u128s[0..secret_bits]);
+            receiver_ot2[i].0.copy_from_slice(&bools[secret_bits..]);
+            receiver_ot2[i].1.copy_from_slice(&u128s[secret_bits..]);
+        }
+
         let mut x: Vec<bool> = (0..secret_bits + 3 * RHO).map(|_| random()).collect();
         random_shares = fashare(
             &mut channel,
@@ -328,6 +361,8 @@ pub async fn mpc(
             secret_bits,
             delta,
             &mut shared_rng,
+            sender_ot1,
+            receiver_ot1,
         )
         .await?;
     }
@@ -378,6 +413,8 @@ pub async fn mpc(
             num_and_gates,
             &mut shared_rng,
             delta,
+            sender_ot2,
+            receiver_ot2,
         )
         .await?;
     }
@@ -710,5 +747,6 @@ pub async fn mpc(
             }
         }
     }
+
     Ok(outputs)
 }

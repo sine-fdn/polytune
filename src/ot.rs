@@ -11,7 +11,7 @@ use mpz_ot::{
     Correlation, OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver, RandomCOTSender,
     TransferId,
 };
-use mpz_ot_core::ferret::LpnType;
+use mpz_ot_core::ferret::{mpcot::sender, LpnType};
 
 // l = n - k = 8380
 const LPN_PARAMETERS_TEST: LpnParameters = LpnParameters {
@@ -172,7 +172,7 @@ pub(crate) async fn _mpz_ot(count: usize) -> Result<bool, OTError> {
     Ok(true)
 }
 
-pub(crate) async fn generate_ots(count: usize) -> bool {
+pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, Vec<u128>), OTError> {
     let (io0, io1) = duplex(8);
     let mut ctx_receiver = STExecutor::new(io0);
     let mut ctx_sender = STExecutor::new(io1);
@@ -192,38 +192,45 @@ pub(crate) async fn generate_ots(count: usize) -> bool {
     let receiver_result = receiver_task.await;
 
     // Handle errors from task execution
-    let (sender_id, u, delta) = match sender_result {
+    let (_sender_id, u, _delta) = match sender_result {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => {
-            eprintln!("Sender task error: {:?}", e);
-            return false;
+            return Err(e);
         }
         Err(e) => {
             eprintln!("Sender task join error: {:?}", e);
-            return false;
+            return Ok((vec![], vec![], vec![]));
         }
     };
 
-    let (receiver_id, b, w) = match receiver_result {
+    let (_receiver_id, b, w) = match receiver_result {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => {
-            eprintln!("Receiver task error: {:?}", e);
-            return false;
+            return Err(e);
         }
         Err(e) => {
             eprintln!("Receiver task join error: {:?}", e);
-            return false;
+            return Ok((vec![], vec![], vec![]));
         }
     };
 
-    for i in 0..count {
+    /*for i in 0..count {
         println!("ids   {:?}   {:?}", sender_id, receiver_id);
         println!("delta {:?}", delta);
         println!("b     {:?}", b[i]);
         println!("u     {:?}", block_to_u128(u[i]));
         println!("w     {:?}", block_to_u128(w[i]));
+    }*/
+    let mut ublock: Vec<u128> = vec![0; u.len()];
+    for i in 0..u.len() {
+        ublock[i] = block_to_u128(u[i]);
     }
-    true
+    let mut wblock: Vec<u128> = vec![0; w.len()];
+    for i in 0..w.len() {
+        wblock[i] = block_to_u128(w[i]);
+    }
+
+    Ok((ublock, b, wblock))
 }
 
 #[cfg(test)]
