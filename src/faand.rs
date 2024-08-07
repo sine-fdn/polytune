@@ -104,16 +104,6 @@ pub(crate) fn preots(ot_num: usize) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, 
         }
     }
     Ok((bits, x0, x1, xb))
-    /*match role { //true sender, false receiver???
-        true => {
-            println!("xb {:?}", xb);
-            Ok((bits, vec![], vec![], xb))
-        }
-        false => {
-            println!("x0 {:?}", x0);
-            Ok((vec![], x0, x1, vec![]))
-        }
-    }*/
 }
 
 /// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
@@ -141,6 +131,7 @@ pub(crate) async fn fabit(
 
             //let mut xc: Vec<u128> = rb.clone();
             let mut xc: Vec<u128> = vec![0; rb.len()];
+            //println!("{:?} {:?}", rb.len(), c.len());
             for i in 0..c.len() {
                 if c[i] {
                     xc[i] ^= y1[i];
@@ -164,6 +155,7 @@ pub(crate) async fn fabit(
             //println!("r0 {:?} {:?}", p_to, r0);
             //println!("r1 {:?} {:?}", p_to, r1);
 
+            //println!("{:?} {:?} {:?} {:?}", kbits.len(), x0.len(), x1.len(), r0.len());
             /*for i in 0..kbits.len() {
                 if kbits[i]{
                     y0[i] = x0[i] ^ r1[i];
@@ -724,7 +716,7 @@ pub(crate) async fn faand(
     let mut receiver_ot4: Vec<(Vec<bool>, Vec<u128>)> =
         vec![(vec![false; length], vec![0; length]); p_max];
 
-    for (i, row) in sender_ot.into_iter().enumerate() {
+    /*for (i, row) in sender_ot.into_iter().enumerate() {
         sender_ot1[i].copy_from_slice(&row[0..lprime]);
         sender_ot2[i].copy_from_slice(&row[lprime..2 * lprime]);
         sender_ot3[i].copy_from_slice(&row[2 * lprime..3 * lprime]);
@@ -748,7 +740,7 @@ pub(crate) async fn faand(
             .copy_from_slice(&u128s[2 * lprime..3 * lprime]);
         receiver_ot4[i].0.copy_from_slice(&bools[3 * lprime..]);
         receiver_ot4[i].1.copy_from_slice(&u128s[3 * lprime..]);
-    }
+    }*/
 
     let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
     let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();

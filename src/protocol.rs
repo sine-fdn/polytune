@@ -308,17 +308,19 @@ pub async fn mpc(
     let num_and_gates = circuit.and_gates();
     let num_gates = num_input_gates + circuit.gates.len();
     let secret_bits = num_input_gates + num_and_gates;
+    let secret_bits_ot = secret_bits + 3 * RHO; 
 
     let random_shares: Vec<Share>;
     let auth_bits: Vec<Share>;
     let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
     let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
-    let faand_len = 3 * bucket_size(num_and_gates) * num_and_gates + num_and_gates;
-    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; secret_bits]; p_max];
+
+    let faand_len = 3 * (bucket_size(num_and_gates) * num_and_gates + 3 * RHO) + num_and_gates + 3 * RHO;
+    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot]; p_max];
     let mut sender_ot2: Vec<Vec<u128>> = vec![vec![0; faand_len]; p_max];
     let mut receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; secret_bits], vec![0; secret_bits]); p_max];
+        vec![(vec![false; secret_bits_ot], vec![0; secret_bits_ot]); p_max];
     let mut receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
         vec![(vec![false; faand_len], vec![0; faand_len]); p_max];
     if TRUSTEDDEALER {
@@ -327,11 +329,12 @@ pub async fn mpc(
             .await?;
         random_shares = channel.recv_from(p_fpre, "random shares").await?;
     } else {
-        let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits + faand_len]; p_max];
-        let mut receiver_ot: Vec<(Vec<bool>, Vec<u128>)> = vec![(vec![false; secret_bits + faand_len], vec![0; secret_bits + faand_len]); p_max];
+        
+        let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + faand_len]; p_max];
+        let mut receiver_ot: Vec<(Vec<bool>, Vec<u128>)> = vec![(vec![false; secret_bits_ot + faand_len], vec![0; secret_bits_ot + faand_len]); p_max];
         for p in (0..p_max).filter(|p| *p != p_own) {
             let (u, b, w) = generate_ots(
-                secret_bits + faand_len,
+                secret_bits_ot + faand_len,
             )
             .await
             .unwrap();
@@ -340,19 +343,19 @@ pub async fn mpc(
             receiver_ot[p] = channel.recv_from(p, "ot").await?;
         }
 
-        for (i, row) in sender_ot.into_iter().enumerate() {
-            sender_ot1[i].copy_from_slice(&row[0..secret_bits]);
-            sender_ot2[i].copy_from_slice(&row[secret_bits..]);
+        /*for (i, row) in sender_ot.into_iter().enumerate() {
+            sender_ot1[i].copy_from_slice(&row[0..secret_bits_ot]);
+            sender_ot2[i].copy_from_slice(&row[secret_bits_ot..]);
         }
         for (i, row) in receiver_ot.into_iter().enumerate() {
             let (bools, u128s) = row;
-            receiver_ot1[i].0.copy_from_slice(&bools[0..secret_bits]);
-            receiver_ot1[i].1.copy_from_slice(&u128s[0..secret_bits]);
-            receiver_ot2[i].0.copy_from_slice(&bools[secret_bits..]);
-            receiver_ot2[i].1.copy_from_slice(&u128s[secret_bits..]);
-        }
+            receiver_ot1[i].0.copy_from_slice(&bools[0..secret_bits_ot]);
+            receiver_ot1[i].1.copy_from_slice(&u128s[0..secret_bits_ot]);
+            receiver_ot2[i].0.copy_from_slice(&bools[secret_bits_ot..]);
+            receiver_ot2[i].1.copy_from_slice(&u128s[secret_bits_ot..]);
+        }*/
 
-        let mut x: Vec<bool> = (0..secret_bits + 3 * RHO).map(|_| random()).collect();
+        let mut x: Vec<bool> = (0..secret_bits_ot).map(|_| random()).collect();
         random_shares = fashare(
             &mut channel,
             &mut x,

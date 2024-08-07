@@ -11,7 +11,7 @@ use mpz_ot::{
     Correlation, OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver, RandomCOTSender,
     TransferId,
 };
-use mpz_ot_core::ferret::{mpcot::sender, LpnType};
+use mpz_ot_core::ferret::LpnType;
 
 // l = n - k = 8380
 const LPN_PARAMETERS_TEST: LpnParameters = LpnParameters {
@@ -214,13 +214,6 @@ pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, 
         }
     };
 
-    /*for i in 0..count {
-        println!("ids   {:?}   {:?}", sender_id, receiver_id);
-        println!("delta {:?}", delta);
-        println!("b     {:?}", b[i]);
-        println!("u     {:?}", block_to_u128(u[i]));
-        println!("w     {:?}", block_to_u128(w[i]));
-    }*/
     let mut ublock: Vec<u128> = vec![0; u.len()];
     for i in 0..u.len() {
         ublock[i] = block_to_u128(u[i]);
@@ -229,6 +222,12 @@ pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, 
     for i in 0..w.len() {
         wblock[i] = block_to_u128(w[i]);
     }
+
+    /*for i in 0..count {
+        println!("b     {:?}", b[i]);
+        println!("u     {:?}", ublock[i]);
+        println!("w     {:?}", wblock[i]);
+    }*/
 
     Ok((ublock, b, wblock))
 }
