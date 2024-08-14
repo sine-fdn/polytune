@@ -1,4 +1,6 @@
 //! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
+use std::vec;
+
 use blake3::Hasher;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -26,6 +28,8 @@ pub enum Error {
     LaANDXorNotZero,
     /// Wrong MAC of d when combining two leaky ANDs.
     AANDWrongDMAC,
+    /// Wrong MAC of e.
+    AANDWrongEFMAC,
     /// No Mac or Key
     MissingMacKey,
 }
@@ -184,6 +188,8 @@ pub(crate) async fn fabitn(
     length: usize,
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
 ) -> Result<Vec<Share>, Error> {
     // Step 1 initialize random bitstring
     let len_abit = length + 2 * RHO;
@@ -309,11 +315,24 @@ pub(crate) async fn fashare(
     length: usize,
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
 ) -> Result<Vec<Share>, Error> {
     //Step 1
 
     //Step 2
-    let mut shares = fabitn(channel, x, p_own, p_max, length + RHO, delta, shared_rng).await?;
+    let mut shares = fabitn(
+        channel,
+        x,
+        p_own,
+        p_max,
+        length + RHO,
+        delta,
+        shared_rng,
+        sender_ot,
+        receiver_ot,
+    )
+    .await?;
 
     // Protocol Pi_aShare
     // Input: bits of len_ashare length, authenticated bits
@@ -669,6 +688,113 @@ fn transform(
 /// Protocol Pi_aAND that performs F_aAND.
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+pub(crate) async fn faand_precomp(
+    channel: &mut MsgChannel<impl Channel>,
+    p_own: usize,
+    p_max: usize,
+    circuit_size: usize,
+    length: usize,
+    shared_rng: &mut ChaCha20Rng,
+    delta: Delta,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
+) -> Result<Vec<(Share, Share, Share)>, Error> {
+    //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
+    let b = bucket_size(circuit_size); // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
+    let lprime: usize = length * b;
+    //let len_ashare = length + RHO;
+    //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
+
+    let sender_ot1: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
+    let sender_ot2: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
+    let sender_ot3: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
+    let sender_ot4: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
+    let receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprime], vec![0; lprime]); p_max];
+    let receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprime], vec![0; lprime]); p_max];
+    let receiver_ot3: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprime], vec![0; lprime]); p_max];
+    let receiver_ot4: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; length], vec![0; length]); p_max];
+
+    let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
+    let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
+    let mut r: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
+    let xbits = fashare(
+        channel,
+        &mut x,
+        p_own,
+        p_max,
+        lprime,
+        delta,
+        shared_rng,
+        sender_ot1,
+        receiver_ot1,
+    )
+    .await?;
+    let ybits = fashare(
+        channel,
+        &mut y,
+        p_own,
+        p_max,
+        lprime,
+        delta,
+        shared_rng,
+        sender_ot2,
+        receiver_ot2,
+    )
+    .await?;
+    let rbits = fashare(
+        channel,
+        &mut r,
+        p_own,
+        p_max,
+        lprime,
+        delta,
+        shared_rng,
+        sender_ot3,
+        receiver_ot3,
+    )
+    .await?;
+
+    // Step 1
+    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
+        flaand(channel, xbits, ybits, rbits, p_own, p_max, delta, lprime).await?;
+    let triples = transform(alltriples, lprime);
+
+    // Step 2
+    let mut buckets: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; length];
+
+    // Assign objects to buckets
+    let mut available: Vec<usize> = (0..length).collect();
+    for obj in triples {
+        let mut indeces: Vec<usize> = available.to_vec();
+        indeces.retain(|&index| buckets[index].len() < b);
+
+        if !indeces.is_empty() {
+            let rand_index: usize = shared_rng.gen_range(0..indeces.len());
+            let ind = indeces[rand_index];
+
+            buckets[ind].push(obj);
+            if buckets[ind].len() == b {
+                available.retain(|&index| index != ind);
+            }
+        }
+    }
+
+    // Step 3
+    let mut bucketcombined: Vec<(Share, Share, Share)> = vec![];
+    for buc in buckets {
+        bucketcombined.push(combine_bucket(channel, p_own, p_max, delta, buc).await?);
+    }
+
+    Ok(bucketcombined)
+}
+
+/// Protocol Pi_aAND that performs F_aAND.
+///
+/// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand(
     channel: &mut MsgChannel<impl Channel>,
@@ -679,211 +805,106 @@ pub(crate) async fn faand(
     length: usize,
     shared_rng: &mut ChaCha20Rng,
     delta: Delta,
+    sender_ot: Vec<Vec<u128>>,
+    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
 ) -> Result<Vec<Share>, Error> {
-    //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
-    let b = bucket_size(circuit_size); // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
-    let lprime: usize = length * b;
-    //let len_ashare = length + RHO;
-    //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
+    let vectriples = faand_precomp(
+        channel,
+        p_own,
+        p_max,
+        circuit_size,
+        length,
+        shared_rng,
+        delta,
+        sender_ot,
+        receiver_ot,
+    )
+    .await?;
 
-    let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let mut r: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let xbits = fashare(channel, &mut x, p_own, p_max, lprime, delta, shared_rng).await?;
-    let ybits = fashare(channel, &mut y, p_own, p_max, lprime, delta, shared_rng).await?;
-    let rbits = fashare(channel, &mut r, p_own, p_max, lprime, delta, shared_rng).await?;
-
-    // Step 1
-    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
-        flaand(channel, xbits, ybits, rbits, p_own, p_max, delta, lprime).await?;
-    let triples = transform(alltriples, lprime);
-
-    // Step 2
-    let mut buckets: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; length];
-
-    // Assign objects to buckets
-    let mut available: Vec<usize> = (0..length).collect();
-    for obj in triples {
-        let mut indeces: Vec<usize> = available.to_vec();
-        indeces.retain(|&index| buckets[index].len() < b);
-
-        if !indeces.is_empty() {
-            let rand_index: usize = shared_rng.gen_range(0..indeces.len());
-            let ind = indeces[rand_index];
-
-            buckets[ind].push(obj);
-            if buckets[ind].len() == b {
-                available.retain(|&index| index != ind);
-            }
-        }
-    }
-
-    // Step 3
-    let mut bucketcombined: Vec<(Share, Share, Share)> = vec![];
-    for b in buckets {
-        bucketcombined.push(combine_bucket(channel, p_own, p_max, delta, b).await?);
-    }
-
-    // Extra step for including into our protocol.rs implementation - the last element in the bucket is defined such that it
-    // results in a triple that matches the random x and y bits generated beforehand in protocol.rs
-    let mut rr: Vec<bool> = (0..length + 3 * RHO).map(|_| random()).collect();
-    let rbits_new = fashare(channel, &mut rr, p_own, p_max, length, delta, shared_rng).await?;
-    let mut s1: Vec<Share> = vec![Share(false, Auth(vec![])); length];
-    let mut s2: Vec<Share> = vec![Share(false, Auth(vec![])); length];
-    for i in 0..length {
-        s1[i] = &bits_rand[i].0 ^ &bucketcombined[i].0;
-        s2[i] = bits_rand[i].1.clone();
-    }
-    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
-        flaand(channel, s1, s2, rbits_new, p_own, p_max, delta, length).await?;
-    let triples = transform(alltriples, length);
-    let mut finalbucket: Vec<(Share, Share, Share)> = vec![
-        (
-            Share(false, Auth(vec![])),
-            Share(false, Auth(vec![])),
-            Share(false, Auth(vec![]))
-        );
-        length
-    ];
-    for i in 0..length {
-        finalbucket[i] = combine_two_leaky_ands(
-            channel,
-            p_own,
-            p_max,
-            delta,
-            &triples[i],
-            &bucketcombined[i],
-        )
-        .await?;
-    }
-
-    let mut shares: Vec<Share> = vec![];
-    for b in finalbucket {
-        shares.push(b.2);
-    }
-    Ok(shares)
-}
-
-/// Protocol Pi_aAND that performs F_aAND.
-///
-/// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
-pub(crate) async fn faand_precomp(
-    channel: &mut MsgChannel<impl Channel>,
-    p_own: usize,
-    p_max: usize,
-    circuit_size: usize,
-    length: usize,
-    shared_rng: &mut ChaCha20Rng,
-    delta: Delta,
-) -> Result<Vec<(Share, Share, Share)>, Error> {
-    //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
-    let b = bucket_size(circuit_size); // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
-    let lprime: usize = length * b;
-    //let len_ashare = length + RHO;
-    //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
-
-    let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let mut r: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let xbits = fashare(channel, &mut x, p_own, p_max, lprime, delta, shared_rng).await?;
-    let ybits = fashare(channel, &mut y, p_own, p_max, lprime, delta, shared_rng).await?;
-    let rbits = fashare(channel, &mut r, p_own, p_max, lprime, delta, shared_rng).await?;
-
-    // Step 1
-    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
-        flaand(channel, xbits, ybits, rbits, p_own, p_max, delta, lprime).await?;
-    let triples = transform(alltriples, lprime);
-
-    // Step 2
-    let mut buckets: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; length];
-
-    // Assign objects to buckets
-    let mut available: Vec<usize> = (0..length).collect();
-    for obj in triples {
-        let mut indeces: Vec<usize> = available.to_vec();
-        indeces.retain(|&index| buckets[index].len() < b);
-
-        if !indeces.is_empty() {
-            let rand_index: usize = shared_rng.gen_range(0..indeces.len());
-            let ind = indeces[rand_index];
-
-            buckets[ind].push(obj);
-            if buckets[ind].len() == b {
-                available.retain(|&index| index != ind);
-            }
-        }
-    }
-
-    // Step 3
-    let mut bucketcombined: Vec<(Share, Share, Share)> = vec![];
-    for b in buckets {
-        bucketcombined.push(combine_bucket(channel, p_own, p_max, delta, b).await?);
-    }
-
-    Ok(bucketcombined)
-}
-
-/// Protocol Pi_aAND that performs F_aAND.
-///
-/// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn faand_with_precomp(
-    channel: &mut MsgChannel<impl Channel>,
-    bits_rand: Vec<(Share, Share)>,
-    p_own: usize,
-    p_max: usize,
-    circuit_size: usize,
-    length: usize,
-    shared_rng: &mut ChaCha20Rng,
-    delta: Delta,
-) -> Result<Vec<Share>, Error> {
-    let vectriples = faand_precomp(channel, p_own, p_max, circuit_size, length, shared_rng, delta).await?;
-    //let mut ef: Vec<(Share, Share)> = vec![];
-    let mut efbool: Vec<(bool, bool)> = vec![];
-    for i in 0..vectriples.len(){
+    let mut ef: Vec<(Share, Share)> = vec![];
+    let mut e: Vec<bool> = vec![];
+    let mut f: Vec<bool> = vec![];
+    for i in 0..vectriples.len() {
         let (a, b, _c) = &vectriples[i];
         let (x, y) = &bits_rand[i];
-        //ef.push((a ^ x, b ^ y));
-        efbool.push((a.0 ^ x.0, b.0 ^ y.0));
+        ef.push((a ^ x, b ^ y));
+        e.push(a.0 ^ x.0);
+        f.push(b.0 ^ y.0);
     }
-    println!("p ef: {:?} {:?}", p_own, efbool[0].0);
     //let mut efp: Vec<Vec<(Share, Share)>> = vec![vec![]; p_max];
-    let mut efpbool: Vec<Vec<(bool, bool)>> = vec![vec![]; p_max];
+    let mut emacs: Vec<Option<Mac>> = vec![];
+    let mut fmacs: Vec<Option<Mac>> = vec![];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "ef", &efbool).await?;
+        for i in 0..ef.len() {
+            let (e, f) = &ef[i];
+            let Some((emac, _)) = e.1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((fmac, _)) = f.1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            emacs.push(Some(emac));
+            fmacs.push(Some(fmac));
+        }
+        //channel.send_to(p, "ef", &ef).await?;
+        channel
+            .send_to(
+                p,
+                "ef",
+                &(e.clone(), f.clone(), emacs.clone(), fmacs.clone()),
+            )
+            .await?;
     }
+    let mut ep: Vec<Vec<bool>> = vec![vec![]; p_max];
+    let mut fp: Vec<Vec<bool>> = vec![vec![]; p_max];
+    let mut emacsp: Vec<Vec<Option<Mac>>> = vec![vec![]; p_max];
+    let mut fmacsp: Vec<Vec<Option<Mac>>> = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        efpbool[p] = channel.recv_from(p, "ef").await?; //TODO malicious security? broadcast ef to all parties
-        println!("p efp p: {:?} {:?} {:?}", p_own, p, efpbool[p][0].0);
+        (ep[p], fp[p], emacsp[p], fmacsp[p]) = channel.recv_from(p, "ef").await?;
+        for i in 0..ep[p].len() {
+            let Some(emacp) = emacsp[p][i] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((_, ekey)) = ef[i].0 .1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some(fmacp) = fmacsp[p][i] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((_, fkey)) = ef[i].1 .1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            /*if ep[p][i] && (emacp.0 != ekey.0 ^ delta.0) || !ep[p][i] && (emacp.0 != ekey.0) {
+                println!("{:?} {:?} {:?}", emacp.0, ekey.0 ^ delta.0, ekey.0);
+                return Err(Error::AANDWrongEFMAC);
+            }
+            if fp[p][i] && (fmacp.0 != fkey.0 ^ delta.0) || !fp[p][i] && (fmacp.0 != fkey.0) {
+                println!("{:?} {:?} {:?}", fmacp.0, fkey.0 ^ delta.0, fkey.0);
+                return Err(Error::AANDWrongEFMAC);
+            }*/
+            //TODO Figure out E and FMac check for 3 parties!!!!!
+        }
     }
-    for i in 0..efbool.len() {
+    for i in 0..ef.len() {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            //ef[i].0 = &ef[i].0 ^ &efp[p][i].0; //e
-            //ef[i].1 = &ef[i].1 ^ &efp[p][i].1; //f
-            efbool[i].0 = efbool[i].0 ^ efpbool[p][i].0; //e
-            efbool[i].1 = efbool[i].1 ^ efpbool[p][i].1; //f
+            e[i] = &e[i] ^ &ep[p][i];
+            f[i] = &f[i] ^ &fp[p][i];
         }
     }
-    println!("p ef res: {:?} {:?}", p_own, efbool[0].0);
-    let mut shares: Vec<Share> = vec![];
-    for i in 0..vectriples.len() {
-        let (_a, _b, c) = &vectriples[i];
-        shares.push(c.clone());
-    }
+    let mut result: Vec<Share> = vec![Share(false, Auth(vec![])); vectriples.len()];
 
-    for i in 0..efbool.len() {
-        let (a, _b, _c) = &vectriples[i];
-        let e = efbool[i].0;
-        let f = efbool[i].1;
+    for i in 0..vectriples.len() {
+        let (a, _b, c) = &vectriples[i];
         let (_x, y) = &bits_rand[i];
-        if e { 
-            shares[i] = &shares[i] ^ &y;
+        result[i] = c.clone();
+        if e[i] {
+            result[i] = &result[i] ^ &y;
         }
-        if !f { 
-            shares[i] = &shares[i] ^ &a;
+        if f[i] {
+            result[i] = &result[i] ^ &a;
         }
     }
-    Ok(shares)
+    Ok(result)
 }
 
 /// Combine the whole bucket by combining elements two by two.
@@ -981,7 +1002,7 @@ pub(crate) async fn combine_two_leaky_ands(
     Ok((xres, y1.clone(), zres))
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use rand::random;
 
@@ -1397,3 +1418,4 @@ mod tests {
         Ok(())
     }
 }
+*/

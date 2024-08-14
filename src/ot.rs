@@ -172,7 +172,7 @@ pub(crate) async fn _mpz_ot(count: usize) -> Result<bool, OTError> {
     Ok(true)
 }
 
-pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, Vec<u128>), OTError> {
+pub(crate) async fn generate_ots(count: usize) -> Result<(u128, Vec<u128>, Vec<bool>, Vec<u128>), OTError> {
     let (io0, io1) = duplex(8);
     let mut ctx_receiver = STExecutor::new(io0);
     let mut ctx_sender = STExecutor::new(io1);
@@ -192,14 +192,14 @@ pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, 
     let receiver_result = receiver_task.await;
 
     // Handle errors from task execution
-    let (_sender_id, u, _delta) = match sender_result {
+    let (_sender_id, u, delta) = match sender_result {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => {
             return Err(e);
         }
         Err(e) => {
             eprintln!("Sender task join error: {:?}", e);
-            return Ok((vec![], vec![], vec![]));
+            return Ok((0, vec![], vec![], vec![]));
         }
     };
 
@@ -210,7 +210,7 @@ pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, 
         }
         Err(e) => {
             eprintln!("Receiver task join error: {:?}", e);
-            return Ok((vec![], vec![], vec![]));
+            return Ok((0, vec![], vec![], vec![]));
         }
     };
 
@@ -229,7 +229,7 @@ pub(crate) async fn generate_ots(count: usize) -> Result<(Vec<u128>, Vec<bool>, 
         println!("w     {:?}", wblock[i]);
     }*/
 
-    Ok((ublock, b, wblock))
+    Ok((delta, ublock, b, wblock))
 }
 
 #[cfg(test)]
