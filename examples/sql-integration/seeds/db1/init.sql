@@ -6,8 +6,8 @@ CREATE TABLE school_entry_examination (
     first_name TEXT,
     last_name TEXT,
     date_of_birth TEXT,
-    sufficiently_vaccinated BOOLEAN,
-    special_educational_needs BOOLEAN
+    sufficiently_vaccinated INT,
+    special_educational_needs INT
 );
 
 LOAD DATA INFILE '/var/lib/mysql-files/school_entry_examination.csv'

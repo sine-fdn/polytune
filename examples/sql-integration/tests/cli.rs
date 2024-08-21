@@ -81,7 +81,7 @@ fn simulate() {
             eprintln!("party0> {line}");
         }
     });
-    let result = r.recv_timeout(Duration::from_secs(5 * 60));
+    let result = r.recv_timeout(Duration::from_secs(60 * 60));
     for mut child in children {
         child.kill().unwrap();
     }

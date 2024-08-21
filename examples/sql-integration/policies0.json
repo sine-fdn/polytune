@@ -9,18 +9,18 @@
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 0,
-      "input": "SELECT first_name || last_name || date_of_birth FROM early_detection_screening WHERE screening_status = 'missing'",
+      "input": "SELECT first_name || last_name || date_of_birth, screening_status FROM early_detection_screening",
       "input_db": "postgres://postgres:test@localhost:5550/postgres",
       "setup": "TRUNCATE results",
       "output": "INSERT INTO results (joined, total) VALUES (CAST($1 AS INT), CAST($2 AS INT))",
       "output_db": "postgres://postgres:test@localhost:5555/postgres",
       "constants": {
         "ROWS": {
-          "query": "SELECT COUNT(id) FROM early_detection_screening WHERE screening_status = 'missing'",
+          "query": "SELECT COUNT(id) FROM early_detection_screening",
           "ty": "usize"
         },
         "ID_LEN": {
-          "query": "SELECT MAX(LENGTH(first_name || last_name || date_of_birth)) FROM early_detection_screening WHERE screening_status = 'missing'",
+          "query": "SELECT MAX(LENGTH(first_name || last_name || date_of_birth)) FROM early_detection_screening",
           "ty": "usize"
         }
       }

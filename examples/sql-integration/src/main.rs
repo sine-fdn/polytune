@@ -432,6 +432,12 @@ async fn execute_mpc(
 
         let prg = {
             let locked = state.lock().await;
+            info!("Compiling circuit with the following constants:");
+            for (p, v) in locked.consts.iter() {
+                for (k, v) in v {
+                    info!("{p}::{k}: {v:?}");
+                }
+            }
             compile_with_constants(&code, locked.consts.clone())
                 .map_err(|e| anyhow!(e.prettify(&code)))?
         };
@@ -445,9 +451,9 @@ async fn execute_mpc(
             );
         };
         info!(
-            "Trying to execute circuit with {}K gates ({}K AND gates)",
-            prg.circuit.gates.len() / 1000,
-            prg.circuit.and_gates() / 1000
+            "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates)",
+            prg.circuit.gates.len() as f64 / 1000.0 / 1000.0,
+            prg.circuit.and_gates() as f64 / 1000.0 / 1000.0
         );
         let mut rows_as_literals = vec![];
         for (r, row) in rows.iter().enumerate() {
@@ -465,6 +471,48 @@ async fn execute_mpc(
                     Type::Bool => {
                         if let Ok(b) = row.try_get::<bool, _>(c) {
                             literal = Some(Literal::from(b))
+                        }
+                    }
+                    Type::Unsigned(UnsignedNumType::U8) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            if n >= 0 && n <= u8::MAX as i32 {
+                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U8))
+                            }
+                        }
+                    }
+                    Type::Unsigned(UnsignedNumType::U16) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            if n >= 0 && n <= u16::MAX as i32 {
+                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U16))
+                            }
+                        }
+                    }
+                    Type::Unsigned(UnsignedNumType::U32) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            if n >= 0 && n <= u32::MAX as i32 {
+                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U32))
+                            }
+                        }
+                    }
+                    Type::Unsigned(UnsignedNumType::U64) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            if n >= 0 {
+                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U64))
+                            }
+                        }
+                    }
+                    Type::Signed(SignedNumType::I8) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            if n >= i8::MIN as i32 && n <= i8::MAX as i32 {
+                                literal = Some(Literal::NumSigned(n as i64, SignedNumType::I8))
+                            }
+                        }
+                    }
+                    Type::Signed(SignedNumType::I16) => {
+                        if let Ok(n) = row.try_get::<i32, _>(c) {
+                            if n >= i16::MIN as i32 && n <= i16::MAX as i32 {
+                                literal = Some(Literal::NumSigned(n as i64, SignedNumType::I16))
+                            }
                         }
                     }
                     Type::Signed(SignedNumType::I32) => {
@@ -790,7 +838,7 @@ impl Channel for HttpChannel {
         }
         let mut msg: Vec<u8> = vec![];
         loop {
-            let Some(chunk) = timeout(Duration::from_secs(60), self.recv[p].recv())
+            let Some(chunk) = timeout(Duration::from_secs(30 * 60), self.recv[p].recv())
                 .await
                 .context(format!("recv_bytes_from(p = {p})"))?
             else {
