@@ -27,8 +27,14 @@ use sqlx::{
     AnyPool, Pool, Row, ValueRef,
 };
 use std::{
-    borrow::BorrowMut, collections::HashMap, net::SocketAddr, path::PathBuf, process::exit,
-    result::Result, sync::Arc, time::Duration,
+    borrow::BorrowMut,
+    collections::HashMap,
+    net::SocketAddr,
+    path::PathBuf,
+    process::exit,
+    result::Result,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 use tokio::{
     fs,
@@ -306,6 +312,9 @@ async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
         urls,
         party: parties,
         recv: receivers,
+        enable_log: false,
+        send_count: 0,
+        recv_count: 0,
     };
     loop {
         info!("Running FPre...");
@@ -344,6 +353,7 @@ async fn execute_mpc(
         output_db: _output_db,
         constants,
     } = policy;
+    let now = Instant::now();
     let (prg, input) = if let Some(db) = db {
         info!("Connecting to input db at {db}...");
         let pool: AnyPool = Pool::connect(db).await?;
@@ -591,10 +601,20 @@ async fn execute_mpc(
             urls: participants.clone(),
             party: *party,
             recv: receivers,
+            enable_log: *party == 0,
+            send_count: 0,
+            recv_count: 0,
         }
     };
     let output = mpc(channel, &prg.circuit, &input, fpre, 0, *party, &p_out).await?;
     state.lock().await.senders.clear();
+    let elapsed = now.elapsed();
+    info!(
+        "MPC computation for party {party} took {} hour(s), {} minute(s), {} second(s)",
+        elapsed.as_secs() / 60 / 60,
+        (elapsed.as_secs() % (60 * 60)) / 60,
+        elapsed.as_secs() % 60,
+    );
     if output.is_empty() {
         Ok(None)
     } else {
@@ -707,6 +727,9 @@ struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
     recv: Vec<Receiver<Vec<u8>>>,
+    enable_log: bool,
+    send_count: u32,
+    recv_count: u32,
 }
 
 impl Channel for HttpChannel {
@@ -714,26 +737,85 @@ impl Channel for HttpChannel {
     type RecvError = anyhow::Error;
 
     async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), Self::SendError> {
+        let simulated_delay_in_ms = 500;
+        let expected_msgs = (self.urls.len() - 2) * 2 + 3;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         trace!("sending msg from {} to {} ({:.2}MB)", self.party, p, mb,);
-        loop {
-            match client.post(&url).body(msg.clone()).send().await?.status() {
-                StatusCode::OK => return Ok(()),
-                StatusCode::NOT_FOUND => {
-                    error!("Could not reach party {p} at {url}...");
-                    sleep(Duration::from_millis(1000)).await;
+        if self.enable_log {
+            self.send_count += 1;
+            info!(
+                "Sending msg {}/{} to party {} ({:.2}MB)",
+                self.send_count, expected_msgs, p, mb
+            );
+        }
+        let chunk_size = 10 * 1024 * 1024;
+        let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
+        if chunks.is_empty() {
+            chunks.push(&[]);
+        }
+        let length = chunks.len();
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            if length > 1 && self.enable_log {
+                info!("  (Sending chunk {}/{} to party {})", i + 1, length, p);
+            }
+            let mut msg = Vec::with_capacity(2 * 4 + chunk.len());
+            msg.extend((i as u32).to_be_bytes());
+            msg.extend((length as u32).to_be_bytes());
+            msg.extend(chunk);
+            loop {
+                sleep(Duration::from_millis(simulated_delay_in_ms)).await;
+                match client.post(&url).body(msg.clone()).send().await?.status() {
+                    StatusCode::OK => break,
+                    StatusCode::NOT_FOUND => {
+                        error!("Could not reach party {p} at {url}...");
+                        sleep(Duration::from_millis(1000)).await;
+                    }
+                    status => anyhow::bail!("Unexpected status code: {status}"),
                 }
-                status => anyhow::bail!("Unexpected status code: {status}"),
             }
         }
+        Ok(())
     }
 
     async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, Self::RecvError> {
-        Ok(timeout(Duration::from_secs(60), self.recv[p].recv())
-            .await
-            .context(format!("recv_bytes_from(p = {p})"))?
-            .unwrap_or_default())
+        let expected_msgs = (self.urls.len() - 2) * 5 + 3;
+        if self.enable_log {
+            self.recv_count += 1;
+            info!(
+                "Waiting for message {} from party {}...",
+                self.recv_count, p
+            );
+        }
+        let mut msg: Vec<u8> = vec![];
+        loop {
+            let Some(chunk) = timeout(Duration::from_secs(60), self.recv[p].recv())
+                .await
+                .context(format!("recv_bytes_from(p = {p})"))?
+            else {
+                anyhow::bail!("Expected a message, but received `None`!");
+            };
+            if chunk.len() < 2 * 4 {
+                anyhow::bail!("Received message without index and size information!");
+            }
+            let i = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            let length = u32::from_be_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+            if length > 1 && self.enable_log {
+                info!("  (Received chunk {}/{} from party {})", i + 1, length, p);
+            }
+            msg.extend(&chunk[8..]);
+            if i == length - 1 {
+                break;
+            }
+        }
+        if self.enable_log {
+            let mb = msg.len() as f64 / 1024.0 / 1024.0;
+            info!(
+                "Received msg {}/{} from {} ({:.2}MB)",
+                self.recv_count, expected_msgs, p, mb
+            );
+        }
+        Ok(msg)
     }
 }
