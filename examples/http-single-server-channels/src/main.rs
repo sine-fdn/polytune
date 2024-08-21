@@ -13,7 +13,7 @@ use tracing::debug;
 mod http_channel;
 mod server;
 
-/// A cli for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
 #[command(name = "parlay")]
 struct Cli {
@@ -47,8 +47,8 @@ enum Commands {
         /// A name that uniquely identifies the MPC session on the server.
         #[arg(short, long)]
         session: String,
-        #[arg(long)]
         /// The path to the Garble program to execute.
+        #[arg(long)]
         program: PathBuf,
         /// The index of the party (0 for the first participant, 1 for the second, etc).
         #[arg(long)]
@@ -82,7 +82,7 @@ async fn main() {
                     sleep(Duration::from_secs(1)).await;
                 }
             }
-            fpre(channel, parties).await.unwrap()
+            fpre(channel, parties).await.unwrap();
         }
         Commands::Party {
             url,

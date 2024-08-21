@@ -1,0 +1,41 @@
+version: "3.9"
+services:
+  db0:
+    image: postgres:16.2
+    restart: always
+    shm_size: 128mb
+    volumes:
+      - ./seeds/db0:/docker-entrypoint-initdb.d
+    ports:
+      - 5550:5432
+    environment:
+      POSTGRES_PASSWORD: test
+
+  db1:
+    image: mysql:8.4
+    restart: always
+    shm_size: 128mb
+    volumes:
+      - ./seeds/db1:/docker-entrypoint-initdb.d
+      - ./seeds/db1/insurance.csv:/var/lib/mysql-files/insurance.csv
+    ports:
+      - 5551:3306
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+
+  db_out:
+    image: postgres:16.2
+    restart: always
+    shm_size: 128mb
+    volumes:
+      - ./seeds/db_out:/docker-entrypoint-initdb.d
+    ports:
+      - 5555:5432
+    environment:
+      POSTGRES_PASSWORD: test
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080

@@ -20,6 +20,19 @@ pub enum Error {
     Channel(channel::Error),
 }
 
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::CheatingDetected => f.write_str("Cheating detected"),
+            Error::RandomSharesMismatch(a, b) => write!(f, "Unequal number of shares: {a} vs {b}"),
+            Error::AndSharesMismatch(a, b) => write!(f, "Unequal number of AND shares: {a} vs {b}"),
+            Error::Channel(e) => write!(f, "Channel error: {e:?}"),
+        }
+    }
+}
+
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Error::Channel(e)
@@ -27,7 +40,10 @@ impl From<channel::Error> for Error {
 }
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
-pub async fn fpre(channel: impl Channel, parties: usize) -> Result<(), Error> {
+pub async fn fpre<C>(channel: C, parties: usize) -> Result<C, Error>
+where
+    C: Channel,
+{
     let mut channel = MsgChannel(channel);
     for p in 0..parties {
         channel.recv_from(p, "delta (fpre)").await?;
@@ -173,7 +189,7 @@ pub async fn fpre(channel: impl Channel, parties: usize) -> Result<(), Error> {
     for (p, and_shares) in and_shares.into_iter().enumerate() {
         channel.send_to(p, "AND shares (fpre)", &and_shares).await?;
     }
-    Ok(())
+    Ok(channel.0)
 }
 
 /// The global key known only to a single party that is used to authenticate bits.

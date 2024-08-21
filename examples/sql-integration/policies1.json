@@ -1,0 +1,26 @@
+{
+  "accepted": [
+    {
+      "participants": [
+        "http://localhost:8000",
+        "http://localhost:8001",
+        "http://localhost:8002"
+      ],
+      "program": ".example.garble.rs",
+      "leader": 0,
+      "party": 1,
+      "input": "SELECT id, name, status FROM insurance",
+      "input_db": "mysql://root:test@localhost:5551/test",
+      "constants": {
+        "ROWS": {
+          "query": "SELECT COUNT(id) FROM insurance",
+          "ty": "usize"
+        },
+        "STR_LEN": {
+          "query": "SELECT MAX(LENGTH(name)) FROM insurance",
+          "ty": "usize"
+        }
+      }
+    }
+  ]
+}
