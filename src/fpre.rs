@@ -286,7 +286,7 @@ impl BitXor for &Auth {
     fn bitxor(self, rhs: Self) -> Self::Output {
         let Auth(auth0) = self;
         let Auth(auth1) = rhs;
-        let mut xor = vec![];
+        let mut xor = Vec::with_capacity(auth0.len());
         for (a, b) in auth0.iter().zip(auth1.iter()) {
             xor.push(match (a, b) {
                 (Some((mac1, key1)), Some((mac2, key2))) => Some((*mac1 ^ *mac2, *key1 ^ *key2)),
