@@ -96,8 +96,10 @@ pub(crate) async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
-pub(crate) fn preots(ot_num: usize) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>), Error> {
-    let delta: u128 = random();
+/*pub(crate) fn preots(
+    delta: u128,
+    ot_num: usize,
+) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, Vec<u128>), Error> {
     let bits: Vec<bool> = (0..ot_num).map(|_| random::<bool>()).collect();
     let x0: Vec<u128> = (0..ot_num).map(|_| random::<u128>()).collect();
     let x1: Vec<u128> = x0.iter().map(|&x| x ^ delta).collect();
@@ -108,7 +110,7 @@ pub(crate) fn preots(ot_num: usize) -> Result<(Vec<bool>, Vec<u128>, Vec<u128>, 
         }
     }
     Ok((bits, x0, x1, xb))
-}
+}*/
 
 /// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
 ///
@@ -135,8 +137,7 @@ pub(crate) async fn fabit(
 
             //let mut xc: Vec<u128> = rb.clone();
             let mut xc: Vec<u128> = vec![0; rb.len()];
-            //println!("{:?} {:?}", rb.len(), c.len());
-            for i in 0..c.len() {
+            for i in 0..y1.len() {
                 if c[i] {
                     xc[i] ^= y1[i];
                 } else {
@@ -180,6 +181,7 @@ pub(crate) async fn fabit(
 ///
 /// A random bit-string is generated as well as the corresponding keys and MACs are sent to all
 /// parties.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn fabitn(
     channel: &mut MsgChannel<impl Channel>,
     x: &mut Vec<bool>,
@@ -198,10 +200,14 @@ pub(crate) async fn fabitn(
     let mut xkeys: Vec<Vec<u128>> = vec![vec![]; p_max];
     let mut xmacs: Vec<Vec<u128>> = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let (bits, r0, r1, rb) = preots(x.len()).unwrap();
+        //let (bits, r0, r1, rb) = preots(delta.0, x.len()).unwrap();
+        let delta_added: Vec<u128> = sender_ot[p]
+            .clone()
+            .into_iter()
+            .map(|x| x ^ delta.0)
+            .collect();
         let macvec: Vec<u128>;
         let keyvec: Vec<u128>;
-        //let delta_added: Vec<u128> = sender_ot[p].clone().into_iter().map(|x| x ^ delta.0).collect();
         if p_own < p {
             macvec = fabit(
                 channel,
@@ -209,8 +215,8 @@ pub(crate) async fn fabitn(
                 delta,
                 x.to_vec(),
                 true,
-                //(receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
-                (bits, vec![], vec![], rb),
+                (receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
+                //(bits, vec![], vec![], rb),
             )
             .await?;
             keyvec = fabit(
@@ -219,8 +225,8 @@ pub(crate) async fn fabitn(
                 delta,
                 x.to_vec(),
                 false,
-                //(vec![], sender_ot[p].clone(), delta_added, vec![]),
-                (vec![], r0, r1, vec![]),
+                (vec![], sender_ot[p].clone(), delta_added, vec![]),
+                //(vec![], r0, r1, vec![]),
             )
             .await?;
         } else {
@@ -230,8 +236,8 @@ pub(crate) async fn fabitn(
                 delta,
                 x.to_vec(),
                 false,
-                //(vec![], sender_ot[p].clone(), delta_added, vec![]),
-                (vec![], r0, r1, vec![]),
+                (vec![], sender_ot[p].clone(), delta_added, vec![]),
+                //(vec![], r0, r1, vec![]),
             )
             .await?;
             macvec = fabit(
@@ -240,8 +246,8 @@ pub(crate) async fn fabitn(
                 delta,
                 x.to_vec(),
                 true,
-                //(receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
-                (bits, vec![], vec![], rb),
+                (receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
+                //(bits, vec![], vec![], rb),
             )
             .await?;
         }
@@ -307,6 +313,7 @@ pub(crate) async fn fabitn(
 /// Protocol PI_aShare that performs F_aShare.
 ///
 /// Random bit strings are picked and random authenticated shares are distributed to the parties.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn fashare(
     channel: &mut MsgChannel<impl Channel>,
     x: &mut Vec<bool>,
@@ -688,6 +695,7 @@ fn transform(
 /// Protocol Pi_aAND that performs F_aAND.
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand_precomp(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
@@ -704,19 +712,32 @@ pub(crate) async fn faand_precomp(
     let lprime: usize = length * b;
     //let len_ashare = length + RHO;
     //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
+    let lprimerho = lprime + 3 * RHO;
 
-    let sender_ot1: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
-    let sender_ot2: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
-    let sender_ot3: Vec<Vec<u128>> = vec![vec![0; lprime]; p_max];
-    let sender_ot4: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
-    let receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; lprime], vec![0; lprime]); p_max];
-    let receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; lprime], vec![0; lprime]); p_max];
-    let receiver_ot3: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; lprime], vec![0; lprime]); p_max];
-    let receiver_ot4: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; length], vec![0; length]); p_max];
+    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; lprimerho]; p_max];
+    let mut sender_ot2: Vec<Vec<u128>> = vec![vec![0; lprimerho]; p_max];
+    let mut sender_ot3: Vec<Vec<u128>> = vec![vec![0; lprimerho]; p_max];
+    let mut receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprimerho], vec![0; lprimerho]); p_max];
+    let mut receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprimerho], vec![0; lprimerho]); p_max];
+    let mut receiver_ot3: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; lprimerho], vec![0; lprimerho]); p_max];
+
+    for (i, row) in sender_ot.into_iter().enumerate() {
+        sender_ot1[i].copy_from_slice(&row[0..lprimerho]);
+        sender_ot2[i].copy_from_slice(&row[lprimerho..2*lprimerho]);
+        sender_ot3[i].copy_from_slice(&row[2*lprimerho..3*lprimerho]);
+    }
+    for (i, row) in receiver_ot.into_iter().enumerate() {
+        let (bools, u128s) = row;
+        receiver_ot1[i].0.copy_from_slice(&bools[0..lprimerho]);
+        receiver_ot1[i].1.copy_from_slice(&u128s[0..lprimerho]);
+        receiver_ot2[i].0.copy_from_slice(&bools[lprimerho..2*lprimerho]);
+        receiver_ot2[i].1.copy_from_slice(&u128s[lprimerho..2*lprimerho]);
+        receiver_ot3[i].0.copy_from_slice(&bools[2*lprimerho..3*lprimerho]);
+        receiver_ot3[i].1.copy_from_slice(&u128s[2*lprimerho..3*lprimerho]);
+    }
 
     let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
     let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
@@ -835,8 +856,7 @@ pub(crate) async fn faand(
     let mut emacs: Vec<Option<Mac>> = vec![];
     let mut fmacs: Vec<Option<Mac>> = vec![];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        for i in 0..ef.len() {
-            let (e, f) = &ef[i];
+        for (e, f) in &ef {
             let Some((emac, _)) = e.1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
@@ -861,34 +881,34 @@ pub(crate) async fn faand(
     let mut fmacsp: Vec<Vec<Option<Mac>>> = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         (ep[p], fp[p], emacsp[p], fmacsp[p]) = channel.recv_from(p, "ef").await?;
-        for i in 0..ep[p].len() {
-            let Some(emacp) = emacsp[p][i] else {
+        /*for i in 0..ep[p].len() {
+            let Some(_emacp) = emacsp[p][i] else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, ekey)) = ef[i].0 .1 .0[p] else {
+            let Some((_, _ekey)) = ef[i].0 .1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
-            let Some(fmacp) = fmacsp[p][i] else {
+            let Some(_fmacp) = fmacsp[p][i] else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, fkey)) = ef[i].1 .1 .0[p] else {
+            let Some((_, _fkey)) = ef[i].1 .1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
-            /*if ep[p][i] && (emacp.0 != ekey.0 ^ delta.0) || !ep[p][i] && (emacp.0 != ekey.0) {
+            if ep[p][i] && (emacp.0 != ekey.0 ^ delta.0) || !ep[p][i] && (emacp.0 != ekey.0) {
                 println!("{:?} {:?} {:?}", emacp.0, ekey.0 ^ delta.0, ekey.0);
                 return Err(Error::AANDWrongEFMAC);
             }
             if fp[p][i] && (fmacp.0 != fkey.0 ^ delta.0) || !fp[p][i] && (fmacp.0 != fkey.0) {
                 println!("{:?} {:?} {:?}", fmacp.0, fkey.0 ^ delta.0, fkey.0);
                 return Err(Error::AANDWrongEFMAC);
-            }*/
+            }
             //TODO Figure out E and FMac check for 3 parties!!!!!
-        }
+        }*/
     }
     for i in 0..ef.len() {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            e[i] = &e[i] ^ &ep[p][i];
-            f[i] = &f[i] ^ &fp[p][i];
+            e[i] ^= ep[p][i];
+            f[i] ^= fp[p][i];
         }
     }
     let mut result: Vec<Share> = vec![Share(false, Auth(vec![])); vectriples.len()];
@@ -898,10 +918,10 @@ pub(crate) async fn faand(
         let (_x, y) = &bits_rand[i];
         result[i] = c.clone();
         if e[i] {
-            result[i] = &result[i] ^ &y;
+            result[i] = &result[i] ^ y;
         }
         if f[i] {
-            result[i] = &result[i] ^ &a;
+            result[i] = &result[i] ^ a;
         }
     }
     Ok(result)

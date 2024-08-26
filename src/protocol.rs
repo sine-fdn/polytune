@@ -324,11 +324,14 @@ pub async fn mpc(
             )
             .await
             .unwrap();
+            //println!("d, u, b, w = {:?} {:?} {:?} {:?} ", d, u, b, w);
             sender_ot[p] = u; //sender is p_own, receiver p
-            channel.send_to(p, "ot", &(b, w)).await?;
-            receiver_ot[p] = channel.recv_from(p, "ot").await?;
+            //channel.send_to(p, "ot", &(b, w)).await?;
+            //receiver_ot[p] = channel.recv_from(p, "ot").await?;
+            receiver_ot[p] = (b, w);
             delta = Delta(d);
         }
+        //delta = Delta(random());
         
         for (i, row) in sender_ot.into_iter().enumerate() {
             sender_ot1[i].copy_from_slice(&row[0..secret_bits_ot]);
