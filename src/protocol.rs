@@ -1,4 +1,4 @@
-//! Secure 2-party computation protocol with communication via channels.
+//! Secure multi-party computation protocol with communication via channels.
 use std::ops::BitXor;
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
@@ -60,7 +60,7 @@ fn xor_labels(a: &[Label], b: &[Label]) -> Vec<Label> {
     xor
 }
 
-/// A custom error type for SMPC computation and communication.
+/// A custom error type for MPC computation and communication.
 #[derive(Debug)]
 pub enum Error {
     /// A message could not be sent or received.
@@ -69,7 +69,7 @@ pub enum Error {
     CircuitError(CircuitError),
     /// A table row could not be encrypted or decrypted.
     GarblingError(garble::Error),
-    /// Caused by the core SMPC protocol computation.
+    /// Caused by the core MPC protocol computation.
     MpcError(MpcError),
     /// The specified party does not exist in the circuit.
     PartyDoesNotExist,
@@ -167,77 +167,85 @@ pub fn simulate_mpc(
     output_parties: &[usize],
 ) -> Result<Vec<bool>, Error> {
     let tokio = Runtime::new().expect("Could not start tokio runtime");
-    tokio.block_on(async {
-        let p_eval = 0;
-        let p_pre = inputs.len();
+    tokio.block_on(simulate_mpc_async(circuit, inputs, output_parties))
+}
 
-        let mut channels = SimpleChannel::channels(inputs.len() + 1);
-        tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+pub async fn simulate_mpc_async(
+    circuit: &Circuit,
+    inputs: &[&[bool]],
+    output_parties: &[usize],
+) -> Result<Vec<bool>, Error> {
+    let p_eval = 0;
+    let p_pre = inputs.len();
 
-        let mut parties = channels.into_iter().zip(inputs).enumerate();
-        let Some(evaluator) = parties.next() else {
-            return Ok(vec![]);
-        };
+    let mut channels = SimpleChannel::channels(inputs.len() + 1);
+    tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
 
-        let mut computation: JoinSet<Vec<bool>> = JoinSet::new();
-        for (p_own, (channel, inputs)) in parties {
-            let circuit = circuit.clone();
-            let inputs = inputs.to_vec();
-            let output_parties = output_parties.to_vec();
-            computation.spawn(async move {
-                let result: Result<Vec<bool>, Error> = mpc(
-                    channel,
-                    &circuit,
-                    &inputs,
-                    Preprocessor::TrustedDealer(p_pre),
-                    p_eval,
-                    p_own,
-                    &output_parties,
-                )
-                .await;
-                let mut res_party: Vec<bool> = Vec::new();
-                match result {
-                    Err(e) => {
-                        eprintln!("SMPC protocol failed for party {:?}: {:?}", p_own, e);
-                    }
-                    Ok(res) => {
-                        res_party = res;
-                    }
+    let mut parties = channels.into_iter().zip(inputs).enumerate();
+    let Some(evaluator) = parties.next() else {
+        return Ok(vec![]);
+    };
+
+    let mut computation: JoinSet<Vec<bool>> = JoinSet::new();
+    for (p_own, (channel, inputs)) in parties {
+        let circuit = circuit.clone();
+        let inputs = inputs.to_vec();
+        let output_parties = output_parties.to_vec();
+        computation.spawn(async move {
+            let result: Result<Vec<bool>, Error> = mpc(
+                channel,
+                &circuit,
+                &inputs,
+                Preprocessor::TrustedDealer(p_pre),
+                p_eval,
+                p_own,
+                &output_parties,
+            )
+            .await;
+            let mut res_party: Vec<bool> = Vec::new();
+            match result {
+                Err(e) => {
+                    eprintln!("SMPC protocol failed for party {:?}: {:?}", p_own, e);
                 }
-                res_party
-            });
-        }
-        let (_, (party_channel, inputs)) = evaluator;
-        let eval_result = mpc(
-            party_channel,
-            circuit,
-            inputs,
-            Preprocessor::TrustedDealer(p_pre),
-            p_eval,
-            p_eval,
-            output_parties,
-        )
-        .await;
-        match eval_result {
-            Err(e) => {
-                eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
-                Ok(vec![])
+                Ok(res) => {
+                    res_party = res;
+                }
             }
-            Ok(res) => {
-                let mut outputs = vec![res];
-                while let Some(output) = computation.join_next().await {
-                    if let Ok(output) = output {
-                        outputs.push(output);
-                    }
-                }
-                outputs.retain(|o| !o.is_empty());
-                if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                    eprintln!("The result does not match for all output parties: {outputs:?}");
-                }
-                Ok(outputs.pop().unwrap_or_default())
-            }
+            res_party
+        });
+    }
+    let (_, (party_channel, inputs)) = evaluator;
+    let eval_result = mpc(
+        party_channel,
+        circuit,
+        inputs,
+        Preprocessor::TrustedDealer(p_pre),
+        p_eval,
+        p_eval,
+        output_parties,
+    )
+    .await;
+    match eval_result {
+        Err(e) => {
+            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+            Ok(vec![])
         }
-    })
+        Ok(res) => {
+            let mut outputs = vec![res];
+            while let Some(output) = computation.join_next().await {
+                if let Ok(output) = output {
+                    outputs.push(output);
+                }
+            }
+            outputs.retain(|o| !o.is_empty());
+            if !outputs.windows(2).all(|w| w[0] == w[1]) {
+                eprintln!("The result does not match for all output parties: {outputs:?}");
+            }
+            println!("MPC simulation finished successfully!");
+            Ok(outputs.pop().unwrap_or_default())
+        }
+    }
 }
 
 /// Specifies how correlated randomness is provided in the prepocessing phase.

@@ -12,7 +12,13 @@ fn simulate() {
     println!("\n\n--- {millis}ms ---\n\n");
     let mut children = vec![];
     let mut cmd = Command::new("cargo")
-        .args(["run", "--", "--port=8002", "--config=preprocessor.json"])
+        .args([
+            "run",
+            "--release",
+            "--",
+            "--port=8002",
+            "--config=preprocessor.json",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -35,7 +41,7 @@ fn simulate() {
 
     let port = "--port=8001".to_string();
     let config = "--config=policies1.json".to_string();
-    let args = vec!["run", "--", &port, &config];
+    let args = vec!["run", "--release", "--", &port, &config];
     let mut cmd = Command::new("cargo")
         .args(args)
         .stdout(Stdio::piped())
@@ -57,7 +63,13 @@ fn simulate() {
     children.push(cmd);
 
     sleep(Duration::from_millis(millis));
-    let args = vec!["run", "--", "--port=8000", "--config=policies0.json"];
+    let args = vec![
+        "run",
+        "--release",
+        "--",
+        "--port=8000",
+        "--config=policies0.json",
+    ];
     let mut cmd = Command::new("cargo")
         .args(args)
         .stdout(Stdio::piped())

@@ -785,7 +785,7 @@ impl Channel for HttpChannel {
     type RecvError = anyhow::Error;
 
     async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), Self::SendError> {
-        let simulated_delay_in_ms = 500;
+        let simulated_delay_in_ms = 300;
         let expected_msgs = (self.urls.len() - 2) * 2 + 3;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
@@ -798,29 +798,37 @@ impl Channel for HttpChannel {
                 self.send_count, expected_msgs, p, mb
             );
         }
-        let chunk_size = 10 * 1024 * 1024;
+        let chunk_size = 100 * 1024 * 1024;
         let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
         if chunks.is_empty() {
             chunks.push(&[]);
         }
-        let length = chunks.len();
+        let len = chunks.len();
         for (i, chunk) in chunks.into_iter().enumerate() {
-            if length > 1 && self.enable_log {
-                info!("  (Sending chunk {}/{} to party {})", i + 1, length, p);
+            if len > 1 && self.enable_log {
+                info!("  (Sending chunk {}/{} to party {})", i + 1, len, p);
             }
             let mut msg = Vec::with_capacity(2 * 4 + chunk.len());
             msg.extend((i as u32).to_be_bytes());
-            msg.extend((length as u32).to_be_bytes());
+            msg.extend((len as u32).to_be_bytes());
             msg.extend(chunk);
             loop {
                 sleep(Duration::from_millis(simulated_delay_in_ms)).await;
-                match client.post(&url).body(msg.clone()).send().await?.status() {
+                let req = client.post(&url).body(msg.clone()).send();
+                let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
+                    warn!("  req timeout: chunk {}/{} for party {}", i + 1, len, p);
+                    continue;
+                };
+                match res.status() {
                     StatusCode::OK => break,
                     StatusCode::NOT_FOUND => {
                         error!("Could not reach party {p} at {url}...");
                         sleep(Duration::from_millis(1000)).await;
                     }
-                    status => anyhow::bail!("Unexpected status code: {status}"),
+                    status => {
+                        error!("Unexpected status code: {status}");
+                        anyhow::bail!("Unexpected status code: {status}")
+                    }
                 }
             }
         }
