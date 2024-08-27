@@ -82,7 +82,7 @@ async fn main() {
                     sleep(Duration::from_secs(1)).await;
                 }
             }
-            fpre(channel, parties).await.unwrap()
+            fpre(channel, parties).await.unwrap();
         }
         Commands::Party {
             url,
