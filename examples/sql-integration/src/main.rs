@@ -74,17 +74,34 @@ struct Policy {
     program: PathBuf,
     leader: usize,
     party: usize,
-    input: String,
-    input_db: Option<String>,
-    setup: Option<String>,
-    output: Option<String>,
-    output_db: Option<String>,
+    input: Option<DbQuery>,
+    output: Option<DbQuery>,
     constants: HashMap<String, Constant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct Constant {
+struct DbQuery {
+    db: String,
+    setup: Option<String>,
     query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum Constant {
+    Query(QueryConstant),
+    File(FileConstant),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct QueryConstant {
+    query: String,
+    ty: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct FileConstant {
+    file: String,
     ty: String,
 }
 
@@ -119,7 +136,7 @@ async fn main() -> Result<(), Error> {
     let local_policies = load_policies(config).await?;
     if local_policies.accepted.len() == 1 {
         let policy = &local_policies.accepted[0];
-        if policy.input.is_empty() {
+        if policy.input.is_none() {
             info!("Running as preprocessor...");
             return run_fpre(port, policy.participants.clone()).await;
         }
@@ -236,15 +253,10 @@ async fn main() -> Result<(), Error> {
                     Ok(Some(output)) => match decode_literal(output) {
                         Ok(rows) => {
                             let n_rows = rows.len();
-                            let Policy {
-                                setup,
-                                output,
-                                output_db,
-                                ..
-                            } = policy;
-                            if let (Some(output_db), Some(output)) = (output_db, output) {
-                                info!("Connecting to output db at {output_db}...");
-                                let pool: AnyPool = Pool::connect(output_db).await?;
+                            if let Some(output) = &policy.output {
+                                let DbQuery { db, setup, query } = output;
+                                info!("Connecting to output db at {db}...");
+                                let pool: AnyPool = Pool::connect(db).await?;
                                 if let Some(setup) = setup {
                                     let result: AnyQueryResult =
                                         sqlx::query(setup).execute(&pool).await?;
@@ -252,7 +264,7 @@ async fn main() -> Result<(), Error> {
                                     debug!("{rows_affected} rows affected by '{setup}'");
                                 }
                                 for row in rows {
-                                    let mut query = sqlx::query(output);
+                                    let mut query = sqlx::query(query);
                                     for field in row {
                                         query = query.bind(field);
                                     }
@@ -347,47 +359,68 @@ async fn execute_mpc(
         participants,
         party,
         input,
-        input_db: db,
-        setup: _setup,
         output: _output,
-        output_db: _output_db,
         constants,
     } = policy;
     let now = Instant::now();
-    let (prg, input) = if let Some(db) = db {
+    let (prg, input) = if let Some(DbQuery {
+        db,
+        setup: _setup,
+        query,
+    }) = input
+    {
         info!("Connecting to input db at {db}...");
         let pool: AnyPool = Pool::connect(db).await?;
-        let rows: Vec<AnyRow> = sqlx::query(input).fetch_all(&pool).await?;
-        info!("'{input}' returned {} rows from {db}", rows.len());
+        let rows: Vec<AnyRow> = sqlx::query(query).fetch_all(&pool).await?;
+        info!("'{query}' returned {} rows from {db}", rows.len());
 
         let mut my_consts = HashMap::new();
         for (k, c) in constants {
-            let row: AnyRow = sqlx::query(&c.query).fetch_one(&pool).await?;
-            if row.len() != 1 {
-                bail!(
-                    "Expected a single scalar value, but got {} from query '{}'",
-                    row.len(),
-                    c.query
-                );
-            } else {
-                if let Ok(n) = row.try_get::<i32, _>(0) {
-                    if n >= 0 && c.ty == "usize" {
-                        my_consts.insert(
-                            k.clone(),
-                            Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+            match c {
+                Constant::Query(c) => {
+                    let row: AnyRow = sqlx::query(&c.query).fetch_one(&pool).await?;
+                    if row.len() != 1 {
+                        bail!(
+                            "Expected a single scalar value, but got {} from query '{}'",
+                            row.len(),
+                            c.query
                         );
-                        continue;
-                    }
-                } else if let Ok(n) = row.try_get::<i64, _>(0) {
-                    if n >= 0 && c.ty == "usize" {
-                        my_consts.insert(
-                            k.clone(),
-                            Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
-                        );
-                        continue;
+                    } else {
+                        if let Ok(n) = row.try_get::<i32, _>(0) {
+                            if n >= 0 && c.ty == "usize" {
+                                my_consts.insert(
+                                    k.clone(),
+                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                                );
+                                continue;
+                            }
+                        } else if let Ok(n) = row.try_get::<i64, _>(0) {
+                            if n >= 0 && c.ty == "usize" {
+                                my_consts.insert(
+                                    k.clone(),
+                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                                );
+                                continue;
+                            }
+                        }
+                        bail!("Could not decode scalar value as {} of '{}'", c.ty, c.query);
                     }
                 }
-                bail!("Could not decode scalar value as {} of '{}'", c.ty, c.query);
+                Constant::File(c) => {
+                    let Ok(file) = fs::read_to_string(&c.file).await else {
+                        bail!("Could not load constant from file {:?}", &c.file);
+                    };
+                    if c.ty == "usize" {
+                        if let Ok(n) = file.parse::<u32>() {
+                            my_consts.insert(
+                                k.clone(),
+                                Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                            );
+                            continue;
+                        }
+                    }
+                    bail!("Could not decode file {} as {}", c.file, c.ty);
+                }
             }
         }
         {
@@ -625,10 +658,7 @@ async fn execute_mpc(
         let input = prg.literal_arg(*party, literal)?.as_bits();
         (prg, input)
     } else {
-        let consts = HashMap::new();
-        let prg = compile_with_constants(&code, consts).map_err(|e| anyhow!(e.prettify(&code)))?;
-        let input = prg.parse_arg(*party, input)?.as_bits();
-        (prg, input)
+        bail!("Policy must specify an input (either from a DB or a CSV file)");
     };
     let fpre = Preprocessor::TrustedDealer(participants.len() - 1);
     let p_out: Vec<_> = vec![*leader];
