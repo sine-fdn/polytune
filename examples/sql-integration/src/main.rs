@@ -74,9 +74,16 @@ struct Policy {
     program: PathBuf,
     leader: usize,
     party: usize,
-    input: Option<DbQuery>,
+    input: Option<DataInput>,
     output: Option<DbQuery>,
     constants: HashMap<String, Constant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum DataInput {
+    Db(DbQuery),
+    Csv(CsvInput),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,6 +91,11 @@ struct DbQuery {
     db: String,
     setup: Option<String>,
     query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct CsvInput {
+    file: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,7 +113,7 @@ struct QueryConstant {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct FileConstant {
-    file: String,
+    file: PathBuf,
     ty: String,
 }
 
@@ -363,302 +375,325 @@ async fn execute_mpc(
         constants,
     } = policy;
     let now = Instant::now();
-    let (prg, input) = if let Some(DbQuery {
-        db,
-        setup: _setup,
-        query,
-    }) = input
-    {
-        info!("Connecting to input db at {db}...");
-        let pool: AnyPool = Pool::connect(db).await?;
-        let rows: Vec<AnyRow> = sqlx::query(query).fetch_all(&pool).await?;
-        info!("'{query}' returned {} rows from {db}", rows.len());
-
-        let mut my_consts = HashMap::new();
-        for (k, c) in constants {
-            match c {
-                Constant::Query(c) => {
-                    let row: AnyRow = sqlx::query(&c.query).fetch_one(&pool).await?;
-                    if row.len() != 1 {
-                        bail!(
-                            "Expected a single scalar value, but got {} from query '{}'",
-                            row.len(),
-                            c.query
-                        );
-                    } else {
-                        if let Ok(n) = row.try_get::<i32, _>(0) {
-                            if n >= 0 && c.ty == "usize" {
-                                my_consts.insert(
-                                    k.clone(),
-                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
-                                );
-                                continue;
-                            }
-                        } else if let Ok(n) = row.try_get::<i64, _>(0) {
-                            if n >= 0 && c.ty == "usize" {
-                                my_consts.insert(
-                                    k.clone(),
-                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
-                                );
-                                continue;
-                            }
-                        }
-                        bail!("Could not decode scalar value as {} of '{}'", c.ty, c.query);
-                    }
+    let (prg, input) = match input {
+        None => bail!("Policy must specify an input (either from a DB or a CSV file)"),
+        Some(DataInput::Csv(CsvInput { file })) => {
+            let Ok(f) = fs::read_to_string(file).await else {
+                bail!("Could not read csv file {}", file.display());
+            };
+            for (i, r) in csv::Reader::from_reader(f.as_bytes()).records().enumerate() {
+                let Ok(r) = r else {
+                    bail!("Could not read record {} of csv file {}", i, file.display());
+                };
+                for _field in r.iter() {
+                    // create tuple
                 }
-                Constant::File(c) => {
-                    let Ok(file) = fs::read_to_string(&c.file).await else {
-                        bail!("Could not load constant from file {:?}", &c.file);
-                    };
-                    if c.ty == "usize" {
-                        if let Ok(n) = file.parse::<u32>() {
-                            my_consts.insert(
-                                k.clone(),
-                                Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+            }
+            todo!("CSV support not yet implemented")
+        }
+        Some(DataInput::Db(DbQuery { db, setup, query })) => {
+            info!("Connecting to input db at {db}...");
+            let pool: AnyPool = Pool::connect(db).await?;
+
+            if let Some(setup) = setup {
+                let result: AnyQueryResult = sqlx::query(setup).execute(&pool).await?;
+                let rows_affected = result.rows_affected();
+                debug!("{rows_affected} rows affected by '{setup}'");
+            }
+
+            let rows: Vec<AnyRow> = sqlx::query(query).fetch_all(&pool).await?;
+            info!("'{query}' returned {} rows from {db}", rows.len());
+
+            let mut my_consts = HashMap::new();
+            for (k, c) in constants {
+                match c {
+                    Constant::Query(c) => {
+                        let row: AnyRow = sqlx::query(&c.query).fetch_one(&pool).await?;
+                        if row.len() != 1 {
+                            bail!(
+                                "Expected a single scalar value, but got {} from query '{}'",
+                                row.len(),
+                                c.query
                             );
-                            continue;
+                        } else {
+                            if let Ok(n) = row.try_get::<i32, _>(0) {
+                                if n >= 0 && c.ty == "usize" {
+                                    my_consts.insert(
+                                        k.clone(),
+                                        Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                                    );
+                                    continue;
+                                }
+                            } else if let Ok(n) = row.try_get::<i64, _>(0) {
+                                if n >= 0 && c.ty == "usize" {
+                                    my_consts.insert(
+                                        k.clone(),
+                                        Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                                    );
+                                    continue;
+                                }
+                            }
+                            bail!("Could not decode scalar value as {} of '{}'", c.ty, c.query);
                         }
                     }
-                    bail!("Could not decode file {} as {}", c.file, c.ty);
-                }
-            }
-        }
-        {
-            let mut locked = state.lock().await;
-            locked
-                .consts
-                .insert(format!("PARTY_{party}"), my_consts.clone());
-        }
-        let client = reqwest::Client::new();
-        for p in participants.iter().rev().skip(1).rev() {
-            if p != &participants[*party] {
-                info!("Sending constants to party {p}");
-                let url = format!("{p}consts/{party}");
-                let const_request = ConstsRequest {
-                    consts: my_consts.clone(),
-                };
-                let Ok(res) = client.post(&url).json(&const_request).send().await else {
-                    bail!("Could not reach {url}");
-                };
-                match res.status() {
-                    StatusCode::OK => {}
-                    code => {
-                        bail!("Unexpected response while trying to send consts to {url}: {code}");
+                    Constant::File(c) => {
+                        let Ok(file) = fs::read_to_string(&c.file).await else {
+                            bail!("Could not load constant from file {:?}", &c.file);
+                        };
+                        if c.ty == "usize" {
+                            if let Ok(n) = file.parse::<u32>() {
+                                my_consts.insert(
+                                    k.clone(),
+                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                                );
+                                continue;
+                            }
+                        }
+                        bail!("Could not decode file {} as {}", c.file.display(), c.ty);
                     }
                 }
             }
-        }
-        loop {
-            sleep(Duration::from_millis(500)).await;
-            let locked = state.lock().await;
-            if locked.consts.len() >= participants.len() - 1 {
-                break;
-            } else {
-                let missing = participants.len() - 1 - locked.consts.len();
-                info!(
-                    "Constants missing from {} parties, received constants from {:?}",
-                    missing,
-                    locked.consts.keys()
-                );
+            {
+                let mut locked = state.lock().await;
+                locked
+                    .consts
+                    .insert(format!("PARTY_{party}"), my_consts.clone());
             }
-        }
-
-        let prg = {
-            let locked = state.lock().await;
-            info!("Compiling circuit with the following constants:");
-            for (p, v) in locked.consts.iter() {
-                for (k, v) in v {
-                    info!("{p}::{k}: {v:?}");
+            let client = reqwest::Client::new();
+            for p in participants.iter().rev().skip(1).rev() {
+                if p != &participants[*party] {
+                    info!("Sending constants to party {p}");
+                    let url = format!("{p}consts/{party}");
+                    let const_request = ConstsRequest {
+                        consts: my_consts.clone(),
+                    };
+                    let Ok(res) = client.post(&url).json(&const_request).send().await else {
+                        bail!("Could not reach {url}");
+                    };
+                    match res.status() {
+                        StatusCode::OK => {}
+                        code => {
+                            bail!(
+                                "Unexpected response while trying to send consts to {url}: {code}"
+                            );
+                        }
+                    }
                 }
             }
-            compile_with_constants(&code, locked.consts.clone())
-                .map_err(|e| anyhow!(e.prettify(&code)))?
-        };
-        let input_ty = &prg.main.params[*party].ty;
-        let Type::ArrayConst(row_type, _) = input_ty else {
-            bail!("Expected an array input type (with const size) for party {party}, but found {input_ty}");
-        };
-        let Type::Tuple(field_types) = row_type.as_ref() else {
-            bail!(
+            loop {
+                sleep(Duration::from_millis(500)).await;
+                let locked = state.lock().await;
+                if locked.consts.len() >= participants.len() - 1 {
+                    break;
+                } else {
+                    let missing = participants.len() - 1 - locked.consts.len();
+                    info!(
+                        "Constants missing from {} parties, received constants from {:?}",
+                        missing,
+                        locked.consts.keys()
+                    );
+                }
+            }
+
+            let prg = {
+                let locked = state.lock().await;
+                info!("Compiling circuit with the following constants:");
+                for (p, v) in locked.consts.iter() {
+                    for (k, v) in v {
+                        info!("{p}::{k}: {v:?}");
+                    }
+                }
+                compile_with_constants(&code, locked.consts.clone())
+                    .map_err(|e| anyhow!(e.prettify(&code)))?
+            };
+            let input_ty = &prg.main.params[*party].ty;
+            let Type::ArrayConst(row_type, _) = input_ty else {
+                bail!("Expected an array input type (with const size) for party {party}, but found {input_ty}");
+            };
+            let Type::Tuple(field_types) = row_type.as_ref() else {
+                bail!(
                 "Expected an array of tuples as input type for party {party}, but found {input_ty}"
             );
-        };
-        info!(
-            "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates)",
-            prg.circuit.gates.len() as f64 / 1000.0 / 1000.0,
-            prg.circuit.and_gates() as f64 / 1000.0 / 1000.0
-        );
-        let mut rows_as_literals = vec![];
-        for (r, row) in rows.iter().enumerate() {
-            let mut row_as_literal = vec![];
-            if field_types.len() != row.len() {
-                bail!(
-                    "The program expects a tuple with {} fields, but the query returned a row with {} fields",
-                    field_types.len(),
-                    row.len()
-                );
-            }
-            for (c, field_type) in field_types.iter().enumerate() {
-                let mut literal = None;
-                match field_type {
-                    Type::Bool => {
-                        if let Ok(b) = row.try_get::<bool, _>(c) {
-                            literal = Some(Literal::from(b))
-                        }
-                    }
-                    Type::Unsigned(UnsignedNumType::U8) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            if n >= 0 && n <= u8::MAX as i32 {
-                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U8))
+            };
+            info!(
+                "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates)",
+                prg.circuit.gates.len() as f64 / 1000.0 / 1000.0,
+                prg.circuit.and_gates() as f64 / 1000.0 / 1000.0
+            );
+            let mut rows_as_literals = vec![];
+            for (r, row) in rows.iter().enumerate() {
+                let mut row_as_literal = vec![];
+                if field_types.len() != row.len() {
+                    bail!(
+                        "The program expects a tuple with {} fields, but the query returned a row with {} fields",
+                        field_types.len(),
+                        row.len()
+                    );
+                }
+                for (c, field_type) in field_types.iter().enumerate() {
+                    let mut literal = None;
+                    match field_type {
+                        Type::Bool => {
+                            if let Ok(b) = row.try_get::<bool, _>(c) {
+                                literal = Some(Literal::from(b))
                             }
                         }
-                    }
-                    Type::Unsigned(UnsignedNumType::U16) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            if n >= 0 && n <= u16::MAX as i32 {
-                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U16))
+                        Type::Unsigned(UnsignedNumType::U8) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                if n >= 0 && n <= u8::MAX as i32 {
+                                    literal =
+                                        Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U8))
+                                }
                             }
                         }
-                    }
-                    Type::Unsigned(UnsignedNumType::U32) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            if n >= 0 && n <= u32::MAX as i32 {
-                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U32))
+                        Type::Unsigned(UnsignedNumType::U16) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                if n >= 0 && n <= u16::MAX as i32 {
+                                    literal =
+                                        Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U16))
+                                }
                             }
                         }
-                    }
-                    Type::Unsigned(UnsignedNumType::U64) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            if n >= 0 {
-                                literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U64))
+                        Type::Unsigned(UnsignedNumType::U32) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                if n >= 0 && n <= u32::MAX as i32 {
+                                    literal =
+                                        Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U32))
+                                }
                             }
                         }
-                    }
-                    Type::Signed(SignedNumType::I8) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            if n >= i8::MIN as i32 && n <= i8::MAX as i32 {
-                                literal = Some(Literal::NumSigned(n as i64, SignedNumType::I8))
+                        Type::Unsigned(UnsignedNumType::U64) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                if n >= 0 {
+                                    literal =
+                                        Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U64))
+                                }
                             }
                         }
-                    }
-                    Type::Signed(SignedNumType::I16) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            if n >= i16::MIN as i32 && n <= i16::MAX as i32 {
-                                literal = Some(Literal::NumSigned(n as i64, SignedNumType::I16))
+                        Type::Signed(SignedNumType::I8) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                if n >= i8::MIN as i32 && n <= i8::MAX as i32 {
+                                    literal = Some(Literal::NumSigned(n as i64, SignedNumType::I8))
+                                }
                             }
                         }
-                    }
-                    Type::Signed(SignedNumType::I32) => {
-                        if let Ok(n) = row.try_get::<i32, _>(c) {
-                            literal = Some(Literal::NumSigned(n as i64, SignedNumType::I32))
+                        Type::Signed(SignedNumType::I16) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                if n >= i16::MIN as i32 && n <= i16::MAX as i32 {
+                                    literal = Some(Literal::NumSigned(n as i64, SignedNumType::I16))
+                                }
+                            }
                         }
-                    }
-                    Type::Signed(SignedNumType::I64) => {
-                        if let Ok(n) = row.try_get::<i64, _>(c) {
-                            literal = Some(Literal::NumSigned(n, SignedNumType::I64))
+                        Type::Signed(SignedNumType::I32) => {
+                            if let Ok(n) = row.try_get::<i32, _>(c) {
+                                literal = Some(Literal::NumSigned(n as i64, SignedNumType::I32))
+                            }
                         }
-                    }
-                    Type::Array(ty, size)
-                        if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
-                    {
-                        if let Ok(s) = row.try_get::<String, _>(c) {
-                            let mut fixed_str =
-                                vec![Literal::NumUnsigned(0, UnsignedNumType::U8); *size];
-                            for (i, b) in s.as_bytes().iter().enumerate() {
-                                if i < *size {
-                                    fixed_str[i] =
-                                        Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
-                                } else {
-                                    warn!(
+                        Type::Signed(SignedNumType::I64) => {
+                            if let Ok(n) = row.try_get::<i64, _>(c) {
+                                literal = Some(Literal::NumSigned(n, SignedNumType::I64))
+                            }
+                        }
+                        Type::Array(ty, size)
+                            if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
+                        {
+                            if let Ok(s) = row.try_get::<String, _>(c) {
+                                let mut fixed_str =
+                                    vec![Literal::NumUnsigned(0, UnsignedNumType::U8); *size];
+                                for (i, b) in s.as_bytes().iter().enumerate() {
+                                    if i < *size {
+                                        fixed_str[i] =
+                                            Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
+                                    } else {
+                                        warn!(
                                         "String is longer than {size} bytes: '{s}', dropping '{}'",
                                         &s[i..]
                                     );
-                                    break;
-                                }
-                            }
-                            literal = Some(Literal::Array(fixed_str))
-                        }
-                    }
-                    Type::ArrayConst(ty, size)
-                        if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
-                    {
-                        let size = *prg.const_sizes.get(size).unwrap();
-                        let mut str = None;
-                        if let Ok(s) = row.try_get::<String, _>(c) {
-                            str = Some(s)
-                        } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
-                            if let Ok(s) = String::from_utf8(s) {
-                                str = Some(s)
-                            }
-                        }
-                        if let Some(s) = str {
-                            let mut fixed_str =
-                                vec![Literal::NumUnsigned(0, UnsignedNumType::U8); size];
-                            for (i, b) in s.as_bytes().iter().enumerate() {
-                                if i < size {
-                                    fixed_str[i] =
-                                        Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
-                                } else {
-                                    warn!(
-                                        "String is longer than {size} bytes: '{s}', dropping '{}'",
-                                        &s[i..]
-                                    );
-                                    break;
-                                }
-                            }
-                            literal = Some(Literal::Array(fixed_str))
-                        }
-                    }
-                    Type::Enum(name) => {
-                        let Some(enum_def) = prg.program.enum_defs.get(name) else {
-                            bail!("Could not find definition for enum {name} in program");
-                        };
-                        let mut str = None;
-                        if let Ok(s) = row.try_get::<String, _>(c) {
-                            str = Some(s)
-                        } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
-                            if let Ok(s) = String::from_utf8(s) {
-                                str = Some(s)
-                            }
-                        }
-                        if let Some(variant) = str {
-                            for v in &enum_def.variants {
-                                if let Variant::Unit(variant_name) = v {
-                                    if variant_name.to_lowercase() == variant.to_lowercase() {
-                                        literal = Some(Literal::Enum(
-                                            name.clone(),
-                                            variant_name.clone(),
-                                            VariantLiteral::Unit,
-                                        ));
                                         break;
+                                    }
+                                }
+                                literal = Some(Literal::Array(fixed_str))
+                            }
+                        }
+                        Type::ArrayConst(ty, size)
+                            if ty.as_ref() == &Type::Unsigned(UnsignedNumType::U8) =>
+                        {
+                            let size = *prg.const_sizes.get(size).unwrap();
+                            let mut str = None;
+                            if let Ok(s) = row.try_get::<String, _>(c) {
+                                str = Some(s)
+                            } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
+                                if let Ok(s) = String::from_utf8(s) {
+                                    str = Some(s)
+                                }
+                            }
+                            if let Some(s) = str {
+                                let mut fixed_str =
+                                    vec![Literal::NumUnsigned(0, UnsignedNumType::U8); size];
+                                for (i, b) in s.as_bytes().iter().enumerate() {
+                                    if i < size {
+                                        fixed_str[i] =
+                                            Literal::NumUnsigned(*b as u64, UnsignedNumType::U8);
+                                    } else {
+                                        warn!(
+                                        "String is longer than {size} bytes: '{s}', dropping '{}'",
+                                        &s[i..]
+                                    );
+                                        break;
+                                    }
+                                }
+                                literal = Some(Literal::Array(fixed_str))
+                            }
+                        }
+                        Type::Enum(name) => {
+                            let Some(enum_def) = prg.program.enum_defs.get(name) else {
+                                bail!("Could not find definition for enum {name} in program");
+                            };
+                            let mut str = None;
+                            if let Ok(s) = row.try_get::<String, _>(c) {
+                                str = Some(s)
+                            } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
+                                if let Ok(s) = String::from_utf8(s) {
+                                    str = Some(s)
+                                }
+                            }
+                            if let Some(variant) = str {
+                                for v in &enum_def.variants {
+                                    if let Variant::Unit(variant_name) = v {
+                                        if variant_name.to_lowercase() == variant.to_lowercase() {
+                                            literal = Some(Literal::Enum(
+                                                name.clone(),
+                                                variant_name.clone(),
+                                                VariantLiteral::Unit,
+                                            ));
+                                            break;
+                                        }
                                     }
                                 }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
+                    if let Some(literal) = literal {
+                        row_as_literal.push(literal);
+                    } else if let Ok(raw) = row.try_get_raw(c) {
+                        bail!(
+                            "Could not decode column {c} with type {}, column has type {}",
+                            field_types[c],
+                            raw.type_info()
+                        );
+                    } else {
+                        bail!("Could not decode column {c} with type {}", field_types[c]);
+                    }
                 }
-                if let Some(literal) = literal {
-                    row_as_literal.push(literal);
-                } else if let Ok(raw) = row.try_get_raw(c) {
-                    bail!(
-                        "Could not decode column {c} with type {}, column has type {}",
-                        field_types[c],
-                        raw.type_info()
-                    );
-                } else {
-                    bail!("Could not decode column {c} with type {}", field_types[c]);
-                }
+                let literal = Literal::Tuple(row_as_literal);
+                debug!("rows[{r}] = {literal}");
+                rows_as_literals.push(literal);
             }
-            let literal = Literal::Tuple(row_as_literal);
-            debug!("rows[{r}] = {literal}");
-            rows_as_literals.push(literal);
+            let literal = Literal::Array(rows_as_literals);
+            let input = prg.literal_arg(*party, literal)?.as_bits();
+            (prg, input)
         }
-        let literal = Literal::Array(rows_as_literals);
-        let input = prg.literal_arg(*party, literal)?.as_bits();
-        (prg, input)
-    } else {
-        bail!("Policy must specify an input (either from a DB or a CSV file)");
     };
     let fpre = Preprocessor::TrustedDealer(participants.len() - 1);
     let p_out: Vec<_> = vec![*leader];
