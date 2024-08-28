@@ -1,4 +1,5 @@
 CREATE TABLE results (
     id SERIAL PRIMARY KEY,
-    name TEXT
+    joined INT,
+    total INT
 );

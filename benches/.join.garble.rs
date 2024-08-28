@@ -1,6 +1,5 @@
 const ROWS_0: usize = PARTY_0::ROWS;
 const ROWS_1: usize = PARTY_1::ROWS;
-const ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);
 
 enum ScreeningStatus {
     Recent,
@@ -9,8 +8,8 @@ enum ScreeningStatus {
 }
 
 pub fn main(
-    screenings: [([u8; ID_LEN], ScreeningStatus); ROWS_0],
-    school_examinations: [([u8; ID_LEN], u8); ROWS_1],
+    screenings: [([u8; 20], ScreeningStatus); ROWS_0],
+    school_examinations: [([u8; 20], u8); ROWS_1],
 ) -> [(u16, u16); 1] {
     let mut missing_screenings_with_special_ed_needs = 0u16;
     let mut total = ROWS_1 as u16;

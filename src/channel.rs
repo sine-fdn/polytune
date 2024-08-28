@@ -159,31 +159,50 @@ impl Channel for SimpleChannel {
     type SendError = SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
 
-    async fn send_bytes_to(
-        &mut self,
-        party: usize,
-        msg: Vec<u8>,
-    ) -> Result<(), SendError<Vec<u8>>> {
-        self.s[party]
-            .as_ref()
-            .unwrap_or_else(|| panic!("No sender for party {party}"))
-            .send(msg)
-            .await
+    async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), SendError<Vec<u8>>> {
+        let mb = msg.len() as f64 / 1024.0 / 1024.0;
+        println!("Sending msg to party {p} ({mb:.2}MB)...");
+        let chunk_size = 100 * 1024 * 1024;
+        let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
+        if chunks.is_empty() {
+            chunks.push(&[]);
+        }
+        let length = chunks.len();
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            if length > 1 {
+                println!("  (Sending chunk {}/{} to party {})", i + 1, length, p);
+            }
+            let mut msg = Vec::with_capacity(2 * 4 + chunk.len());
+            msg.extend((i as u32).to_be_bytes());
+            msg.extend((length as u32).to_be_bytes());
+            msg.extend(chunk);
+            self.s[p]
+                .as_ref()
+                .unwrap_or_else(|| panic!("No sender for party {p}"))
+                .send(msg)
+                .await?;
+        }
+        Ok(())
     }
 
-    async fn recv_bytes_from(&mut self, party: usize) -> Result<Vec<u8>, AsyncRecvError> {
-        match timeout(
-            Duration::from_secs(5),
-            self.r[party]
+    async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, AsyncRecvError> {
+        let mut msg: Vec<u8> = vec![];
+        loop {
+            let chunk = self.r[p]
                 .as_mut()
-                .unwrap_or_else(|| panic!("No receiver for party {party}"))
-                .recv(),
-        )
-        .await
-        {
-            Ok(Some(bytes)) => Ok(bytes),
-            Ok(None) => Err(AsyncRecvError::Closed),
-            Err(_) => Err(AsyncRecvError::TimeoutElapsed),
+                .unwrap_or_else(|| panic!("No receiver for party {p}"))
+                .recv();
+            let chunk = match timeout(Duration::from_secs(10 * 60), chunk).await {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => return Err(AsyncRecvError::Closed),
+                Err(_) => return Err(AsyncRecvError::TimeoutElapsed),
+            };
+            let i = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            let length = u32::from_be_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+            msg.extend(&chunk[8..]);
+            if i == length - 1 {
+                break Ok(msg);
+            }
         }
     }
 }
