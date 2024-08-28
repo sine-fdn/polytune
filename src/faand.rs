@@ -788,19 +788,15 @@ pub(crate) async fn faand_precomp(
     let mut buckets: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; length];
 
     // Assign objects to buckets
-    let mut available: Vec<usize> = (0..length).collect();
     for obj in triples {
-        let mut indeces: Vec<usize> = available.to_vec();
-        indeces.retain(|&index| buckets[index].len() < b);
-
-        if !indeces.is_empty() {
-            let rand_index: usize = shared_rng.gen_range(0..indeces.len());
-            let ind = indeces[rand_index];
-
-            buckets[ind].push(obj);
-            if buckets[ind].len() == b {
-                available.retain(|&index| index != ind);
+        let mut i: usize = shared_rng.gen_range(0..buckets.len());
+        loop {
+            let i_wrapped = i % buckets.len();
+            if buckets[i_wrapped].len() < b {
+                buckets[i_wrapped].push(obj);
+                break;
             }
+            i += 1;
         }
     }
 
