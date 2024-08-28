@@ -21,13 +21,6 @@ tokio = { version = "1.35.1", features = ["full"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
 
-[dev-dependencies]
-criterion = { version = "0.5.1", features = ["async_tokio"] }
-
-[[bench]]
-name = "join"
-harness = false
-
 # mpz-ot
 futures = "0.3"
 rstest = "0.12"
@@ -37,3 +30,10 @@ mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz.git", 
 mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz.git", features = ["ideal"], rev = "84399bd" }
 mpz-ot-core = { git = "https://github.com/privacy-scaling-explorations/mpz.git", rev = "84399bd" }
 mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz.git", rev = "84399bd" }
+
+[dev-dependencies]
+criterion = { version = "0.5.1", features = ["async_tokio"] }
+
+[[bench]]
+name = "join"
+harness = false
