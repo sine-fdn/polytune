@@ -192,13 +192,13 @@ pub async fn simulate_mpc_async(
     let p_eval = 0;
     let p_pre = inputs.len();
 
-        let mut channels: Vec<SimpleChannel>;
-        if TRUSTEDDEALER {
-            channels = SimpleChannel::channels(inputs.len() + 1);
-            tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
-        } else {
-            channels = SimpleChannel::channels(inputs.len());
-        }
+    let mut channels: Vec<SimpleChannel>;
+    if TRUSTEDDEALER {
+        channels = SimpleChannel::channels(inputs.len() + 1);
+        tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
+    } else {
+        channels = SimpleChannel::channels(inputs.len());
+    }
 
     let mut parties = channels.into_iter().zip(inputs).enumerate();
     let Some(evaluator) = parties.next() else {

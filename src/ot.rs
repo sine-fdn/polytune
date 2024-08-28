@@ -172,20 +172,20 @@ pub(crate) async fn _mpz_ot(count: usize) -> Result<bool, OTError> {
     Ok(true)
 }
 
-pub(crate) async fn generate_ots(count: usize) -> Result<(u128, Vec<u128>, Vec<bool>, Vec<u128>), OTError> {
+pub(crate) async fn generate_ots(
+    count: usize,
+) -> Result<(u128, Vec<u128>, Vec<bool>, Vec<u128>), OTError> {
     let (io0, io1) = duplex(8);
     let mut ctx_receiver = STExecutor::new(io0);
     let mut ctx_sender = STExecutor::new(io1);
 
     let (rcot_sender, rcot_receiver) = ideal_rcot();
 
-    let sender_task = tokio::spawn(async move {
-        mpz_ot_sender(count, &mut ctx_sender, rcot_sender).await
-    });
+    let sender_task =
+        tokio::spawn(async move { mpz_ot_sender(count, &mut ctx_sender, rcot_sender).await });
 
-    let receiver_task = tokio::spawn(async move {
-        mpz_ot_receiver(count, &mut ctx_receiver, rcot_receiver).await
-    });
+    let receiver_task =
+        tokio::spawn(async move { mpz_ot_receiver(count, &mut ctx_receiver, rcot_receiver).await });
 
     // Await the results of both tasks
     let sender_result = sender_task.await;

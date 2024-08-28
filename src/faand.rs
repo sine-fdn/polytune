@@ -215,7 +215,12 @@ pub(crate) async fn fabitn(
                 delta,
                 x.to_vec(),
                 true,
-                (receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
+                (
+                    receiver_ot[p].0.clone(),
+                    vec![],
+                    vec![],
+                    receiver_ot[p].1.clone(),
+                ),
                 //(bits, vec![], vec![], rb),
             )
             .await?;
@@ -246,7 +251,12 @@ pub(crate) async fn fabitn(
                 delta,
                 x.to_vec(),
                 true,
-                (receiver_ot[p].0.clone(), vec![], vec![], receiver_ot[p].1.clone()),
+                (
+                    receiver_ot[p].0.clone(),
+                    vec![],
+                    vec![],
+                    receiver_ot[p].1.clone(),
+                ),
                 //(bits, vec![], vec![], rb),
             )
             .await?;
@@ -726,17 +736,25 @@ pub(crate) async fn faand_precomp(
 
     for (i, row) in sender_ot.into_iter().enumerate() {
         sender_ot1[i].copy_from_slice(&row[0..lprimerho]);
-        sender_ot2[i].copy_from_slice(&row[lprimerho..2*lprimerho]);
-        sender_ot3[i].copy_from_slice(&row[2*lprimerho..3*lprimerho]);
+        sender_ot2[i].copy_from_slice(&row[lprimerho..2 * lprimerho]);
+        sender_ot3[i].copy_from_slice(&row[2 * lprimerho..3 * lprimerho]);
     }
     for (i, row) in receiver_ot.into_iter().enumerate() {
         let (bools, u128s) = row;
         receiver_ot1[i].0.copy_from_slice(&bools[0..lprimerho]);
         receiver_ot1[i].1.copy_from_slice(&u128s[0..lprimerho]);
-        receiver_ot2[i].0.copy_from_slice(&bools[lprimerho..2*lprimerho]);
-        receiver_ot2[i].1.copy_from_slice(&u128s[lprimerho..2*lprimerho]);
-        receiver_ot3[i].0.copy_from_slice(&bools[2*lprimerho..3*lprimerho]);
-        receiver_ot3[i].1.copy_from_slice(&u128s[2*lprimerho..3*lprimerho]);
+        receiver_ot2[i]
+            .0
+            .copy_from_slice(&bools[lprimerho..2 * lprimerho]);
+        receiver_ot2[i]
+            .1
+            .copy_from_slice(&u128s[lprimerho..2 * lprimerho]);
+        receiver_ot3[i]
+            .0
+            .copy_from_slice(&bools[2 * lprimerho..3 * lprimerho]);
+        receiver_ot3[i]
+            .1
+            .copy_from_slice(&u128s[2 * lprimerho..3 * lprimerho]);
     }
 
     let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
