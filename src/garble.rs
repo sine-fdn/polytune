@@ -37,7 +37,7 @@ pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
     triple: (bool, Vec<Option<Mac>>, Label),
 ) -> Result<Vec<u8>, Error> {
-    let (key, nonce) = hash(garbling_key);
+    let (key, nonce) = key_and_nonce(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
     let bytes = bincode::serialize(&triple).map_err(|e| Error::Serde(format!("{e:?}")))?;
     let ciphertext = cipher
@@ -50,7 +50,7 @@ pub(crate) fn decrypt(
     garbling_key: &GarblingKey,
     bytes: &[u8],
 ) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
-    let (key, nonce) = hash(garbling_key);
+    let (key, nonce) = key_and_nonce(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
     let plaintext = cipher
         .decrypt(&nonce, bytes)
@@ -58,7 +58,7 @@ pub(crate) fn decrypt(
     bincode::deserialize(&plaintext).map_err(|e| Error::Serde(format!("{e:?}")))
 }
 
-fn hash(
+fn key_and_nonce(
     GarblingKey {
         label_x,
         label_y,
@@ -66,16 +66,12 @@ fn hash(
         row,
     }: &GarblingKey,
 ) -> (Key, Nonce) {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&label_x.0.to_le_bytes());
-    hasher.update(&label_y.0.to_le_bytes());
-    hasher.update(&w.to_le_bytes());
-    hasher.update(&[*row]);
-    let mut output_reader = hasher.finalize_xof();
     let mut key: [u8; 32] = [0; 32];
-    output_reader.fill(&mut key);
+    key[..16].copy_from_slice(&label_x.0.to_be_bytes());
+    key[16..].copy_from_slice(&label_y.0.to_be_bytes());
     let mut nonce: [u8; 12] = [0; 12];
-    output_reader.fill(&mut nonce);
+    nonce[..8].copy_from_slice(&(*w as u64).to_be_bytes());
+    nonce[8] = *row;
     (key.into(), nonce.into())
 }
 
