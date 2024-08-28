@@ -9,7 +9,7 @@ use garble_lang::{
 use parlay::protocol::simulate_mpc_async;
 
 fn join_benchmark(c: &mut Criterion) {
-    let n_records = 1000;
+    let n_records = 100;
     let code = include_str!(".join.garble.rs");
 
     let bench_id = format!("join {n_records} records");
