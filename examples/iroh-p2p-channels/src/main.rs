@@ -242,7 +242,7 @@ async fn main() -> Result<()> {
             let fpre = Preprocessor::TrustedDealer(conns.len() - 1);
             let channel = IrohChannel::new(conns, MAX_MSG_BYTES);
             let p_out: Vec<_> = (0..parties).collect();
-            let output = mpc(channel, &prg.circuit, &input, fpre, p_eval, party, &p_out)
+            let output = mpc(channel, &prg.circuit, &input, fpre, p_eval, party, &p_out, true)
                 .await
                 .unwrap();
             if !output.is_empty() {

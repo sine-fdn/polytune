@@ -44,31 +44,27 @@ pub(crate) async fn mpz_ot_sender(
     sender
         .setup(ctx_sender)
         .map_err(OTError::from)
-        .await
-        .unwrap();
+        .await?;
 
-    // extend once.
+    // Extend once.
     let num = LPN_PARAMETERS_TEST.k;
     sender
         .extend(ctx_sender, num)
         .map_err(OTError::from)
-        .await
-        .unwrap();
+        .await?;
 
-    // extend twice
+    // Extend twice.
     sender
         .extend(ctx_sender, count)
         .map_err(OTError::from)
-        .await
-        .unwrap();
+        .await?;
 
     let RCOTSenderOutput {
         id: sender_id,
         msgs: u,
     } = sender
         .send_random_correlated(ctx_sender, count)
-        .await
-        .unwrap();
+        .await?;
 
     Ok((sender_id, u, block_to_u128(sender.delta())))
 }
@@ -87,23 +83,20 @@ pub(crate) async fn mpz_ot_receiver(
     receiver
         .setup(ctx_receiver)
         .map_err(OTError::from)
-        .await
-        .unwrap();
+        .await?;
 
     // extend once.
     let num = LPN_PARAMETERS_TEST.k;
     receiver
         .extend(ctx_receiver, num)
         .map_err(OTError::from)
-        .await
-        .unwrap();
+        .await?;
 
     // extend twice
     receiver
         .extend(ctx_receiver, count)
         .map_err(OTError::from)
-        .await
-        .unwrap();
+        .await?;
 
     let RCOTReceiverOutput {
         id: receiver_id,
@@ -111,65 +104,9 @@ pub(crate) async fn mpz_ot_receiver(
         msgs: w,
     } = receiver
         .receive_random_correlated(ctx_receiver, count)
-        .await
-        .unwrap();
+        .await?;
 
     Ok((receiver_id, b, w))
-}
-
-pub(crate) async fn _mpz_ot(count: usize) -> Result<bool, OTError> {
-    let lpn_type: LpnType = LpnType::Regular;
-    let (mut ctx_sender, mut ctx_receiver) = test_st_executor(8);
-
-    let (rcot_sender, rcot_receiver) = ideal_rcot();
-
-    let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-
-    let mut sender = Sender::new(config.clone(), rcot_sender);
-    let mut receiver = Receiver::new(config, rcot_receiver);
-
-    tokio::try_join!(
-        sender.setup(&mut ctx_sender).map_err(OTError::from),
-        receiver.setup(&mut ctx_receiver).map_err(OTError::from)
-    )
-    .unwrap();
-
-    // extend once.
-    let num = LPN_PARAMETERS_TEST.k;
-    tokio::try_join!(
-        sender.extend(&mut ctx_sender, num).map_err(OTError::from),
-        receiver
-            .extend(&mut ctx_receiver, num)
-            .map_err(OTError::from)
-    )
-    .unwrap();
-
-    // extend twice
-    tokio::try_join!(
-        sender.extend(&mut ctx_sender, count).map_err(OTError::from),
-        receiver
-            .extend(&mut ctx_receiver, count)
-            .map_err(OTError::from)
-    )
-    .unwrap();
-
-    let (
-        RCOTSenderOutput {
-            id: _sender_id,
-            msgs: _u,
-        },
-        RCOTReceiverOutput {
-            id: _receiver_id,
-            choices: _b,
-            msgs: _w,
-        },
-    ) = tokio::try_join!(
-        sender.send_random_correlated(&mut ctx_sender, count),
-        receiver.receive_random_correlated(&mut ctx_receiver, count)
-    )
-    .unwrap();
-
-    Ok(true)
 }
 
 pub(crate) async fn generate_ots(

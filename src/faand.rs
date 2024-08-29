@@ -32,6 +32,10 @@ pub enum Error {
     AANDWrongEFMAC,
     /// No Mac or Key
     MissingMacKey,
+    /// Conversion error
+    ConversionError,
+    /// Empty bucket
+    EmptyBucketError,
 }
 
 impl From<channel::Error> for Error {
@@ -383,8 +387,12 @@ pub(crate) async fn fashare(
         dm_entry.push(shares[length + r].0 as u8);
         for p in 0..p_max {
             if p != p_own {
-                d0[r] ^= shares[length + r].1 .0[p].unwrap().1 .0;
-                dm_entry.extend(&shares[length + r].1 .0[p].unwrap().0 .0.to_be_bytes());
+                if let Some((mac, key)) = shares[length + r].1 .0[p] {
+                    d0[r] ^= key.0;
+                    dm_entry.extend(&mac.0.to_be_bytes());
+                } else {
+                    return Err(Error::MissingMacKey);
+                }
             } else {
                 dm_entry.extend(&[0; 16]);
             }
@@ -443,10 +451,11 @@ pub(crate) async fn fashare(
         for (p, pitem) in dmp.iter().enumerate().take(p_max) {
             for pp in (0..p_max).filter(|pp| *pp != p) {
                 if !pitem[r].is_empty() {
-                    let b: u128 = u128::from_be_bytes(
-                        pitem[r][(1 + pp * 16)..(17 + pp * 16)].try_into().unwrap(),
-                    );
-                    xormacs[pp][r] ^= b;
+                    if let Ok(b) = pitem[r][(1 + pp * 16)..(17 + pp * 16)].try_into().map(u128::from_be_bytes) {
+                        xormacs[pp][r] ^= b;
+                    } else {
+                        return Err(Error::ConversionError);
+                    }
                 }
             }
         }
@@ -967,10 +976,17 @@ pub(crate) async fn combine_bucket(
     bucket: Vec<(Share, Share, Share)>,
 ) -> Result<(Share, Share, Share), Error> {
     let mut bucketcopy = bucket.clone();
-    let mut result = bucketcopy.pop().unwrap();
+
+    let mut result = match bucketcopy.pop() {
+        Some(first_triple) => first_triple,
+        None => {
+            return Err(Error::EmptyBucketError);
+        }
+    };
     while let Some(triple) = bucketcopy.pop() {
         result = combine_two_leaky_ands(channel, p_own, p_max, delta, &result, &triple).await?;
     }
+
     Ok(result)
 }
 

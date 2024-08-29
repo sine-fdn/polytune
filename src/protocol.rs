@@ -22,8 +22,6 @@ pub(crate) struct GarbledGate(pub(crate) [Vec<u8>; 4]);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Label(pub(crate) u128);
 
-const TRUSTEDDEALER: bool = false;
-
 impl BitXor for Label {
     type Output = Self;
 
@@ -178,9 +176,10 @@ pub fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
     output_parties: &[usize],
+    trusted: bool,
 ) -> Result<Vec<bool>, Error> {
     let tokio = Runtime::new().expect("Could not start tokio runtime");
-    tokio.block_on(simulate_mpc_async(circuit, inputs, output_parties))
+    tokio.block_on(simulate_mpc_async(circuit, inputs, output_parties, trusted))
 }
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
@@ -188,12 +187,13 @@ pub async fn simulate_mpc_async(
     circuit: &Circuit,
     inputs: &[&[bool]],
     output_parties: &[usize],
+    trusted: bool,
 ) -> Result<Vec<bool>, Error> {
     let p_eval = 0;
     let p_pre = inputs.len();
 
     let mut channels: Vec<SimpleChannel>;
-    if TRUSTEDDEALER {
+    if trusted {
         channels = SimpleChannel::channels(inputs.len() + 1);
         tokio::spawn(fpre(channels.pop().unwrap(), inputs.len()));
     } else {
@@ -219,6 +219,7 @@ pub async fn simulate_mpc_async(
                 p_eval,
                 p_own,
                 &output_parties,
+                trusted,
             )
             .await;
             let mut res_party: Vec<bool> = Vec::new();
@@ -242,6 +243,7 @@ pub async fn simulate_mpc_async(
         p_eval,
         p_eval,
         output_parties,
+        trusted,
     )
     .await;
     match eval_result {
@@ -282,6 +284,7 @@ pub async fn mpc(
     p_eval: usize,
     p_own: usize,
     p_out: &[usize],
+    trusted: bool,
 ) -> Result<Vec<bool>, Error> {
     let p_max = circuit.input_gates.len();
     let is_contrib = p_own != p_eval;
@@ -334,7 +337,7 @@ pub async fn mpc(
     ];
 
     let mut delta: Delta = Delta(0);
-    if TRUSTEDDEALER {
+    if trusted {
         channel.send_to(p_fpre, "delta", &()).await?;
         delta = channel.recv_from(p_fpre, "delta").await?;
     } else {
@@ -368,7 +371,7 @@ pub async fn mpc(
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
     let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
 
-    if TRUSTEDDEALER {
+    if trusted {
         channel
             .send_to(p_fpre, "random shares", &(secret_bits as u32))
             .await?;
@@ -423,7 +426,7 @@ pub async fn mpc(
         }
     }
 
-    if TRUSTEDDEALER {
+    if trusted {
         channel.send_to(p_fpre, "AND shares", &and_shares).await?;
         auth_bits = channel.recv_from(p_fpre, "AND shares").await?;
     } else {

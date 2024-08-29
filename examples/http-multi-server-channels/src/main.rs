@@ -81,7 +81,7 @@ async fn main() -> Result<(), Error> {
             let fpre = Preprocessor::TrustedDealer(urls.len() - 1);
             let p_out: Vec<_> = (0..(urls.len() - 1)).collect();
             let channel = HttpChannel::new(urls, party).await?;
-            let output = mpc(channel, &prg.circuit, &input, fpre, 0, party, &p_out).await?;
+            let output = mpc(channel, &prg.circuit, &input, fpre, 0, party, &p_out, true).await?;
             if !output.is_empty() {
                 println!("\nThe result is {}", prg.parse_output(&output)?);
             }

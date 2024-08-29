@@ -654,7 +654,7 @@ async fn execute_mpc(
             recv_count: 0,
         }
     };
-    let output = mpc(channel, &prg.circuit, &input, fpre, 0, *party, &p_out).await?;
+    let output = mpc(channel, &prg.circuit, &input, fpre, 0, *party, &p_out, true).await?;
     state.lock().await.senders.clear();
     let elapsed = now.elapsed();
     info!(
