@@ -266,38 +266,54 @@ pub(crate) async fn fabitn(
     }
 
     // Step 3 including verification of macs and keys
-    for _ in 0..2 * RHO {
-        let randbits: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
-        let mut xj = false;
-        for (&xb, &rb) in x.iter().zip(&randbits) {
-            xj ^= xb & rb;
+    let mut randbits: Vec<Vec<bool>> = vec![vec![]; 2 * RHO];
+    let mut xj: Vec<bool> = vec![false; 2 * RHO];
+    for ind in 0..2 * RHO {
+        randbits[ind] = (0..len_abit).map(|_| shared_rng.gen()).collect();
+        for (&xb, &rb) in x.iter().zip(&randbits[ind]) {
+            xj[ind] ^= xb & rb;
         }
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            channel.send_to(p, "xj", &xj).await?;
-        }
-        let mut xjp: Vec<bool> = vec![false; p_max];
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            xjp[p] = channel.recv_from(p, "xj").await?;
+    }
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "xj", &xj).await?;
+    }
+    let mut xjp: Vec<Vec<bool>> = vec![vec![false; p_max]; 2 * RHO];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        xjp[p] = channel.recv_from(p, "xj").await?;
+    }
 
-            let mut macint: u128 = 0;
-            for (i, rbit) in randbits.iter().enumerate().take(len_abit) {
+    let mut macint: Vec<Vec<u128>> = vec![vec![0; 2 * RHO]; p_max];
+    for ind in 0..2 * RHO {
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            for (i, rbit) in randbits[ind].iter().enumerate().take(len_abit) {
                 if *rbit {
-                    macint ^= xmacs[p][i];
+                    macint[p][ind] ^= xmacs[p][i];
                 }
             }
-            channel
-                .send_to(p, "mac", &(macint, randbits.clone()))
-                .await?;
         }
+    }
+
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel
+            .send_to(p, "mac", &(macint[p].clone(), randbits.clone()))
+            .await?;
+    }
+
+    let mut macp: Vec<Vec<u128>> = vec![vec![0; 2 * RHO]; p_max];
+    let mut randbitsp: Vec<Vec<Vec<bool>>> = vec![vec![vec![]; 2 * RHO]; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        (macp[p], randbitsp[p]) = channel.recv_from(p, "mac").await?;
+    }
+
+    for ind in 0..2 * RHO {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            let (macp, randbitsp): (u128, Vec<bool>) = channel.recv_from(p, "mac").await?;
             let mut keyint: u128 = 0;
-            for (i, rbit) in randbitsp.iter().enumerate().take(len_abit) {
+            for (i, rbit) in randbitsp[p][ind].iter().enumerate().take(len_abit) {
                 if *rbit {
                     keyint ^= xkeys[p][i];
                 }
             }
-            if macp != keyint ^ ((xjp[p] as u128) * delta.0) {
+            if macp[p][ind] != keyint ^ ((xjp[p][ind] as u128) * delta.0) {
                 return Err(Error::ABitMacMisMatch);
             }
         }
