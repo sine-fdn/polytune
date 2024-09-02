@@ -41,10 +41,7 @@ pub(crate) async fn mpz_ot_sender(
 
     let mut sender = Sender::new(config, rcot_sender);
 
-    sender
-        .setup(ctx_sender)
-        .map_err(OTError::from)
-        .await?;
+    sender.setup(ctx_sender).map_err(OTError::from).await?;
 
     // Extend once.
     let num = LPN_PARAMETERS_TEST.k;
@@ -62,9 +59,7 @@ pub(crate) async fn mpz_ot_sender(
     let RCOTSenderOutput {
         id: sender_id,
         msgs: u,
-    } = sender
-        .send_random_correlated(ctx_sender, count)
-        .await?;
+    } = sender.send_random_correlated(ctx_sender, count).await?;
 
     Ok((sender_id, u, block_to_u128(sender.delta())))
 }
@@ -80,10 +75,7 @@ pub(crate) async fn mpz_ot_receiver(
 
     let mut receiver = Receiver::new(config, rcot_receiver);
 
-    receiver
-        .setup(ctx_receiver)
-        .map_err(OTError::from)
-        .await?;
+    receiver.setup(ctx_receiver).map_err(OTError::from).await?;
 
     // extend once.
     let num = LPN_PARAMETERS_TEST.k;
@@ -199,21 +191,21 @@ mod tests {
     #[tokio::test]
     async fn test_ferret(#[case] lpn_type: LpnType) -> Result<(), OTError> {
         let (mut ctx_sender, mut ctx_receiver) = test_st_executor(8);
-    
+
         let (rcot_sender, rcot_receiver) = ideal_rcot();
-    
+
         let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-    
+
         let mut sender = Sender::new(config.clone(), rcot_sender);
         let mut receiver = Receiver::new(config, rcot_receiver);
-    
+
         try_join!(
             sender.setup(&mut ctx_sender).map_err(OTError::from),
             receiver.setup(&mut ctx_receiver).map_err(OTError::from)
         )?;
-    
+
         let now = Instant::now();
-    
+
         // Extend once.
         let count = LPN_PARAMETERS_TEST.k;
         try_join!(
@@ -222,7 +214,7 @@ mod tests {
                 .extend(&mut ctx_receiver, count)
                 .map_err(OTError::from)
         )?;
-    
+
         // Extend twice.
         let count = 100;
         try_join!(
@@ -231,7 +223,7 @@ mod tests {
                 .extend(&mut ctx_receiver, count)
                 .map_err(OTError::from)
         )?;
-    
+
         let (
             RCOTSenderOutput {
                 id: sender_id,
@@ -246,13 +238,13 @@ mod tests {
             sender.send_random_correlated(&mut ctx_sender, count),
             receiver.receive_random_correlated(&mut ctx_receiver, count)
         )?;
-    
+
         let elapsed = now.elapsed();
         println!("Elapsed: {:.2?}", elapsed);
-    
+
         assert_eq!(sender_id, receiver_id);
         assert_cot(sender.delta(), &b, &u, &w);
-    
+
         Ok(())
-    }    
+    }
 }

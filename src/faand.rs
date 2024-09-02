@@ -451,7 +451,10 @@ pub(crate) async fn fashare(
         for (p, pitem) in dmp.iter().enumerate().take(p_max) {
             for pp in (0..p_max).filter(|pp| *pp != p) {
                 if !pitem[r].is_empty() {
-                    if let Ok(b) = pitem[r][(1 + pp * 16)..(17 + pp * 16)].try_into().map(u128::from_be_bytes) {
+                    if let Ok(b) = pitem[r][(1 + pp * 16)..(17 + pp * 16)]
+                        .try_into()
+                        .map(u128::from_be_bytes)
+                    {
                         xormacs[pp][r] ^= b;
                     } else {
                         return Err(Error::ConversionError);
@@ -998,30 +1001,62 @@ pub(crate) async fn check_dvalue(
     p_own: usize,
     p_max: usize,
     delta: Delta,
-    y: Vec<Share>
-) -> Result<Vec<bool>, Error> { //return d values already checked
+    y: Vec<Share>,
+) -> Result<Vec<bool>, Error> {
     // Step (a)
-    let mut d_values: Vec<bool> = Vec::with_capacity(y.len() - 1);
-    let first = y[0].0;
+    let mut d_values: Vec<bool> = vec![false; y.len() - 1];
+    let mut d_macs: Vec<Vec<Option<Mac>>> = vec![vec![None; y.len() - 1]; p_max];
 
+    let first = y[0].0;
+    let mut i = 0;
     for y_value in y.iter().skip(1) {
         let current_d = first ^ y_value.0;
-        d_values.push(current_d);
+        d_values[i] = current_d;
+        for p in (0..p_max).filter(|p| *p != p_own) {
+            let Some((y0mac, _)) = y[0].1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((ymac, _)) = y_value.1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            d_macs[p][i] = Some(y0mac ^ ymac);
+        }
+        i += 1;
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "dvalue", &d_values).await?;
+        channel
+            .send_to(p, "dvalue", &(d_values.clone(), d_macs[p].clone()))
+            .await?;
     }
-    let mut all_d_values = vec![vec![false; y.len() - 1]; p_max];
+    let mut all_d_values: Vec<Vec<bool>> = vec![vec![false; y.len() - 1]; p_max];
+    let mut all_d_macs: Vec<Vec<Option<Mac>>> = vec![vec![None; y.len() - 1]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        all_d_values[p] = channel.recv_from(p, "dvalue").await?;
+        (all_d_values[p], all_d_macs[p]) = channel.recv_from(p, "dvalue").await?;
+
         for i in 0..y.len() - 1 {
+            let Some(dmac) = all_d_macs[p][i] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((_, y0key)) = y[0].1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((_, ykey)) = y[i].1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            /*if (all_d_values[p][i] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
+                || (!all_d_values[p][i] && dmac.0 != y0key.0 ^ ykey.0)
+            {
+                return Err(Error::AANDWrongDMAC);
+            }*/
+            //TODO TOFIX
+
             d_values[i] ^= all_d_values[p][i];
         }
     }
+
     Ok(d_values)
 }
-
 
 /// Combine two leaky ANDs into one non-leaky AND.
 pub(crate) fn combine_two_leaky_ands(
@@ -1031,7 +1066,6 @@ pub(crate) fn combine_two_leaky_ands(
     (x2, y2, z2): &(Share, Share, Share),
     d: bool,
 ) -> Result<(Share, Share, Share), Error> {
-
     //Step (b)
     let xbit = x1.0 ^ x2.0;
     let mut xauth: Auth = Auth(vec![None; p_max]);
