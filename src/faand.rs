@@ -752,82 +752,48 @@ pub(crate) async fn faand_precomp(
     //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
     let lprimerho = lprime + 3 * RHO;
 
-    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; lprimerho]; p_max];
-    let mut sender_ot2: Vec<Vec<u128>> = vec![vec![0; lprimerho]; p_max];
-    let mut sender_ot3: Vec<Vec<u128>> = vec![vec![0; lprimerho]; p_max];
-    let mut receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; lprimerho], vec![0; lprimerho]); p_max];
-    let mut receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; lprimerho], vec![0; lprimerho]); p_max];
-    let mut receiver_ot3: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; lprimerho], vec![0; lprimerho]); p_max];
+    let mut sender_ott: Vec<Vec<u128>> = vec![vec![0; 3 * lprimerho]; p_max];
+    let mut receiver_ott: Vec<(Vec<bool>, Vec<u128>)> =
+        vec![(vec![false; 3 * lprimerho], vec![0; 3 * lprimerho]); p_max];
 
-    for (i, row) in sender_ot.into_iter().enumerate() {
-        sender_ot1[i].copy_from_slice(&row[0..lprimerho]);
-        sender_ot2[i].copy_from_slice(&row[lprimerho..2 * lprimerho]);
-        sender_ot3[i].copy_from_slice(&row[2 * lprimerho..3 * lprimerho]);
+    //TODO Figure this out and correct so we do not need to truncate this
+    for (i, row) in sender_ot.clone().into_iter().enumerate() {
+        sender_ott[i].copy_from_slice(&row[0..3 * lprimerho]);
     }
-    for (i, row) in receiver_ot.into_iter().enumerate() {
+    for (i, row) in receiver_ot.clone().into_iter().enumerate() {
         let (bools, u128s) = row;
-        receiver_ot1[i].0.copy_from_slice(&bools[0..lprimerho]);
-        receiver_ot1[i].1.copy_from_slice(&u128s[0..lprimerho]);
-        receiver_ot2[i]
-            .0
-            .copy_from_slice(&bools[lprimerho..2 * lprimerho]);
-        receiver_ot2[i]
-            .1
-            .copy_from_slice(&u128s[lprimerho..2 * lprimerho]);
-        receiver_ot3[i]
-            .0
-            .copy_from_slice(&bools[2 * lprimerho..3 * lprimerho]);
-        receiver_ot3[i]
-            .1
-            .copy_from_slice(&u128s[2 * lprimerho..3 * lprimerho]);
+        receiver_ott[i].0.copy_from_slice(&bools[0..3 * lprimerho]);
+        receiver_ott[i].1.copy_from_slice(&u128s[0..3 * lprimerho]);
     }
+    let mut xyz: Vec<bool> = (0..3 * lprimerho).map(|_| random()).collect();
+    let xyzbits: Vec<Share> = fashare(
+        channel,
+        &mut xyz,
+        p_own,
+        p_max,
+        3 * lprime,
+        delta,
+        shared_rng,
+        sender_ott,
+        receiver_ott,
+    )
+    .await?;
 
-    let mut x: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let mut y: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let mut r: Vec<bool> = (0..lprime + 3 * RHO).map(|_| random()).collect();
-    let xbits = fashare(
-        channel,
-        &mut x,
-        p_own,
-        p_max,
-        lprime,
-        delta,
-        shared_rng,
-        sender_ot1,
-        receiver_ot1,
-    )
-    .await?;
-    let ybits = fashare(
-        channel,
-        &mut y,
-        p_own,
-        p_max,
-        lprime,
-        delta,
-        shared_rng,
-        sender_ot2,
-        receiver_ot2,
-    )
-    .await?;
-    let rbits = fashare(
-        channel,
-        &mut r,
-        p_own,
-        p_max,
-        lprime,
-        delta,
-        shared_rng,
-        sender_ot3,
-        receiver_ot3,
-    )
-    .await?;
+    let (xbits, rest) = xyzbits.split_at(lprime);
+    let (ybits, rbits) = rest.split_at(lprime);
 
     // Step 1
-    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) =
-        flaand(channel, xbits, ybits, rbits, p_own, p_max, delta, lprime).await?;
+    let alltriples: (Vec<Share>, Vec<Share>, Vec<Share>) = flaand(
+        channel,
+        xbits.to_vec(),
+        ybits.to_vec(),
+        rbits.to_vec(),
+        p_own,
+        p_max,
+        delta,
+        lprime,
+    )
+    .await?;
     let triples = transform(alltriples, lprime);
 
     // Step 2
@@ -1033,7 +999,9 @@ pub(crate) async fn check_dvalue(
     let mut all_d_macs: Vec<Vec<Option<Mac>>> = vec![vec![None; y.len() - 1]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         (all_d_values[p], all_d_macs[p]) = channel.recv_from(p, "dvalue").await?;
+    }
 
+    for p in (0..p_max).filter(|p| *p != p_own) {
         for i in 0..y.len() - 1 {
             let Some(dmac) = all_d_macs[p][i] else {
                 return Err(Error::MissingMacKey);
@@ -1041,13 +1009,16 @@ pub(crate) async fn check_dvalue(
             let Some((_, y0key)) = y[0].1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, ykey)) = y[i].1 .0[p] else {
-                return Err(Error::MissingMacKey);
-            };
-            /*if (all_d_values[p][i] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
-                || (!all_d_values[p][i] && dmac.0 != y0key.0 ^ ykey.0)
-            {
-                return Err(Error::AANDWrongDMAC);
+            /*if i != 0{
+                let Some((_, ykey)) = y[i].1 .0[p] else {
+                    return Err(Error::MissingMacKey);
+                };
+                if (all_d_values[p][i] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
+                    || (!all_d_values[p][i] && dmac.0 != y0key.0 ^ ykey.0)
+                {
+                    println!("{:?} {:?} {:?}", dmac.0, y0key.0 ^ ykey.0 ^ delta.0, y0key.0 ^ ykey.0);
+                    return Err(Error::AANDWrongDMAC);
+                }
             }*/
             //TODO TOFIX
 
@@ -1063,7 +1034,7 @@ pub(crate) fn combine_two_leaky_ands(
     p_own: usize,
     p_max: usize,
     (x1, y1, z1): &(Share, Share, Share),
-    (x2, y2, z2): &(Share, Share, Share),
+    (x2, _, z2): &(Share, Share, Share),
     d: bool,
 ) -> Result<(Share, Share, Share), Error> {
     //Step (b)
