@@ -3,7 +3,7 @@
 use futures::TryFutureExt as _;
 use serio::channel::{duplex, MemoryDuplex};
 
-use mpz_common::executor::{test_st_executor, STExecutor};
+use mpz_common::executor::STExecutor;
 use mpz_core::{lpn::LpnParameters, Block};
 use mpz_ot::{
     ferret::{FerretConfig, Receiver, Sender},
@@ -174,6 +174,7 @@ mod tests {
     use futures::TryFutureExt as _;
     use rstest::*;
     use std::time::Instant;
+    use tokio::try_join;
 
     use mpz_common::executor::test_st_executor;
     use mpz_core::lpn::LpnParameters;
@@ -196,43 +197,41 @@ mod tests {
     //#[case::uniform(LpnType::Uniform)]
     #[case::regular(LpnType::Regular)]
     #[tokio::test]
-    async fn test_ferret(#[case] lpn_type: LpnType) {
+    async fn test_ferret(#[case] lpn_type: LpnType) -> Result<(), OTError> {
         let (mut ctx_sender, mut ctx_receiver) = test_st_executor(8);
-
+    
         let (rcot_sender, rcot_receiver) = ideal_rcot();
-
+    
         let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-
+    
         let mut sender = Sender::new(config.clone(), rcot_sender);
         let mut receiver = Receiver::new(config, rcot_receiver);
-
-        tokio::try_join!(
+    
+        try_join!(
             sender.setup(&mut ctx_sender).map_err(OTError::from),
             receiver.setup(&mut ctx_receiver).map_err(OTError::from)
-        )
-        .unwrap();
-
+        )?;
+    
         let now = Instant::now();
-        // extend once.
+    
+        // Extend once.
         let count = LPN_PARAMETERS_TEST.k;
-        tokio::try_join!(
+        try_join!(
             sender.extend(&mut ctx_sender, count).map_err(OTError::from),
             receiver
                 .extend(&mut ctx_receiver, count)
                 .map_err(OTError::from)
-        )
-        .unwrap();
-
-        // extend twice
+        )?;
+    
+        // Extend twice.
         let count = 100;
-        tokio::try_join!(
+        try_join!(
             sender.extend(&mut ctx_sender, count).map_err(OTError::from),
             receiver
                 .extend(&mut ctx_receiver, count)
                 .map_err(OTError::from)
-        )
-        .unwrap();
-
+        )?;
+    
         let (
             RCOTSenderOutput {
                 id: sender_id,
@@ -243,22 +242,17 @@ mod tests {
                 choices: b,
                 msgs: w,
             },
-        ) = tokio::try_join!(
+        ) = try_join!(
             sender.send_random_correlated(&mut ctx_sender, count),
             receiver.receive_random_correlated(&mut ctx_receiver, count)
-        )
-        .unwrap();
+        )?;
+    
         let elapsed = now.elapsed();
         println!("Elapsed: {:.2?}", elapsed);
-
+    
         assert_eq!(sender_id, receiver_id);
         assert_cot(sender.delta(), &b, &u, &w);
-
-        /*for i in 0..count {
-            println!("d     {:?}", sender.delta());
-            println!("b     {:?}", b[i]);
-            println!("u     {:?}", block_to_u128(u[i]));
-            println!("w     {:?}", block_to_u128(w[i]));
-        }*/
-    }
+    
+        Ok(())
+    }    
 }

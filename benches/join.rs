@@ -73,7 +73,7 @@ fn join_benchmark(c: &mut Criterion) {
 
                 let inputs = vec![input0.as_slice(), input1.as_slice()];
 
-                simulate_mpc_async(&prg.circuit, &inputs, &[0])
+                simulate_mpc_async(&prg.circuit, &inputs, &[0], true)
                     .await
                     .unwrap();
                 let elapsed = now.elapsed();
