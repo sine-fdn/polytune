@@ -276,6 +276,7 @@ pub enum Preprocessor {
 }
 
 /// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
+#[allow(clippy::too_many_arguments)]
 pub async fn mpc(
     channel: impl Channel,
     circuit: &Circuit,

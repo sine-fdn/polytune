@@ -112,9 +112,18 @@ async fn main() {
             }
             let fpre = Preprocessor::TrustedDealer(P_DEALER);
             let p_out: Vec<_> = (0..parties).collect();
-            let output = mpc(channel, &prg.circuit, &input, fpre, p_eval, party, &p_out, true)
-                .await
-                .unwrap();
+            let output = mpc(
+                channel,
+                &prg.circuit,
+                &input,
+                fpre,
+                p_eval,
+                party,
+                &p_out,
+                true,
+            )
+            .await
+            .unwrap();
             if !output.is_empty() {
                 let result = prg.parse_output(&output).unwrap();
                 println!("\nThe result is {result}");
