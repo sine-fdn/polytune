@@ -968,69 +968,69 @@ pub(crate) async fn faand(
 
 /// Combine the whole bucket by combining elements two by two.
 pub(crate) async fn combine_bucket(
-    // TODO make this more efficient to do as a tree structure
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
     delta: Delta,
     bucket: Vec<(Share, Share, Share)>,
 ) -> Result<(Share, Share, Share), Error> {
-    let mut bucketcopy = bucket.clone();
+    if bucket.is_empty() {
+        return Err(Error::EmptyBucketError);
+    }
 
-    let mut result = match bucketcopy.pop() {
-        Some(first_triple) => first_triple,
-        None => {
-            return Err(Error::EmptyBucketError);
-        }
-    };
-    while let Some(triple) = bucketcopy.pop() {
-        result = combine_two_leaky_ands(channel, p_own, p_max, delta, &result, &triple).await?;
+    let y: Vec<Share> = bucket.iter().map(|(_, share1, _)| share1.clone()).collect();
+    let d_values = check_dvalue(channel, p_own, p_max, delta, y).await?;
+
+    let mut result = bucket[0].clone();
+
+    // Combine elements two by two, starting from the second element
+    for (i, triple) in bucket.iter().enumerate().skip(1) {
+        let d = d_values[i - 1];
+        result = combine_two_leaky_ands(p_own, p_max, &result, triple, d)?;
     }
 
     Ok(result)
 }
 
-/// Combine two leaky ANDs into one non-leaky AND.
-pub(crate) async fn combine_two_leaky_ands(
+/// Check and return d-values for a vector of shares.
+pub(crate) async fn check_dvalue(
     channel: &mut MsgChannel<impl Channel>,
     p_own: usize,
     p_max: usize,
     delta: Delta,
+    y: Vec<Share>
+) -> Result<Vec<bool>, Error> { //return d values already checked
+    // Step (a)
+    let mut d_values: Vec<bool> = Vec::with_capacity(y.len() - 1);
+    let first = y[0].0;
+
+    for y_value in y.iter().skip(1) {
+        let current_d = first ^ y_value.0;
+        d_values.push(current_d);
+    }
+
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        channel.send_to(p, "dvalue", &d_values).await?;
+    }
+    let mut all_d_values = vec![vec![false; y.len() - 1]; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        all_d_values[p] = channel.recv_from(p, "dvalue").await?;
+        for i in 0..y.len() - 1 {
+            d_values[i] ^= all_d_values[p][i];
+        }
+    }
+    Ok(d_values)
+}
+
+
+/// Combine two leaky ANDs into one non-leaky AND.
+pub(crate) fn combine_two_leaky_ands(
+    p_own: usize,
+    p_max: usize,
     (x1, y1, z1): &(Share, Share, Share),
     (x2, y2, z2): &(Share, Share, Share),
+    d: bool,
 ) -> Result<(Share, Share, Share), Error> {
-    // Step (a)
-    let mut d = y1.0 ^ y2.0;
-    let mut dmacs: Vec<Option<Mac>> = vec![None; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        let Some((y1mac, _)) = y1.1 .0[p] else {
-            return Err(Error::MissingMacKey);
-        };
-        let Some((y2mac, _)) = y2.1 .0[p] else {
-            return Err(Error::MissingMacKey);
-        };
-        dmacs[p] = Some(y1mac ^ y2mac);
-        channel.send_to(p, "dvalue", &(d, dmacs[p])).await?;
-    }
-    let mut dp: Vec<(bool, Option<Mac>)> = vec![(false, None); p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        dp[p] = channel.recv_from(p, "dvalue").await?;
-        let Some(dmac) = dp[p].1 else {
-            return Err(Error::MissingMacKey);
-        };
-        let Some((_, y1key)) = y1.1 .0[p] else {
-            return Err(Error::MissingMacKey);
-        };
-        let Some((_, y2key)) = y2.1 .0[p] else {
-            return Err(Error::MissingMacKey);
-        };
-        if (dp[p].0 && dmac.0 != y1key.0 ^ y2key.0 ^ delta.0) //y1.keys[p] ^ y2.keys[p] ^ delta.0)
-            || (!dp[p].0 && dmac.0 != y1key.0 ^ y2key.0)
-        {
-            return Err(Error::AANDWrongDMAC);
-        }
-        d ^= dp[p].0;
-    }
 
     //Step (b)
     let xbit = x1.0 ^ x2.0;
