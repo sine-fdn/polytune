@@ -320,19 +320,15 @@ pub async fn mpc(
     let secret_bits = num_input_gates + num_and_gates;
     let secret_bits_ot = secret_bits + 3 * RHO;
 
-    let faand_len =
-        3 * (bucket_size(num_and_gates) * num_and_gates + 3 * RHO) + num_and_gates + 3 * RHO;
-    let mut sender_ot1: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot]; p_max];
-    let mut sender_ot2: Vec<Vec<u128>> = vec![vec![0; faand_len]; p_max];
-    let mut receiver_ot1: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; secret_bits_ot], vec![0; secret_bits_ot]); p_max];
-    let mut receiver_ot2: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; faand_len], vec![0; faand_len]); p_max];
-    let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + faand_len]; p_max];
+    let b = bucket_size(num_and_gates);
+    let lprime: usize = num_and_gates * b;
+    let faand_len = lprime + 3 * RHO;
+
+    let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
     let mut receiver_ot: Vec<(Vec<bool>, Vec<u128>)> = vec![
         (
-            vec![false; secret_bits_ot + faand_len],
-            vec![0; secret_bits_ot + faand_len]
+            vec![false; secret_bits_ot + 3 * faand_len],
+            vec![0; secret_bits_ot + 3 * faand_len]
         );
         p_max
     ];
@@ -343,7 +339,7 @@ pub async fn mpc(
         delta = channel.recv_from(p_fpre, "delta").await?;
     } else {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            let (d, u, b, w) = generate_ots(secret_bits_ot + faand_len).await.unwrap();
+            let (d, u, b, w) = generate_ots(secret_bits_ot + 3 * faand_len).await.unwrap();
             //println!("d, u, b, w = {:?} {:?} {:?} {:?} ", d, u, b, w);
             sender_ot[p] = u; //sender is p_own, receiver p
                               //channel.send_to(p, "ot", &(b, w)).await?;
@@ -352,25 +348,15 @@ pub async fn mpc(
             delta = Delta(d);
         }
         //delta = Delta(random());
-
-        for (i, row) in sender_ot.into_iter().enumerate() {
-            sender_ot1[i].copy_from_slice(&row[0..secret_bits_ot]);
-            sender_ot2[i].copy_from_slice(&row[secret_bits_ot..]);
-        }
-        for (i, row) in receiver_ot.into_iter().enumerate() {
-            let (bools, u128s) = row;
-            receiver_ot1[i].0.copy_from_slice(&bools[0..secret_bits_ot]);
-            receiver_ot1[i].1.copy_from_slice(&u128s[0..secret_bits_ot]);
-            receiver_ot2[i].0.copy_from_slice(&bools[secret_bits_ot..]);
-            receiver_ot2[i].1.copy_from_slice(&u128s[secret_bits_ot..]);
-        }
     }
 
     let random_shares: Vec<Share>;
+    let rand_shares: Vec<Share>;
     let auth_bits: Vec<Share>;
     let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
     let mut shared_rng = shared_rng(&mut channel, p_own, p_max).await?;
+    let mut xyzbits: Vec<Share> = vec![];
 
     if trusted {
         channel
@@ -378,19 +364,25 @@ pub async fn mpc(
             .await?;
         random_shares = channel.recv_from(p_fpre, "random shares").await?;
     } else {
-        let mut x: Vec<bool> = (0..secret_bits_ot).map(|_| random()).collect();
-        random_shares = fashare(
+        let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
+            .map(|_| random())
+            .collect();
+        rand_shares = fashare(
             &mut channel,
             &mut x,
             p_own,
             p_max,
-            secret_bits,
+            secret_bits + 3 * lprime,
             delta,
             &mut shared_rng,
-            sender_ot1,
-            receiver_ot1,
+            sender_ot,
+            receiver_ot,
         )
         .await?;
+
+        let (random_shares_vec, xyzbits_vec) = rand_shares.split_at(secret_bits);
+        random_shares = random_shares_vec.to_vec();
+        xyzbits = xyzbits_vec.to_vec();
     }
 
     let mut random_shares = random_shares.into_iter();
@@ -440,8 +432,7 @@ pub async fn mpc(
             num_and_gates,
             &mut shared_rng,
             delta,
-            sender_ot2,
-            receiver_ot2,
+            xyzbits,
         )
         .await?;
     }

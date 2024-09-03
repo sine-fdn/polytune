@@ -742,42 +742,11 @@ pub(crate) async fn faand_precomp(
     length: usize,
     shared_rng: &mut ChaCha20Rng,
     delta: Delta,
-    sender_ot: Vec<Vec<u128>>,
-    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
+    xyzbits: Vec<Share>,
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     //let b = (128.0 / f64::log2(circuit_size as f64)).ceil() as u128;
     let b = bucket_size(circuit_size); // it should be bucket size, but the last element in the bucket will be defined by the input random shares xbits and ybits
     let lprime: usize = length * b;
-    //let len_ashare = length + RHO;
-    //let len_abit = len_ashare + 2 * RHO; //(length + 3 * RHO)
-    let lprimerho = lprime + 3 * RHO;
-
-    let mut sender_ott: Vec<Vec<u128>> = vec![vec![0; 3 * lprimerho]; p_max];
-    let mut receiver_ott: Vec<(Vec<bool>, Vec<u128>)> =
-        vec![(vec![false; 3 * lprimerho], vec![0; 3 * lprimerho]); p_max];
-
-    //TODO Figure this out and correct so we do not need to truncate this
-    for (i, row) in sender_ot.clone().into_iter().enumerate() {
-        sender_ott[i].copy_from_slice(&row[0..3 * lprimerho]);
-    }
-    for (i, row) in receiver_ot.clone().into_iter().enumerate() {
-        let (bools, u128s) = row;
-        receiver_ott[i].0.copy_from_slice(&bools[0..3 * lprimerho]);
-        receiver_ott[i].1.copy_from_slice(&u128s[0..3 * lprimerho]);
-    }
-    let mut xyz: Vec<bool> = (0..3 * lprimerho).map(|_| random()).collect();
-    let xyzbits: Vec<Share> = fashare(
-        channel,
-        &mut xyz,
-        p_own,
-        p_max,
-        3 * lprime,
-        delta,
-        shared_rng,
-        sender_ott,
-        receiver_ott,
-    )
-    .await?;
 
     let (xbits, rest) = xyzbits.split_at(lprime);
     let (ybits, rbits) = rest.split_at(lprime);
@@ -843,8 +812,7 @@ pub(crate) async fn faand(
     length: usize,
     shared_rng: &mut ChaCha20Rng,
     delta: Delta,
-    sender_ot: Vec<Vec<u128>>,
-    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
+    xyzbits: Vec<Share>,
 ) -> Result<Vec<Share>, Error> {
     let vectriples = faand_precomp(
         channel,
@@ -854,8 +822,7 @@ pub(crate) async fn faand(
         length,
         shared_rng,
         delta,
-        sender_ot,
-        receiver_ot,
+        xyzbits,
     )
     .await?;
 
