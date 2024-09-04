@@ -177,7 +177,7 @@ pub(crate) async fn fabitn(
                 channel,
                 p,
                 delta,
-                &x,
+                x,
                 true,
                 (&receiver_ot[p].0, &[], &[], &receiver_ot[p].1),
             )
@@ -186,7 +186,7 @@ pub(crate) async fn fabitn(
                 channel,
                 p,
                 delta,
-                &x,
+                x,
                 false,
                 (&[], &sender_ot[p], &delta_added, &[]),
             )
@@ -196,7 +196,7 @@ pub(crate) async fn fabitn(
                 channel,
                 p,
                 delta,
-                &x,
+                x,
                 false,
                 (&[], &sender_ot[p], &delta_added, &[]),
             )
@@ -205,7 +205,7 @@ pub(crate) async fn fabitn(
                 channel,
                 p,
                 delta,
-                &x,
+                x,
                 true,
                 (&receiver_ot[p].0, &[], &[], &receiver_ot[p].1),
             )
