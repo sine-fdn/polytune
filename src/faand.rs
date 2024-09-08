@@ -688,7 +688,7 @@ pub(crate) async fn faand_precomp(
     }
 
     // Step 3 check d-values.
-    let dvalues = check_dvalue(channel, p_own, p_max, &buckets).await?;
+    let dvalues = check_dvalue(channel, p_own, p_max, &buckets, delta).await?;
 
     let mut combined: Vec<(Share, Share, Share)> = Vec::with_capacity(buckets.len());
 
@@ -811,6 +811,7 @@ pub(crate) async fn check_dvalue(
     p_own: usize,
     p_max: usize,
     buckets: &[Vec<(Share, Share, Share)>],
+    delta: Delta,
 ) -> Result<Vec<Vec<bool>>, Error> {
     // Step (a) compute and check macs of d-values.
     let mut d_values: Vec<Vec<bool>> = vec![vec![]; buckets.len()];
@@ -820,8 +821,7 @@ pub(crate) async fn check_dvalue(
         let (_, y, _) = &buckets[j][0];
         let first = y.0;
         for (_, y_value, _) in buckets[j].iter().skip(1) {
-            let current_d = first ^ y_value.0;
-            d_values[j].push(current_d);
+            d_values[j].push(first ^ y_value.0);
             for p in (0..p_max).filter(|p| *p != p_own) {
                 let Some((y0mac, _)) = y.1 .0[p] else {
                     return Err(Error::MissingMacKey);
@@ -847,7 +847,22 @@ pub(crate) async fn check_dvalue(
 
     for p in (0..p_max).filter(|p| *p != p_own) {
         for (j, dval) in d_values.iter_mut().enumerate().take(buckets.len()) {
+            let Some((_, y0key)) = buckets[j][0].1 .1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
             for (i, d) in dval.iter_mut().enumerate().take(all_d_macs[p][j].len()) {
+                let Some(dmac) = all_d_macs[p][j][i] else {
+                    return Err(Error::MissingMacKey);
+                };
+                let Some((_, ykey)) = buckets[j][i + 1].1 .1.0[p] else {
+                    return Err(Error::MissingMacKey);
+                };
+                if (all_d_values[p][j][i] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
+                    || (!all_d_values[p][j][i] && dmac.0 != y0key.0 ^ ykey.0)
+                {
+                    println!("{:?} {:?} {:?}", dmac.0, y0key.0 ^ ykey.0 ^ delta.0, y0key.0 ^ ykey.0);
+                    return Err(Error::AANDWrongDMAC);
+                }
                 *d ^= all_d_values[p][j][i];
             }
         }
