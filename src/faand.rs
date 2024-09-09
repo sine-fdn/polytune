@@ -258,11 +258,11 @@ pub(crate) async fn fabitn(
         fabitn_msg_p[p] = channel.recv_from(p, "fabitn").await?;
     }
 
-    for j in 0..two_rho {
+    for (j, rbits) in rbits.iter().enumerate() {
         for p in (0..p_max).filter(|p| *p != p_own) {
             let (xj, macint) = &fabitn_msg_p[p][j];
             let mut keyint: u128 = 0;
-            for (i, rbit) in rbits[j].iter().enumerate() {
+            for (i, rbit) in rbits.iter().enumerate() {
                 if *rbit {
                     keyint ^= xkeys[p][i];
                 }
