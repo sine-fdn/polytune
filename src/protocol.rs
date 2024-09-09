@@ -343,7 +343,7 @@ pub async fn mpc(
             .recv_from(p_fpre, "delta")
             .await?
             .pop()
-            .ok_or_else(|| Error::EmptyMsg)?;
+            .ok_or(Error::EmptyMsg)?;
     } else {
         for p in (0..p_max).filter(|p| *p != p_own) {
             let (d, u, b, w) = generate_ots(secret_bits_ot + 3 * faand_len).await.unwrap();

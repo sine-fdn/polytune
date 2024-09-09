@@ -64,7 +64,7 @@ where
             .recv_from(p, "random shares (fpre)")
             .await?
             .pop()
-            .ok_or_else(|| Error::EmptyMsg)?;
+            .ok_or(Error::EmptyMsg)?;
         if num_shares > 0 && num_shares != r {
             let e = Error::RandomSharesMismatch(num_shares, r);
             for p in 0..parties {
@@ -352,12 +352,12 @@ mod tests {
             .recv_from(fpre_party, "delta")
             .await?
             .pop()
-            .ok_or_else(|| Error::EmptyMsg)?;
+            .ok_or(Error::EmptyMsg)?;
         let delta_b: Delta = b
             .recv_from(fpre_party, "delta")
             .await?
             .pop()
-            .ok_or_else(|| Error::EmptyMsg)?;
+            .ok_or(Error::EmptyMsg)?;
 
         // random r1, r2, s1, s2:
         a.send_to(fpre_party, "random shares", &[2_u32]).await?;
@@ -416,12 +416,12 @@ mod tests {
                 .recv_from(fpre_party, "delta")
                 .await?
                 .pop()
-                .ok_or_else(|| Error::EmptyMsg)?;
+                .ok_or(Error::EmptyMsg)?;
             let delta_b: Delta = b
                 .recv_from(fpre_party, "delta")
                 .await?
                 .pop()
-                .ok_or_else(|| Error::EmptyMsg)?;
+                .ok_or(Error::EmptyMsg)?;
 
             // random r1, r2, s1, s2:
             a.send_to(fpre_party, "random shares", &[2_u32]).await?;
@@ -445,9 +445,9 @@ mod tests {
 
             if i == 0 {
                 // uncorrupted authenticated (r1 XOR s1) AND (r2 XOR s2):
-                a.send_to(fpre_party, "AND shares", &vec![(auth_r1, auth_r2)])
+                a.send_to(fpre_party, "AND shares", &[(auth_r1, auth_r2)])
                     .await?;
-                b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
+                b.send_to(fpre_party, "AND shares", &[(auth_s1, auth_s2)])
                     .await?;
                 let Share(r3, Auth(mac_r3_key_s3)) = a
                     .recv_from::<Share>(fpre_party, "AND shares")
@@ -470,10 +470,10 @@ mod tests {
                 a.send_to(
                     fpre_party,
                     "AND shares",
-                    &vec![(auth_r1_corrupted, auth_r2)],
+                    &[(auth_r1_corrupted, auth_r2)],
                 )
                 .await?;
-                b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
+                b.send_to(fpre_party, "AND shares", &[(auth_s1, auth_s2)])
                     .await?;
                 assert_eq!(
                     a.recv_from::<String>(fpre_party, "AND shares").await?,
@@ -491,10 +491,10 @@ mod tests {
                 a.send_to(
                     fpre_party,
                     "AND shares",
-                    &vec![(auth_r1_corrupted, auth_r2)],
+                    &[(auth_r1_corrupted, auth_r2)],
                 )
                 .await?;
-                b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
+                b.send_to(fpre_party, "AND shares", &[(auth_s1, auth_s2)])
                     .await?;
                 assert_eq!(
                     a.recv_from::<Share>(fpre_party, "AND shares").await?.len(),

@@ -35,7 +35,7 @@ fn join_benchmark(c: &mut Criterion) {
                         )]),
                     ),
                 ]);
-                let prg = compile_with_constants(&code, consts).unwrap();
+                let prg = compile_with_constants(code, consts).unwrap();
                 println!("{}", prg.circuit.report_gates());
                 let elapsed = now.elapsed();
                 println!(

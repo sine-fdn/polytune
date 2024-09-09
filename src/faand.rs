@@ -88,7 +88,7 @@ pub(crate) async fn shared_rng(
             .recv_from(p, "RNG")
             .await?
             .pop()
-            .ok_or_else(|| Error::EmptyMsg)?;
+            .ok_or(Error::EmptyMsg)?;
         commitments[p] = commitment;
         bufs[p] = buffer;
     }
@@ -249,7 +249,7 @@ pub(crate) async fn fabitn(
     for p in (0..p_max).filter(|p| *p != p_own) {
         fabitn_msg.iter_mut().enumerate().for_each(|(i, msg)| {
             msg.1 = macint[p][i];
-        });        
+        });
         channel.send_to(p, "fabitn", &fabitn_msg).await?;
     }
 
@@ -355,10 +355,11 @@ pub(crate) async fn fashare(
             .send_to(p, "fashare commitverify", &own_commitments)
             .await?;
     }
-    let mut commitments: Vec<Vec<(Commitment, Commitment, Commitment, Vec<u8>)>> =
-        vec![vec![]; p_max];
+    let mut commitments = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        commitments[p] = channel.recv_from(p, "fashare commitverify").await?;
+        commitments[p] = channel
+            .recv_from::<(Commitment, Commitment, Commitment, Vec<u8>)>(p, "fashare commitverify")
+            .await?;
     }
     commitments[p_own] = own_commitments;
 
@@ -770,18 +771,22 @@ pub(crate) async fn faand(
         }
         channel.send_to(p, "faand", &ef_with_macs).await?;
     }
-    let mut faand_vec: Vec<Vec<(bool, bool, Option<Mac>, Option<Mac>)>> =
-        vec![vec![(false, false, None, None); vectriples.len()]; p_max];
+    let mut faand_vec = vec![vec![(false, false, None, None); vectriples.len()]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        faand_vec[p] = channel.recv_from(p, "faand").await?;
+        faand_vec[p] = channel
+            .recv_from::<(bool, bool, Option<Mac>, Option<Mac>)>(p, "faand")
+            .await?;
     }
-    ef_with_macs.iter_mut().enumerate().for_each(|(i, (e, f, _, _))| {
-        for p in (0..p_max).filter(|&p| p != p_own) {
-            let (fa_e, fa_f, _, _) = faand_vec[p][i];
-            *e ^= fa_e;
-            *f ^= fa_f;
-        }
-    });
+    ef_with_macs
+        .iter_mut()
+        .enumerate()
+        .for_each(|(i, (e, f, _, _))| {
+            for p in (0..p_max).filter(|&p| p != p_own) {
+                let (fa_e, fa_f, _, _) = faand_vec[p][i];
+                *e ^= fa_e;
+                *f ^= fa_f;
+            }
+        });
     let mut result = vec![Share(false, Auth(vec![])); vectriples.len()];
 
     for i in 0..vectriples.len() {
@@ -857,10 +862,11 @@ pub(crate) async fn check_dvalue(
         channel.send_to(p, "dvalue", &dvalue_msg).await?;
     }
 
-    let mut dvalue_msg_p: Vec<Vec<(Vec<bool>, Vec<Option<Mac>>)>> =
-        vec![vec![(vec![], vec![]); buckets.len()]; p_max];
+    let mut dvalue_msg_p = vec![vec![(vec![], vec![]); buckets.len()]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        dvalue_msg_p[p] = channel.recv_from(p, "dvalue").await?;
+        dvalue_msg_p[p] = channel
+            .recv_from::<(Vec<bool>, Vec<Option<Mac>>)>(p, "dvalue")
+            .await?;
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {

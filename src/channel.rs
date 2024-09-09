@@ -30,6 +30,8 @@ pub enum ErrorKind {
     InvalidLength,
 }
 
+type ChunkAndRemaining = (Vec<u8>, usize);
+
 /// A communication channel used to send/receive messages to/from another party.
 pub trait Channel {
     /// The error that can occur sending messages over the channel.
@@ -53,7 +55,7 @@ pub trait Channel {
         party: usize,
         phase: &str,
         i: usize,
-    ) -> impl Future<Output = Result<(Vec<u8>, usize), Self::RecvError>> + Send;
+    ) -> impl Future<Output = Result<ChunkAndRemaining, Self::RecvError>> + Send;
 }
 
 /// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
@@ -142,8 +144,8 @@ impl<C: Channel> MsgChannel<C> {
 /// A simple synchronous channel using [`Sender`] and [`Receiver`].
 #[derive(Debug)]
 pub struct SimpleChannel {
-    s: Vec<Option<Sender<(Vec<u8>, usize)>>>,
-    r: Vec<Option<Receiver<(Vec<u8>, usize)>>>,
+    s: Vec<Option<Sender<ChunkAndRemaining>>>,
+    r: Vec<Option<Receiver<ChunkAndRemaining>>>,
 }
 
 impl SimpleChannel {
@@ -187,7 +189,7 @@ pub enum AsyncRecvError {
 }
 
 impl Channel for SimpleChannel {
-    type SendError = SendError<(Vec<u8>, usize)>;
+    type SendError = SendError<ChunkAndRemaining>;
     type RecvError = AsyncRecvError;
 
     async fn send_bytes_to(
@@ -197,7 +199,7 @@ impl Channel for SimpleChannel {
         i: usize,
         remaining: usize,
         msg: Vec<u8>,
-    ) -> Result<(), SendError<(Vec<u8>, usize)>> {
+    ) -> Result<(), SendError<ChunkAndRemaining>> {
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         let i = i + 1;
         let total = i + remaining;
@@ -218,15 +220,15 @@ impl Channel for SimpleChannel {
         p: usize,
         _phase: &str,
         _i: usize,
-    ) -> Result<(Vec<u8>, usize), AsyncRecvError> {
+    ) -> Result<ChunkAndRemaining, AsyncRecvError> {
         let chunk = self.r[p]
             .as_mut()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
             .recv();
         match timeout(Duration::from_secs(10 * 60), chunk).await {
             Ok(Some((bytes, remaining))) => Ok((bytes, remaining)),
-            Ok(None) => return Err(AsyncRecvError::Closed),
-            Err(_) => return Err(AsyncRecvError::TimeoutElapsed),
+            Ok(None) => Err(AsyncRecvError::Closed),
+            Err(_) => Err(AsyncRecvError::TimeoutElapsed),
         }
     }
 }
