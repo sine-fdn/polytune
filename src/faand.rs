@@ -224,19 +224,20 @@ pub(crate) async fn fabitn(
     }
 
     // Step 3 including verification of macs and keys.
-    let mut randbits: Vec<Vec<bool>> = vec![vec![]; two_rho];
-    let mut xj: Vec<bool> = vec![false; two_rho];
-    for i in 0..two_rho {
-        randbits[i] = (0..len_abit).map(|_| shared_rng.gen()).collect();
-        for (&xb, &rb) in x.iter().zip(&randbits[i]) {
-            xj[i] ^= xb & rb;
-        }
-    }
+    let mut fabitn_msg: Vec<(bool, u128, Vec<bool>)> = vec![(false, 0, vec![]); two_rho];
+
+    fabitn_msg.iter_mut().for_each(|msg| {
+        msg.2 = (0..len_abit).map(|_| shared_rng.gen()).collect();
+        msg.0 = x.iter()
+            .zip(&msg.2)
+            .map(|(&xb, &rb)| xb & rb)
+            .fold(false, |acc, val| acc ^ val);
+    });
 
     let mut macint: Vec<Vec<u128>> = vec![vec![0; two_rho]; p_max];
-    for (i, randbit_vec) in randbits.iter().take(two_rho).enumerate() {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            for (j, &rbit) in randbit_vec.iter().take(len_abit).enumerate() {
+    for (i, msg) in fabitn_msg.iter().enumerate() {
+        for p in (0..p_max).filter(|&p| p != p_own) {
+            for (j, &rbit) in msg.2.iter().take(len_abit).enumerate() {
                 if rbit {
                     macint[p][i] ^= xmacs[p][j];
                 }
@@ -245,27 +246,27 @@ pub(crate) async fn fabitn(
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel
-            .send_single_to(p, "fabitn", &(&xj, &macint[p], &randbits))
-            .await?;
+        for i in 0..two_rho {
+            fabitn_msg[i].1 = macint[p][i];
+        }
+        channel.send_to(p, "fabitn", &fabitn_msg.clone()).await?;
     }
 
-    let mut xjp: Vec<Vec<bool>> = vec![vec![false; two_rho]; p_max];
-    let mut macp: Vec<Vec<u128>> = vec![vec![0; two_rho]; p_max];
-    let mut randbitsp: Vec<Vec<Vec<bool>>> = vec![vec![vec![]; two_rho]; p_max];
+    let mut fabitn_msg_p: Vec<Vec<(bool, u128, Vec<bool>)>> = vec![vec![(false, 0, vec![]); two_rho]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        (xjp[p], macp[p], randbitsp[p]) = channel.recv_single_from(p, "fabitn").await?;
+        fabitn_msg_p[p] = channel.recv_from(p, "fabitn").await?;
     }
 
     for ind in 0..two_rho {
         for p in (0..p_max).filter(|p| *p != p_own) {
+            let (xj, macint, randbits) = &fabitn_msg_p[p][ind];
             let mut keyint: u128 = 0;
-            for (i, rbit) in randbitsp[p][ind].iter().enumerate().take(len_abit) {
+            for (i, rbit) in randbits.iter().enumerate().take(len_abit) {
                 if *rbit {
                     keyint ^= xkeys[p][i];
                 }
             }
-            if macp[p][ind] != keyint ^ ((xjp[p][ind] as u128) * delta.0) {
+            if *macint != keyint ^ ((*xj as u128) * delta.0) {
                 return Err(Error::ABitMacMisMatch);
             }
         }
@@ -518,11 +519,13 @@ pub(crate) async fn flaand(
     let v = fhaand(channel, p_own, p_max, delta, length, xbits, yvec).await?;
 
     // Step 3 a) compute z and e.
+    let mut flaand_msg: Vec<(bool, Vec<u128>)> = vec![(false, vec![0; p_max]); length];
     let mut z: Vec<bool> = vec![false; length];
     let mut e: Vec<bool> = vec![false; length];
     for l in 0..length {
         z[l] = v[l] ^ (xbits[l].0 & ybits[l].0);
         e[l] = z[l] ^ rbits[l].0;
+        flaand_msg[l].0 = e[l];
     }
     // If e is true, this is negation of r as described in Section 2 of WRK17b, if e is false (0), this is a copy.
     let mut zbits: Vec<Share> = vec![Share(false, Auth(vec![None; p_max])); length];
@@ -550,7 +553,7 @@ pub(crate) async fn flaand(
 
     // Set 3 b broadcast e
     // Step 5 compute uij and xkeys_phi and send to all parties.
-    let mut uij: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
+    let mut uij: Vec<Vec<u128>> = vec![vec![0; p_max]; length];
     let mut xkeys_phi: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         for (l, phie) in phi.iter().enumerate().take(length) {
@@ -558,28 +561,26 @@ pub(crate) async fn flaand(
                 return Err(Error::MissingMacKey);
             };
             xkeys_phi[p][l] = hash128(xkey.0);
-            uij[p][l] = hash128(xkey.0 ^ delta.0) ^ xkeys_phi[p][l] ^ *phie;
+            uij[l][p] = hash128(xkey.0 ^ delta.0) ^ xkeys_phi[p][l] ^ *phie;
+            flaand_msg[l].1[p] = uij[l][p];
         }
-        channel
-            .send_single_to(p, "flaand eandu", &(&e, &uij))
-            .await?;
+        channel.send_to(p, "flaand_vec", &flaand_msg).await?;
     }
-    let mut epp: Vec<Vec<bool>> = vec![vec![]; p_max];
-    let mut uijp: Vec<Vec<Vec<u128>>> = vec![vec![vec![0; p_max]; length]; p_max];
     let mut xmacs_phi: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
+    let mut flaand_msg_p: Vec<Vec<(bool, Vec<u128>)>> = vec![vec![(false, vec![0; p_max]); length]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        (epp[p], uijp[p]) = channel.recv_single_from(p, "flaand eandu").await?;
+        flaand_msg_p[p] = channel.recv_from(p, "flaand_vec").await?;
         for (l, xbit) in xbits.iter().enumerate().take(length) {
             let Some((xmac, _)) = xbits[l].1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
-            xmacs_phi[p][l] = hash128(xmac.0) ^ (xbit.0 as u128 * uijp[p][p_own][l]);
+            xmacs_phi[p][l] = hash128(xmac.0) ^ (xbit.0 as u128 * flaand_msg_p[p][l].1[p_own]);
         }
-        for (l, e) in epp[p].iter().enumerate().take(length) {
+        for l in 0..flaand_msg_p[p].len() {
             let Some((mac, key)) = rbits[l].1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
-            if *e {
+            if flaand_msg_p[p][l].0 {
                 zbits[l].1 .0[p] = Some((mac, Key(key.0 ^ delta.0)));
             } else {
                 zbits[l].1 .0[p] = Some((mac, key));
