@@ -228,7 +228,8 @@ pub(crate) async fn fabitn(
 
     fabitn_msg.iter_mut().for_each(|msg| {
         msg.2 = (0..len_abit).map(|_| shared_rng.gen()).collect();
-        msg.0 = x.iter()
+        msg.0 = x
+            .iter()
             .zip(&msg.2)
             .map(|(&xb, &rb)| xb & rb)
             .fold(false, |acc, val| acc ^ val);
@@ -246,13 +247,14 @@ pub(crate) async fn fabitn(
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {
-        for i in 0..two_rho {
-            fabitn_msg[i].1 = macint[p][i];
-        }
-        channel.send_to(p, "fabitn", &fabitn_msg.clone()).await?;
+        fabitn_msg.iter_mut().enumerate().for_each(|(i, msg)| {
+            msg.1 = macint[p][i];
+        });        
+        channel.send_to(p, "fabitn", &fabitn_msg).await?;
     }
 
-    let mut fabitn_msg_p: Vec<Vec<(bool, u128, Vec<bool>)>> = vec![vec![(false, 0, vec![]); two_rho]; p_max];
+    let mut fabitn_msg_p: Vec<Vec<(bool, u128, Vec<bool>)>> =
+        vec![vec![(false, 0, vec![]); two_rho]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         fabitn_msg_p[p] = channel.recv_from(p, "fabitn").await?;
     }
@@ -567,7 +569,8 @@ pub(crate) async fn flaand(
         channel.send_to(p, "flaand_vec", &flaand_msg).await?;
     }
     let mut xmacs_phi: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
-    let mut flaand_msg_p: Vec<Vec<(bool, Vec<u128>)>> = vec![vec![(false, vec![0; p_max]); length]; p_max];
+    let mut flaand_msg_p: Vec<Vec<(bool, Vec<u128>)>> =
+        vec![vec![(false, vec![0; p_max]); length]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         flaand_msg_p[p] = channel.recv_from(p, "flaand_vec").await?;
         for (l, xbit) in xbits.iter().enumerate().take(length) {
@@ -736,18 +739,19 @@ pub(crate) async fn faand(
     .await?;
 
     // Beaver triple precomputation - transform random triples to specific triples.
-    let mut ef: Vec<(Share, Share)> = vec![];
-    let mut e: Vec<bool> = vec![];
-    let mut f: Vec<bool> = vec![];
+    let mut ef_with_macs = vec![(false, false, None, None); vectriples.len()];
+
+    let mut ef = vec![];
     for i in 0..vectriples.len() {
+        let (e, f, _, _) = &mut ef_with_macs[i];
         let (a, b, _c) = &vectriples[i];
         let (x, y) = &bits_rand[i];
         ef.push((a ^ x, b ^ y));
-        e.push(a.0 ^ x.0);
-        f.push(b.0 ^ y.0);
+        *e = a.0 ^ x.0;
+        *f = b.0 ^ y.0;
     }
-    let mut emacs: Vec<Option<Mac>> = vec![];
-    let mut fmacs: Vec<Option<Mac>> = vec![];
+    let mut emacs = vec![];
+    let mut fmacs = vec![];
     for p in (0..p_max).filter(|p| *p != p_own) {
         for (e, f) in &ef {
             let Some((emac, _)) = e.1 .0[p] else {
@@ -759,33 +763,36 @@ pub(crate) async fn faand(
             emacs.push(Some(emac));
             fmacs.push(Some(fmac));
         }
-        channel
-            .send_single_to(p, "faand", &(&e, &f, &emacs, &fmacs))
-            .await?;
-    }
-    let mut ep: Vec<Vec<bool>> = vec![vec![]; p_max];
-    let mut fp: Vec<Vec<bool>> = vec![vec![]; p_max];
-    let mut emacsp: Vec<Vec<Option<Mac>>> = vec![vec![]; p_max];
-    let mut fmacsp: Vec<Vec<Option<Mac>>> = vec![vec![]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        (ep[p], fp[p], emacsp[p], fmacsp[p]) = channel.recv_single_from(p, "faand").await?;
-    }
-    for i in 0..ef.len() {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            e[i] ^= ep[p][i];
-            f[i] ^= fp[p][i];
+        for i in 0..vectriples.len() {
+            let (_, _, emac, fmac) = &mut ef_with_macs[i];
+            *emac = emacs[i];
+            *fmac = fmacs[i];
         }
+        channel.send_to(p, "faand", &ef_with_macs).await?;
     }
-    let mut result: Vec<Share> = vec![Share(false, Auth(vec![])); vectriples.len()];
+    let mut faand_vec: Vec<Vec<(bool, bool, Option<Mac>, Option<Mac>)>> =
+        vec![vec![(false, false, None, None); vectriples.len()]; p_max];
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        faand_vec[p] = channel.recv_from(p, "faand").await?;
+    }
+    ef_with_macs.iter_mut().enumerate().for_each(|(i, (e, f, _, _))| {
+        for p in (0..p_max).filter(|&p| p != p_own) {
+            let (fa_e, fa_f, _, _) = faand_vec[p][i];
+            *e ^= fa_e;
+            *f ^= fa_f;
+        }
+    });
+    let mut result = vec![Share(false, Auth(vec![])); vectriples.len()];
 
     for i in 0..vectriples.len() {
         let (a, _b, c) = &vectriples[i];
         let (_x, y) = &bits_rand[i];
+        let (e, f, _, _) = ef_with_macs[i];
         result[i] = c.clone();
-        if e[i] {
+        if e {
             result[i] = &result[i] ^ y;
         }
-        if f[i] {
+        if f {
             result[i] = &result[i] ^ a;
         }
     }
@@ -823,8 +830,8 @@ pub(crate) async fn check_dvalue(
     delta: Delta,
 ) -> Result<Vec<Vec<bool>>, Error> {
     // Step (a) compute and check macs of d-values.
-    let mut d_values: Vec<Vec<bool>> = vec![vec![]; buckets.len()];
-    let mut d_macs: Vec<Vec<Vec<Option<Mac>>>> = vec![vec![vec![]; buckets.len()]; p_max];
+    let mut d_values = vec![vec![]; buckets.len()];
+    let mut d_macs = vec![vec![vec![]; buckets.len()]; p_max];
 
     for j in 0..buckets.len() {
         let (_, y, _) = &buckets[j][0];
@@ -844,30 +851,33 @@ pub(crate) async fn check_dvalue(
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel
-            .send_single_to(p, "faand dvalue", &(&d_values, &d_macs[p]))
-            .await?;
+        let dvalue_msg: Vec<(Vec<bool>, Vec<Option<Mac>>)> = (0..buckets.len())
+            .map(|i| (d_values[i].clone(), d_macs[p][i].clone()))
+            .collect();
+        channel.send_to(p, "dvalue", &dvalue_msg).await?;
     }
-    let mut all_d_values: Vec<Vec<Vec<bool>>> = vec![vec![]; p_max];
-    let mut all_d_macs: Vec<Vec<Vec<Option<Mac>>>> = vec![vec![]; p_max];
+
+    let mut dvalue_msg_p: Vec<Vec<(Vec<bool>, Vec<Option<Mac>>)>> =
+        vec![vec![(vec![], vec![]); buckets.len()]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        (all_d_values[p], all_d_macs[p]) = channel.recv_single_from(p, "faand dvalue").await?;
+        dvalue_msg_p[p] = channel.recv_from(p, "dvalue").await?;
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {
         for (j, dval) in d_values.iter_mut().enumerate().take(buckets.len()) {
+            let (d_value_p, d_macs_p) = &dvalue_msg_p[p][j];
             let Some((_, y0key)) = buckets[j][0].1 .1 .0[p] else {
                 return Err(Error::MissingMacKey);
             };
-            for (i, d) in dval.iter_mut().enumerate().take(all_d_macs[p][j].len()) {
-                let Some(dmac) = all_d_macs[p][j][i] else {
+            for (i, d) in dval.iter_mut().enumerate().take(d_macs_p.len()) {
+                let Some(dmac) = d_macs_p[i] else {
                     return Err(Error::MissingMacKey);
                 };
                 let Some((_, ykey)) = buckets[j][i + 1].1 .1 .0[p] else {
                     return Err(Error::MissingMacKey);
                 };
-                if (all_d_values[p][j][i] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
-                    || (!all_d_values[p][j][i] && dmac.0 != y0key.0 ^ ykey.0)
+                if (d_value_p[i] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
+                    || (!d_value_p[i] && dmac.0 != y0key.0 ^ ykey.0)
                 {
                     println!(
                         "{:?} {:?} {:?}",
@@ -877,7 +887,7 @@ pub(crate) async fn check_dvalue(
                     );
                     return Err(Error::AANDWrongDMAC);
                 }
-                *d ^= all_d_values[p][j][i];
+                *d ^= d_value_p[i];
             }
         }
     }
