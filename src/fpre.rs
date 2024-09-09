@@ -18,6 +18,8 @@ pub enum Error {
     AndSharesMismatch(usize, usize),
     /// An error occurred while trying to communicate over the channel.
     Channel(channel::Error),
+    /// A message was sent, but it contained no data.
+    EmptyMsg,
 }
 
 impl std::error::Error for Error {}
@@ -29,6 +31,7 @@ impl std::fmt::Display for Error {
             Error::RandomSharesMismatch(a, b) => write!(f, "Unequal number of shares: {a} vs {b}"),
             Error::AndSharesMismatch(a, b) => write!(f, "Unequal number of AND shares: {a} vs {b}"),
             Error::Channel(e) => write!(f, "Channel error: {e:?}"),
+            Error::EmptyMsg => f.write_str("The message sent by the other party was empty"),
         }
     }
 }
@@ -46,22 +49,26 @@ where
 {
     let mut channel = MsgChannel(channel);
     for p in 0..parties {
-        channel.recv_from(p, "delta (fpre)").await?;
+        channel.recv_from::<()>(p, "delta (fpre)").await?;
     }
     let mut deltas = vec![];
     for p in 0..parties {
         let delta = Delta(random());
-        channel.send_to(p, "delta (fpre)", &delta).await?;
+        channel.send_to(p, "delta (fpre)", &[delta]).await?;
         deltas.push(delta);
     }
 
     let mut num_shares = 0;
     for p in 0..parties {
-        let r: u32 = channel.recv_from(p, "random shares (fpre)").await?;
+        let r: u32 = channel
+            .recv_from(p, "random shares (fpre)")
+            .await?
+            .pop()
+            .ok_or_else(|| Error::EmptyMsg)?;
         if num_shares > 0 && num_shares != r {
             let e = Error::RandomSharesMismatch(num_shares, r);
             for p in 0..parties {
-                channel.send_to(p, "error", &format!("{e:?}")).await?;
+                channel.send_to(p, "error", &[format!("{e:?}")]).await?;
             }
             return Err(e);
         }
@@ -105,7 +112,7 @@ where
             if num_shares != and_shares.len() {
                 let e = Error::AndSharesMismatch(num_shares, and_shares.len());
                 for p in 0..parties {
-                    channel.send_to(p, "error", &format!("{e:?}")).await?;
+                    channel.send_to(p, "error", &[format!("{e:?}")]).await?;
                 }
                 return Err(e);
             }
@@ -140,7 +147,7 @@ where
     if has_cheated {
         let e = Error::CheatingDetected;
         for p in 0..parties {
-            channel.send_to(p, "error", &format!("{e:?}")).await?;
+            channel.send_to(p, "error", &[format!("{e:?}")]).await?;
         }
         return Err(e);
     }
@@ -325,8 +332,8 @@ impl Auth {
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::{Error, MsgChannel, SimpleChannel},
-        fpre::{fpre, Auth, Delta, Share},
+        channel::{MsgChannel, SimpleChannel},
+        fpre::{fpre, Auth, Delta, Error, Share},
     };
 
     #[tokio::test]
@@ -339,14 +346,22 @@ mod tests {
         let mut a = MsgChannel(channels.pop().unwrap());
 
         // init:
-        a.send_to(fpre_party, "delta", &()).await?;
-        b.send_to(fpre_party, "delta", &()).await?;
-        let delta_a: Delta = a.recv_from(fpre_party, "delta").await?;
-        let delta_b: Delta = b.recv_from(fpre_party, "delta").await?;
+        a.send_to::<()>(fpre_party, "delta", &[]).await?;
+        b.send_to::<()>(fpre_party, "delta", &[]).await?;
+        let delta_a: Delta = a
+            .recv_from(fpre_party, "delta")
+            .await?
+            .pop()
+            .ok_or_else(|| Error::EmptyMsg)?;
+        let delta_b: Delta = b
+            .recv_from(fpre_party, "delta")
+            .await?
+            .pop()
+            .ok_or_else(|| Error::EmptyMsg)?;
 
         // random r1, r2, s1, s2:
-        a.send_to(fpre_party, "random shares", &2_u32).await?;
-        b.send_to(fpre_party, "random shares", &2_u32).await?;
+        a.send_to(fpre_party, "random shares", &[2_u32]).await?;
+        b.send_to(fpre_party, "random shares", &[2_u32]).await?;
 
         let mut r = a
             .recv_vec_from(fpre_party, "random shares", 2)
@@ -395,14 +410,22 @@ mod tests {
             let mut a = MsgChannel(channels.pop().unwrap());
 
             // init:
-            a.send_to(fpre_party, "delta", &()).await?;
-            b.send_to(fpre_party, "delta", &()).await?;
-            let delta_a: Delta = a.recv_from(fpre_party, "delta").await?;
-            let delta_b: Delta = b.recv_from(fpre_party, "delta").await?;
+            a.send_to::<()>(fpre_party, "delta", &[]).await?;
+            b.send_to::<()>(fpre_party, "delta", &[]).await?;
+            let delta_a: Delta = a
+                .recv_from(fpre_party, "delta")
+                .await?
+                .pop()
+                .ok_or_else(|| Error::EmptyMsg)?;
+            let delta_b: Delta = b
+                .recv_from(fpre_party, "delta")
+                .await?
+                .pop()
+                .ok_or_else(|| Error::EmptyMsg)?;
 
             // random r1, r2, s1, s2:
-            a.send_to(fpre_party, "random shares", &2_u32).await?;
-            b.send_to(fpre_party, "random shares", &2_u32).await?;
+            a.send_to(fpre_party, "random shares", &[2_u32]).await?;
+            b.send_to(fpre_party, "random shares", &[2_u32]).await?;
 
             let mut r = a
                 .recv_vec_from::<Share>(fpre_party, "random shares", 2)
@@ -427,12 +450,12 @@ mod tests {
                 b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
                     .await?;
                 let Share(r3, Auth(mac_r3_key_s3)) = a
-                    .recv_from::<Vec<Share>>(fpre_party, "AND shares")
+                    .recv_from::<Share>(fpre_party, "AND shares")
                     .await?
                     .pop()
                     .unwrap();
                 let Share(s3, Auth(mac_s3_key_r3)) = b
-                    .recv_from::<Vec<Share>>(fpre_party, "AND shares")
+                    .recv_from::<Share>(fpre_party, "AND shares")
                     .await?
                     .pop()
                     .unwrap();
@@ -454,11 +477,11 @@ mod tests {
                     .await?;
                 assert_eq!(
                     a.recv_from::<String>(fpre_party, "AND shares").await?,
-                    "CheatingDetected"
+                    vec!["CheatingDetected".to_string()]
                 );
                 assert_eq!(
                     b.recv_from::<String>(fpre_party, "AND shares").await?,
-                    "CheatingDetected"
+                    vec!["CheatingDetected".to_string()]
                 );
             } else if i == 2 {
                 // A would need knowledge of B's key and delta to corrupt the shared secret:
@@ -474,15 +497,11 @@ mod tests {
                 b.send_to(fpre_party, "AND shares", &vec![(auth_s1, auth_s2)])
                     .await?;
                 assert_eq!(
-                    a.recv_from::<Vec<Share>>(fpre_party, "AND shares")
-                        .await?
-                        .len(),
+                    a.recv_from::<Share>(fpre_party, "AND shares").await?.len(),
                     1
                 );
                 assert_eq!(
-                    b.recv_from::<Vec<Share>>(fpre_party, "AND shares")
-                        .await?
-                        .len(),
+                    b.recv_from::<Share>(fpre_party, "AND shares").await?.len(),
                     1
                 );
             }

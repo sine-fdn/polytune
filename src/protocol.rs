@@ -88,6 +88,8 @@ pub enum Error {
     MissingOutputParties,
     /// The output parties list contains an invalid index.
     InvalidOutputParty(usize),
+    /// A message was sent, but it contained no data.
+    EmptyMsg,
 }
 
 impl std::error::Error for Error {}
@@ -106,6 +108,7 @@ impl std::fmt::Display for Error {
             }
             Error::MissingOutputParties => write!(f, "Output parties are missing"),
             Error::InvalidOutputParty(p) => write!(f, "Party {p} is not a valid output party"),
+            Error::EmptyMsg => f.write_str("The message sent by the other party was empty"),
         }
     }
 }
@@ -335,8 +338,12 @@ pub async fn mpc(
 
     let mut delta: Delta = Delta(0);
     if trusted {
-        channel.send_to(p_fpre, "delta", &()).await?;
-        delta = channel.recv_from(p_fpre, "delta").await?;
+        channel.send_to::<()>(p_fpre, "delta", &[]).await?;
+        delta = channel
+            .recv_from(p_fpre, "delta")
+            .await?
+            .pop()
+            .ok_or_else(|| Error::EmptyMsg)?;
     } else {
         for p in (0..p_max).filter(|p| *p != p_own) {
             let (d, u, b, w) = generate_ots(secret_bits_ot + 3 * faand_len).await.unwrap();
@@ -360,7 +367,7 @@ pub async fn mpc(
 
     if trusted {
         channel
-            .send_to(p_fpre, "random shares", &(secret_bits as u32))
+            .send_to(p_fpre, "random shares", &[secret_bits as u32])
             .await?;
         random_shares = channel.recv_from(p_fpre, "random shares").await?;
     } else {

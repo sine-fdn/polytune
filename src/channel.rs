@@ -57,11 +57,44 @@ pub(crate) struct MsgChannel<C: Channel>(pub C);
 
 impl<C: Channel> MsgChannel<C> {
     /// Serializes and sends an MPC message to the other party.
-    pub(crate) async fn send_to(
+    pub(crate) async fn send_single_to<S: Serialize>(
         &mut self,
         party: usize,
         phase: &str,
-        msg: &impl Serialize,
+        msg: &S,
+    ) -> Result<(), Error> {
+        let msg = bincode::serialize(msg).map_err(|e| Error {
+            phase: format!("sending {phase}"),
+            reason: ErrorKind::SerdeError(format!("{e:?}")),
+        })?;
+        self.0.send_bytes_to(party, msg).await.map_err(|e| Error {
+            phase: phase.to_string(),
+            reason: ErrorKind::SendError(format!("{e:?}")),
+        })
+    }
+
+    /// Receives and deserializes an MPC message from the other party.
+    pub(crate) async fn recv_single_from<T: DeserializeOwned>(
+        &mut self,
+        party: usize,
+        phase: &str,
+    ) -> Result<T, Error> {
+        let msg = self.0.recv_bytes_from(party).await.map_err(|e| Error {
+            phase: phase.to_string(),
+            reason: ErrorKind::RecvError(format!("{e:?}")),
+        })?;
+        bincode::deserialize(&msg).map_err(|e| Error {
+            phase: format!("receiving {phase}"),
+            reason: ErrorKind::SerdeError(format!("{e:?}")),
+        })
+    }
+
+    /// Serializes and sends an MPC message to the other party.
+    pub(crate) async fn send_to<S: Serialize>(
+        &mut self,
+        party: usize,
+        phase: &str,
+        msg: &[S],
     ) -> Result<(), Error> {
         let msg = bincode::serialize(msg).map_err(|e| Error {
             phase: format!("sending {phase}"),
@@ -78,7 +111,7 @@ impl<C: Channel> MsgChannel<C> {
         &mut self,
         party: usize,
         phase: &str,
-    ) -> Result<T, Error> {
+    ) -> Result<Vec<T>, Error> {
         let msg = self.0.recv_bytes_from(party).await.map_err(|e| Error {
             phase: phase.to_string(),
             reason: ErrorKind::RecvError(format!("{e:?}")),
