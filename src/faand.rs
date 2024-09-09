@@ -224,46 +224,45 @@ pub(crate) async fn fabitn(
     }
 
     // Step 3 including verification of macs and keys.
-    let mut fabitn_msg: Vec<(bool, u128, Vec<bool>)> = vec![(false, 0, vec![]); two_rho];
-
-    fabitn_msg.iter_mut().for_each(|msg| {
-        msg.2 = (0..len_abit).map(|_| shared_rng.gen()).collect();
-        msg.0 = x
+    let mut rbits: Vec<Vec<bool>> = Vec::with_capacity(two_rho);
+    let mut xjs = Vec::with_capacity(two_rho);
+    let mut macint: Vec<Vec<u128>> = vec![vec![0; two_rho]; p_max];
+    for i in 0..two_rho {
+        let r: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
+        let xj = x
             .iter()
-            .zip(&msg.2)
+            .zip(&r)
             .map(|(&xb, &rb)| xb & rb)
             .fold(false, |acc, val| acc ^ val);
-    });
-
-    let mut macint: Vec<Vec<u128>> = vec![vec![0; two_rho]; p_max];
-    for (i, msg) in fabitn_msg.iter().enumerate() {
         for p in (0..p_max).filter(|&p| p != p_own) {
-            for (j, &rbit) in msg.2.iter().take(len_abit).enumerate() {
+            for (j, &rbit) in r.iter().enumerate() {
                 if rbit {
                     macint[p][i] ^= xmacs[p][j];
                 }
             }
         }
+        rbits.push(r);
+        xjs.push(xj);
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {
-        fabitn_msg.iter_mut().enumerate().for_each(|(i, msg)| {
-            msg.1 = macint[p][i];
-        });
-        channel.send_to(p, "fabitn", &fabitn_msg).await?;
+        let mut msg = Vec::with_capacity(two_rho);
+        for (j, xj) in xjs.iter().copied().enumerate() {
+            msg.push((xj, macint[p][j]));
+        }
+        channel.send_to(p, "fabitn", &msg).await?;
     }
 
-    let mut fabitn_msg_p: Vec<Vec<(bool, u128, Vec<bool>)>> =
-        vec![vec![(false, 0, vec![]); two_rho]; p_max];
+    let mut fabitn_msg_p: Vec<Vec<(bool, u128)>> = vec![vec![(false, 0); two_rho]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
         fabitn_msg_p[p] = channel.recv_from(p, "fabitn").await?;
     }
 
-    for ind in 0..two_rho {
+    for j in 0..two_rho {
         for p in (0..p_max).filter(|p| *p != p_own) {
-            let (xj, macint, randbits) = &fabitn_msg_p[p][ind];
+            let (xj, macint) = &fabitn_msg_p[p][j];
             let mut keyint: u128 = 0;
-            for (i, rbit) in randbits.iter().enumerate().take(len_abit) {
+            for (i, rbit) in rbits[j].iter().enumerate() {
                 if *rbit {
                     keyint ^= xkeys[p][i];
                 }
