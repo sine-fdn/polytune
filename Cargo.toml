@@ -20,14 +20,19 @@ serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["full"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
+smallvec = "1.13.2"
 
 # mpz-ot
 futures = "0.3"
 rstest = "0.12"
 serio = "0.1"
 
-mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz.git", features = ["test-utils"], rev = "84399bd" }
-mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz.git", features = ["ideal"], rev = "84399bd" }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz.git", features = [
+    "test-utils",
+], rev = "84399bd" }
+mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz.git", features = [
+    "ideal",
+], rev = "84399bd" }
 mpz-ot-core = { git = "https://github.com/privacy-scaling-explorations/mpz.git", rev = "84399bd" }
 mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz.git", rev = "84399bd" }
 

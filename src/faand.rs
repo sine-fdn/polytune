@@ -5,6 +5,7 @@ use blake3::Hasher;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
+use smallvec::{smallvec, SmallVec};
 
 use crate::{
     channel::{self, recv_from, send_to, Channel},
@@ -676,7 +677,7 @@ pub(crate) async fn faand_precomp(
     let triples = transform(xbits, ybits, &zbits, lprime);
 
     // Step 2 assign objects to buckets.
-    let mut buckets: Vec<Vec<(Share, Share, Share)>> = vec![vec![]; length];
+    let mut buckets: Vec<SmallVec<[(Share, Share, Share); 3]>> = vec![smallvec![]; length];
 
     for obj in triples {
         let mut i: usize = shared_rng.gen_range(0..buckets.len());
@@ -797,7 +798,7 @@ pub(crate) async fn faand(
 pub(crate) fn combine_bucket(
     p_own: usize,
     p_max: usize,
-    bucket: Vec<(Share, Share, Share)>,
+    bucket: SmallVec<[(Share, Share, Share); 3]>,
     d_values: Vec<bool>,
 ) -> Result<(Share, Share, Share), Error> {
     if bucket.is_empty() {
@@ -820,7 +821,7 @@ pub(crate) async fn check_dvalue(
     channel: &mut impl Channel,
     p_own: usize,
     p_max: usize,
-    buckets: &[Vec<(Share, Share, Share)>],
+    buckets: &[SmallVec<[(Share, Share, Share); 3]>],
     delta: Delta,
 ) -> Result<Vec<Vec<bool>>, Error> {
     // Step (a) compute and check macs of d-values.
