@@ -224,31 +224,26 @@ pub(crate) async fn fabitn(
     }
 
     // Step 3 including verification of macs and keys.
-    let mut rbits: Vec<Vec<bool>> = Vec::with_capacity(two_rho);
-    let mut xjs = Vec::with_capacity(two_rho);
-    let mut macint: Vec<Vec<u128>> = vec![vec![0; two_rho]; p_max];
-    for i in 0..two_rho {
+    let (rbits, xjs): (Vec<_>, Vec<_>) = (0..two_rho)
+    .map(|_| {
         let r: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
-        let xj = x
-            .iter()
+        let xj = x.iter()
             .zip(&r)
-            .map(|(&xb, &rb)| xb & rb)
-            .fold(false, |acc, val| acc ^ val);
-        for p in (0..p_max).filter(|&p| p != p_own) {
-            for (j, &rbit) in r.iter().enumerate() {
-                if rbit {
-                    macint[p][i] ^= xmacs[p][j];
-                }
-            }
-        }
-        rbits.push(r);
-        xjs.push(xj);
-    }
+            .fold(false, |acc, (&xb, &rb)| acc ^ (xb & rb));
+        (r, xj)
+    })
+    .unzip();
 
     for p in (0..p_max).filter(|p| *p != p_own) {
         let mut msg = Vec::with_capacity(two_rho);
-        for (j, xj) in xjs.iter().copied().enumerate() {
-            msg.push((xj, macint[p][j]));
+        for (r, xj) in rbits.iter().zip(xjs.iter()) {
+            let mut macint = 0;
+            for (j, &rbit) in r.iter().enumerate() {
+                if rbit {
+                    macint ^= xmacs[p][j];
+                }
+            }
+            msg.push((*xj, macint));
         }
         channel.send_to(p, "fabitn", &msg).await?;
     }
