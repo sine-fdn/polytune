@@ -327,7 +327,7 @@ impl Auth {
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::{recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
+        channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
         fpre::{fpre, Auth, Delta, Error, Share},
     };
 

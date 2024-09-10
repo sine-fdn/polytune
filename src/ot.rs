@@ -1,249 +1,108 @@
-//! Ferret OT implementation from the MPZ framework
+//! KOS OT implementation from the Swanky framework
+use ocelot::ot::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender};
 
-use futures::TryFutureExt as _;
-use serio::channel::{duplex, MemoryDuplex};
-
-use mpz_common::executor::STExecutor;
-use mpz_core::{lpn::LpnParameters, Block};
-use mpz_ot::{
-    ferret::{FerretConfig, Receiver, Sender},
-    ideal::cot::{ideal_rcot, IdealCOTReceiver, IdealCOTSender},
-    Correlation, OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver, RandomCOTSender,
-    TransferId,
+use std::{
+    io::{BufReader, BufWriter},
+    os::unix::net::UnixStream,
 };
-use mpz_ot_core::ferret::LpnType;
 
-// l = n - k = 8380
-const LPN_PARAMETERS_TEST: LpnParameters = LpnParameters {
-    n: 9600,
-    k: 1220,
-    t: 600,
-};
+use scuttlebutt::{AesRng, Block, Channel};
 
 /// Transform Block to u128
 pub fn block_to_u128(inp: Block) -> u128 {
-    u128::from_le_bytes(inp.to_bytes())
+    let array: [u8; 16] = inp.into();
+    let mut value: u128 = 0;
+    for &byte in array.iter() {
+        value = (value << 8) | byte as u128;
+    }
+    value
 }
 
 /// Transform u128 to Block
 pub fn u128_to_block(inp: u128) -> Block {
-    Block::new(inp.to_le_bytes())
-}
-
-pub(crate) async fn mpz_ot_sender(
-    count: usize,
-    ctx_sender: &mut STExecutor<MemoryDuplex>,
-    rcot_sender: IdealCOTSender,
-) -> Result<(TransferId, Vec<Block>, u128), OTError> {
-    let lpn_type: LpnType = LpnType::Regular;
-
-    let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-
-    let mut sender = Sender::new(config, rcot_sender);
-
-    sender.setup(ctx_sender).map_err(OTError::from).await?;
-
-    // Extend once.
-    let num = LPN_PARAMETERS_TEST.k;
-    sender
-        .extend(ctx_sender, num)
-        .map_err(OTError::from)
-        .await?;
-
-    // Extend twice.
-    sender
-        .extend(ctx_sender, count)
-        .map_err(OTError::from)
-        .await?;
-
-    let RCOTSenderOutput {
-        id: sender_id,
-        msgs: u,
-    } = sender.send_random_correlated(ctx_sender, count).await?;
-
-    Ok((sender_id, u, block_to_u128(sender.delta())))
-}
-
-pub(crate) async fn mpz_ot_receiver(
-    count: usize,
-    ctx_receiver: &mut STExecutor<MemoryDuplex>,
-    rcot_receiver: IdealCOTReceiver,
-) -> Result<(TransferId, Vec<bool>, Vec<Block>), OTError> {
-    let lpn_type: LpnType = LpnType::Regular;
-
-    let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-
-    let mut receiver = Receiver::new(config, rcot_receiver);
-
-    receiver.setup(ctx_receiver).map_err(OTError::from).await?;
-
-    // extend once.
-    let num = LPN_PARAMETERS_TEST.k;
-    receiver
-        .extend(ctx_receiver, num)
-        .map_err(OTError::from)
-        .await?;
-
-    // extend twice
-    receiver
-        .extend(ctx_receiver, count)
-        .map_err(OTError::from)
-        .await?;
-
-    let RCOTReceiverOutput {
-        id: receiver_id,
-        choices: b,
-        msgs: w,
-    } = receiver
-        .receive_random_correlated(ctx_receiver, count)
-        .await?;
-
-    Ok((receiver_id, b, w))
-}
-
-pub(crate) async fn generate_ots(
-    count: usize,
-) -> Result<(u128, Vec<u128>, Vec<bool>, Vec<u128>), OTError> {
-    let (io0, io1) = duplex(8);
-    let mut ctx_receiver = STExecutor::new(io0);
-    let mut ctx_sender = STExecutor::new(io1);
-
-    let (rcot_sender, rcot_receiver) = ideal_rcot();
-
-    let sender_task =
-        tokio::spawn(async move { mpz_ot_sender(count, &mut ctx_sender, rcot_sender).await });
-
-    let receiver_task =
-        tokio::spawn(async move { mpz_ot_receiver(count, &mut ctx_receiver, rcot_receiver).await });
-
-    // Await the results of both tasks
-    let sender_result = sender_task.await;
-    let receiver_result = receiver_task.await;
-
-    // Handle errors from task execution
-    let (_sender_id, u, delta) = match sender_result {
-        Ok(Ok(result)) => result,
-        Ok(Err(e)) => {
-            return Err(e);
-        }
-        Err(e) => {
-            eprintln!("Sender task join error: {:?}", e);
-            return Ok((0, vec![], vec![], vec![]));
-        }
-    };
-
-    let (_receiver_id, b, w) = match receiver_result {
-        Ok(Ok(result)) => result,
-        Ok(Err(e)) => {
-            return Err(e);
-        }
-        Err(e) => {
-            eprintln!("Receiver task join error: {:?}", e);
-            return Ok((0, vec![], vec![], vec![]));
-        }
-    };
-
-    let mut ublock: Vec<u128> = vec![0; u.len()];
-    for i in 0..u.len() {
-        ublock[i] = block_to_u128(u[i]);
+    let mut array: [u8; 16] = [0; 16];
+    let mut value = inp;
+    for byte in array.iter_mut().rev() {
+        *byte = (value & 0xff) as u8;
+        value >>= 8;
     }
-    let mut wblock: Vec<u128> = vec![0; w.len()];
-    for i in 0..w.len() {
-        wblock[i] = block_to_u128(w[i]);
+    Block::from(array)
+}
+
+pub(crate) fn kos_ot_sender(sender: UnixStream, deltas: Vec<Block>) -> Vec<(Block, Block)> {
+    let mut rng = AesRng::new();
+    let reader = BufReader::new(sender.try_clone().unwrap());
+    let writer = BufWriter::new(sender);
+    let mut channel = Channel::new(reader, writer);
+    let mut ot = ot::KosSender::init(&mut channel, &mut rng).unwrap();
+
+    ot.send_correlated(&mut channel, &deltas, &mut rng).unwrap()
+}
+
+pub(crate) fn kos_ot_receiver(receiver: UnixStream, bs: Vec<bool>) -> Vec<Block> {
+    let mut rng = AesRng::new();
+    let reader = BufReader::new(receiver.try_clone().unwrap());
+    let writer = BufWriter::new(receiver);
+    let mut channel = Channel::new(reader, writer);
+    let mut ot = ot::KosReceiver::init(&mut channel, &mut rng).unwrap();
+
+    ot.receive_correlated(&mut channel, &bs, &mut rng).unwrap()
+}
+
+pub(crate) fn generate_kosots(deltas: Vec<Block>, bs: Vec<bool>) -> (Vec<(u128, u128)>, Vec<u128>) {
+    let (sender, receiver) = UnixStream::pair().unwrap();
+
+    let sender_task = std::thread::spawn(move || kos_ot_sender(sender, deltas));
+
+    let recver_out_block = kos_ot_receiver(receiver, bs.clone());
+    let sender_out_block = sender_task.join().unwrap();
+
+    let mut recver_out: Vec<u128> = vec![];
+    for i in recver_out_block.iter() {
+        recver_out.push(block_to_u128(*i));
+        println!("Recver: {:?}", block_to_u128(*i));
     }
-
-    /*for i in 0..count {
-        println!("b     {:?}", b[i]);
-        println!("u     {:?}", ublock[i]);
-        println!("w     {:?}", wblock[i]);
-    }*/
-
-    Ok((delta, ublock, b, wblock))
+    let mut sender_out: Vec<(u128, u128)> = vec![];
+    for (i, j) in sender_out_block.iter() {
+        sender_out.push((block_to_u128(*i), block_to_u128(*j)));
+    }
+    (sender_out, recver_out)
 }
 
 #[cfg(test)]
 mod tests {
-    use futures::TryFutureExt as _;
-    use rstest::*;
-    use std::time::Instant;
-    use tokio::try_join;
+    use crate::faand::Error;
 
-    use mpz_common::executor::test_st_executor;
-    use mpz_core::lpn::LpnParameters;
-    use mpz_ot::{
-        ferret::{FerretConfig, Receiver, Sender},
-        ideal::cot::ideal_rcot,
-        Correlation, OTError, RCOTReceiverOutput, RCOTSenderOutput, RandomCOTReceiver,
-        RandomCOTSender,
-    };
-    use mpz_ot_core::{ferret::LpnType, test::assert_cot};
+    use std::{os::unix::net::UnixStream, time::Instant};
 
-    // l = n - k = 8380
-    const LPN_PARAMETERS_TEST: LpnParameters = LpnParameters {
-        n: 9600,
-        k: 1220,
-        t: 600,
-    };
+    use scuttlebutt::Block;
 
-    #[rstest]
-    //#[case::uniform(LpnType::Uniform)]
-    #[case::regular(LpnType::Regular)]
-    #[tokio::test]
-    async fn test_ferret(#[case] lpn_type: LpnType) -> Result<(), OTError> {
-        let (mut ctx_sender, mut ctx_receiver) = test_st_executor(8);
+    use crate::ot::{kos_ot_receiver, kos_ot_sender};
 
-        let (rcot_sender, rcot_receiver) = ideal_rcot();
-
-        let config = FerretConfig::new(LPN_PARAMETERS_TEST, lpn_type);
-
-        let mut sender = Sender::new(config.clone(), rcot_sender);
-        let mut receiver = Receiver::new(config, rcot_receiver);
-
-        try_join!(
-            sender.setup(&mut ctx_sender).map_err(OTError::from),
-            receiver.setup(&mut ctx_receiver).map_err(OTError::from)
-        )?;
-
+    #[test]
+    fn test_kos() -> Result<(), Error> {
         let now = Instant::now();
 
-        // Extend once.
-        let count = LPN_PARAMETERS_TEST.k;
-        try_join!(
-            sender.extend(&mut ctx_sender, count).map_err(OTError::from),
-            receiver
-                .extend(&mut ctx_receiver, count)
-                .map_err(OTError::from)
-        )?;
+        let num_ots: usize = 10000;
 
-        // Extend twice.
-        let count = 100;
-        try_join!(
-            sender.extend(&mut ctx_sender, count).map_err(OTError::from),
-            receiver
-                .extend(&mut ctx_receiver, count)
-                .map_err(OTError::from)
-        )?;
+        let deltas: Vec<Block> = (0..num_ots).map(|_| rand::random::<Block>()).collect();
+        let bs: Vec<bool> = (0..num_ots).map(|_| rand::random::<bool>()).collect();
 
-        let (
-            RCOTSenderOutput {
-                id: sender_id,
-                msgs: u,
-            },
-            RCOTReceiverOutput {
-                id: receiver_id,
-                choices: b,
-                msgs: w,
-            },
-        ) = try_join!(
-            sender.send_random_correlated(&mut ctx_sender, count),
-            receiver.receive_random_correlated(&mut ctx_receiver, count)
-        )?;
+        let (sender, receiver) = UnixStream::pair().unwrap();
 
-        let elapsed = now.elapsed();
-        println!("Elapsed: {:.2?}", elapsed);
+        let sender_task = std::thread::spawn(move || kos_ot_sender(sender, deltas));
 
-        assert_eq!(sender_id, receiver_id);
-        assert_cot(sender.delta(), &b, &u, &w);
+        let recver_out = kos_ot_receiver(receiver, bs.clone());
+        let sender_out = sender_task.join().unwrap();
+
+        for i in 0..num_ots {
+            if bs[i] {
+                assert_eq!(recver_out[i], sender_out[i].1);
+            } else {
+                assert_eq!(recver_out[i], sender_out[i].0);
+            }
+        }
+        println!("Time: {:?}", now.elapsed());
 
         Ok(())
     }

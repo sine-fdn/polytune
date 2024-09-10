@@ -11,7 +11,7 @@ use crate::{
     faand::{self, bucket_size, faand, fashare, shared_rng, RHO},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
-    ot::generate_ots,
+    ot::{generate_kosots, u128_to_block},
 };
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
@@ -341,7 +341,10 @@ pub async fn mpc(
         p_max
     ];
 
-    let mut delta: Delta = Delta(0);
+    let delta: Delta;
+    let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
+        .map(|_| random())
+        .collect();
     if trusted {
         send_to::<()>(channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(channel, p_fpre, "delta")
@@ -349,16 +352,16 @@ pub async fn mpc(
             .pop()
             .ok_or(Error::EmptyMsg)?;
     } else {
+        delta = Delta(random());
         for p in (0..p_max).filter(|p| *p != p_own) {
-            let (d, u, b, w) = generate_ots(secret_bits_ot + 3 * faand_len).await.unwrap();
-            //println!("d, u, b, w = {:?} {:?} {:?} {:?} ", d, u, b, w);
-            sender_ot[p] = u; //sender is p_own, receiver p
-                              //send_to(channel,p, "ot", &(b, w)).await?;
-                              //receiver_ot[p] = recv_from(channel,p, "ot").await?;
-            receiver_ot[p] = (b, w);
-            delta = Delta(d);
+            let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
+            let (sender_out, recver_out) = generate_kosots(deltas, x.clone());
+            let sender: Vec<u128> = sender_out.iter().map(|(first, _)| *first).collect();
+            sender_ot[p] = sender; //sender is p_own, receiver p
+                                   //send_to(channel,p, "ot", &(b, w)).await?;
+                                   //receiver_ot[p] = recv_from(channel,p, "ot").await?;
+            receiver_ot[p] = (x.clone(), recver_out);
         }
-        //delta = Delta(random());
     }
 
     let random_shares: Vec<Share>;
@@ -373,9 +376,6 @@ pub async fn mpc(
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
         random_shares = recv_from(channel, p_fpre, "random shares").await?;
     } else {
-        let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
-            .map(|_| random())
-            .collect();
         rand_shares = fashare(
             channel,
             &mut x,
