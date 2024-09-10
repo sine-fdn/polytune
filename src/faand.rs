@@ -7,7 +7,7 @@ use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    channel::{self, Channel, MsgChannel},
+    channel::{self, recv_from, send_to, Channel},
     fpre::{Auth, Delta, Key, Mac, Share},
 };
 
@@ -69,7 +69,7 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
 
 /// Multi-party coin tossing to generate shared randomness.
 pub(crate) async fn shared_rng(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     p_own: usize,
     p_max: usize,
 ) -> Result<ChaCha20Rng, Error> {
@@ -79,13 +79,12 @@ pub(crate) async fn shared_rng(
     buf[16..].copy_from_slice(&r[1].to_be_bytes());
     let c = commit(&buf);
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "RNG", &[(c, buf)]).await?;
+        send_to(channel, p, "RNG", &[(c, buf)]).await?;
     }
     let mut commitments = vec![Commitment([0; 32]); p_max];
     let mut bufs: Vec<[u8; 32]> = vec![[0; 32]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let (commitment, buffer): (Commitment, [u8; 32]) = channel
-            .recv_from(p, "RNG")
+        let (commitment, buffer): (Commitment, [u8; 32]) = recv_from(channel, p, "RNG")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
@@ -111,7 +110,7 @@ pub(crate) async fn shared_rng(
 /// whereas the receiver receives a MAC, which is the key XOR the bit times delta. This protocol
 /// performs multiple of these at once.
 pub(crate) async fn fabit(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     p_to: usize,
     delta: Delta,
     c: &[bool], //xbits
@@ -124,9 +123,9 @@ pub(crate) async fn fabit(
             for i in 0..b.len() {
                 k[i] = b[i] ^ c[i];
             }
-            channel.send_to(p_to, "fabit bits", &k).await?;
+            send_to(channel, p_to, "fabit bits", &k).await?;
 
-            let y0y1: Vec<(u128, u128)> = channel.recv_from(p_to, "fabit y0y1").await?;
+            let y0y1: Vec<(u128, u128)> = recv_from(channel, p_to, "fabit y0y1").await?;
 
             let mut xc: Vec<u128> = vec![0; rb.len()];
             for (i, (y0, y1)) in y0y1.into_iter().enumerate() {
@@ -145,8 +144,8 @@ pub(crate) async fn fabit(
                     (x0, x0 ^ delta.0)
                 })
                 .collect();
-            let _kbits: Vec<bool> = channel.recv_from(p_to, "fabit bits").await?;
-            channel.send_to(p_to, "fabit y0y1", &x0x1).await?;
+            let _kbits: Vec<bool> = recv_from(channel, p_to, "fabit bits").await?;
+            send_to(channel, p_to, "fabit y0y1", &x0x1).await?;
 
             Ok(x0x1.into_iter().map(|(x0, _)| x0).collect())
         }
@@ -159,7 +158,7 @@ pub(crate) async fn fabit(
 /// parties.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn fabitn(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     x: &mut Vec<bool>,
     p_own: usize,
     p_max: usize,
@@ -243,12 +242,12 @@ pub(crate) async fn fabitn(
             }
             msg.push((*xj, macint));
         }
-        channel.send_to(p, "fabitn", &msg).await?;
+        send_to(channel, p, "fabitn", &msg).await?;
     }
 
     let mut fabitn_msg_p: Vec<Vec<(bool, u128)>> = vec![vec![(false, 0); two_rho]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        fabitn_msg_p[p] = channel.recv_from(p, "fabitn").await?;
+        fabitn_msg_p[p] = recv_from(channel, p, "fabitn").await?;
     }
 
     for (j, rbits) in rbits.iter().enumerate() {
@@ -288,7 +287,7 @@ pub(crate) async fn fabitn(
 /// Random bit strings are picked and random authenticated shares are distributed to the parties.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn fashare(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     x: &mut Vec<bool>,
     p_own: usize,
     p_max: usize,
@@ -343,15 +342,16 @@ pub(crate) async fn fashare(
 
     // 3/(b) After receiving all commitments, Pi broadcasts decommitment for macs.
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel
-            .send_to(p, "fashare commitverify", &own_commitments)
-            .await?;
+        send_to(channel, p, "fashare commitverify", &own_commitments).await?;
     }
     let mut commitments = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        commitments[p] = channel
-            .recv_from::<(Commitment, Commitment, Commitment, Vec<u8>)>(p, "fashare commitverify")
-            .await?;
+        commitments[p] = recv_from::<(Commitment, Commitment, Commitment, Vec<u8>)>(
+            channel,
+            p,
+            "fashare commitverify",
+        )
+        .await?;
     }
     commitments[p_own] = own_commitments;
 
@@ -369,11 +369,11 @@ pub(crate) async fn fashare(
         }
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel.send_to(p, "fashare bitcom", &xorkeysbit).await?;
+        send_to(channel, p, "fashare bitcom", &xorkeysbit).await?;
     }
     let mut xorkeysbitp: Vec<Vec<u128>> = vec![vec![0; RHO]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        xorkeysbitp[p] = channel.recv_from(p, "fashare bitcom").await?;
+        xorkeysbitp[p] = recv_from(channel, p, "fashare bitcom").await?;
     }
 
     // 3/(d) consistency check of macs.
@@ -420,7 +420,7 @@ pub(crate) async fn fashare(
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
 pub(crate) async fn fhaand(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     p_own: usize,
     p_max: usize,
     delta: Delta,
@@ -448,10 +448,10 @@ pub(crate) async fn fhaand(
             h0h1[l].1 = lsb1 ^ s ^ y[l];
             v[l] ^= s;
         }
-        channel.send_to(p, "haand", &h0h1).await?;
+        send_to(channel, p, "haand", &h0h1).await?;
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let h0h1: Vec<(bool, bool)> = channel.recv_from(p, "haand").await?;
+        let h0h1: Vec<(bool, bool)> = recv_from(channel, p, "haand").await?;
         for l in 0..length {
             let Some((xmac, _)) = x[l].1 .0[p] else {
                 return Err(Error::MissingMacKey);
@@ -494,7 +494,7 @@ pub(crate) fn hash128(input: u128) -> u128 {
 /// x and y values equals to the XOR of the z values.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn flaand(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     xbits: &[Share],
     ybits: &[Share],
     rbits: &[Share],
@@ -559,13 +559,13 @@ pub(crate) async fn flaand(
             uij[l][p] = hash128(xkey.0 ^ delta.0) ^ xkeys_phi[p][l] ^ *phie;
             flaand_msg[l].1[p] = uij[l][p];
         }
-        channel.send_to(p, "flaand_vec", &flaand_msg).await?;
+        send_to(channel, p, "flaand_vec", &flaand_msg).await?;
     }
     let mut xmacs_phi: Vec<Vec<u128>> = vec![vec![0; length]; p_max];
     let mut flaand_msg_p: Vec<Vec<(bool, Vec<u128>)>> =
         vec![vec![(false, vec![0; p_max]); length]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        flaand_msg_p[p] = channel.recv_from(p, "flaand_vec").await?;
+        flaand_msg_p[p] = recv_from(channel, p, "flaand_vec").await?;
         for (l, xbit) in xbits.iter().enumerate().take(length) {
             let Some((xmac, _)) = xbits[l].1 .0[p] else {
                 return Err(Error::MissingMacKey);
@@ -598,15 +598,13 @@ pub(crate) async fn flaand(
         hash_comm_own[l].1 = commit(&hash_comm_own[l].0.to_be_bytes());
     }
     for p in (0..p_max).filter(|p| *p != p_own) {
-        channel
-            .send_to(p, "flaand hashcomm", &hash_comm_own)
-            .await?;
+        send_to(channel, p, "flaand hashcomm", &hash_comm_own).await?;
     }
 
     let mut hash_comm: Vec<Vec<(u128, Commitment)>> =
         vec![vec![(0, Commitment([0; 32])); length]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        hash_comm[p] = channel.recv_from(p, "flaand hashcomm").await?;
+        hash_comm[p] = recv_from(channel, p, "flaand hashcomm").await?;
     }
 
     let mut xorhash = hash_comm_own; // XOR for all parties, including p_own
@@ -657,7 +655,7 @@ fn transform(x: &[Share], y: &[Share], z: &[Share], length: usize) -> Vec<(Share
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand_precomp(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     p_own: usize,
     p_max: usize,
     circuit_size: usize,
@@ -709,7 +707,7 @@ pub(crate) async fn faand_precomp(
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     bits_rand: Vec<(Share, Share)>,
     p_own: usize,
     p_max: usize,
@@ -761,13 +759,12 @@ pub(crate) async fn faand(
             *emac = emacs[i];
             *fmac = fmacs[i];
         }
-        channel.send_to(p, "faand", &ef_with_macs).await?;
+        send_to(channel, p, "faand", &ef_with_macs).await?;
     }
     let mut faand_vec = vec![vec![(false, false, None, None); vectriples.len()]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        faand_vec[p] = channel
-            .recv_from::<(bool, bool, Option<Mac>, Option<Mac>)>(p, "faand")
-            .await?;
+        faand_vec[p] =
+            recv_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, p, "faand").await?;
     }
     ef_with_macs
         .iter_mut()
@@ -820,7 +817,7 @@ pub(crate) fn combine_bucket(
 
 /// Check and return d-values for a vector of shares.
 pub(crate) async fn check_dvalue(
-    channel: &mut MsgChannel<impl Channel>,
+    channel: &mut impl Channel,
     p_own: usize,
     p_max: usize,
     buckets: &[Vec<(Share, Share, Share)>],
@@ -851,14 +848,12 @@ pub(crate) async fn check_dvalue(
         let dvalue_msg: Vec<(Vec<bool>, Vec<Option<Mac>>)> = (0..buckets.len())
             .map(|i| (d_values[i].clone(), d_macs[p][i].clone()))
             .collect();
-        channel.send_to(p, "dvalue", &dvalue_msg).await?;
+        send_to(channel, p, "dvalue", &dvalue_msg).await?;
     }
 
     let mut dvalue_msg_p = vec![vec![(vec![], vec![]); buckets.len()]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        dvalue_msg_p[p] = channel
-            .recv_from::<(Vec<bool>, Vec<Option<Mac>>)>(p, "dvalue")
-            .await?;
+        dvalue_msg_p[p] = recv_from::<(Vec<bool>, Vec<Option<Mac>>)>(channel, p, "dvalue").await?;
     }
 
     for p in (0..p_max).filter(|p| *p != p_own) {

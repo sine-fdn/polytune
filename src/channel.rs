@@ -58,86 +58,79 @@ pub trait Channel {
     ) -> impl Future<Output = Result<ChunkAndRemaining, Self::RecvError>> + Send;
 }
 
-/// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
-#[derive(Debug)]
-pub(crate) struct MsgChannel<C: Channel>(pub C);
-
-impl<C: Channel> MsgChannel<C> {
-    /// Serializes and sends an MPC message to the other party.
-    pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
-        &mut self,
-        party: usize,
-        phase: &str,
-        msg: &[S],
-    ) -> Result<(), Error> {
-        let chunk_size = 2_000_000;
-        let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
-        if chunks.is_empty() {
-            chunks.push(&[]);
-        }
-        let length = chunks.len();
-        for (i, chunk) in chunks.into_iter().enumerate() {
-            let remaining = length - i - 1;
-            let chunk = bincode::serialize(chunk).map_err(|e| Error {
-                phase: format!("sending {phase}"),
-                reason: ErrorKind::SerdeError(format!("{e:?}")),
-            })?;
-            self.0
-                .send_bytes_to(party, phase, i, remaining, chunk)
-                .await
-                .map_err(|e| Error {
-                    phase: phase.to_string(),
-                    reason: ErrorKind::SendError(format!("{e:?}")),
-                })?;
-        }
-        Ok(())
+/// Serializes and sends an MPC message to the other party.
+pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
+    channel: &mut impl Channel,
+    party: usize,
+    phase: &str,
+    msg: &[S],
+) -> Result<(), Error> {
+    let chunk_size = 5_000_000;
+    let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
+    if chunks.is_empty() {
+        chunks.push(&[]);
     }
-
-    /// Receives and deserializes an MPC message from the other party.
-    pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
-        &mut self,
-        party: usize,
-        phase: &str,
-    ) -> Result<Vec<T>, Error> {
-        let mut msg = vec![];
-        let mut i = 0;
-        loop {
-            let (chunk, remaining) =
-                self.0
-                    .recv_bytes_from(party, phase, i)
-                    .await
-                    .map_err(|e| Error {
-                        phase: phase.to_string(),
-                        reason: ErrorKind::RecvError(format!("{e:?}")),
-                    })?;
-            i += 1;
-            let chunk: Vec<T> = bincode::deserialize(&chunk).map_err(|e| Error {
-                phase: format!("receiving {phase}"),
-                reason: ErrorKind::SerdeError(format!("{e:?}")),
-            })?;
-            msg.extend(chunk);
-            if remaining == 0 {
-                return Ok(msg);
-            }
-        }
-    }
-
-    /// Receives and deserializes a Vec from the other party (while checking the length).
-    pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
-        &mut self,
-        party: usize,
-        phase: &str,
-        len: usize,
-    ) -> Result<Vec<T>, Error> {
-        let v: Vec<T> = self.recv_from(party, phase).await?;
-        if v.len() == len {
-            Ok(v)
-        } else {
-            Err(Error {
+    let length = chunks.len();
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let remaining = length - i - 1;
+        let chunk = bincode::serialize(chunk).map_err(|e| Error {
+            phase: format!("sending {phase}"),
+            reason: ErrorKind::SerdeError(format!("{e:?}")),
+        })?;
+        channel
+            .send_bytes_to(party, phase, i, remaining, chunk)
+            .await
+            .map_err(|e| Error {
                 phase: phase.to_string(),
-                reason: ErrorKind::InvalidLength,
-            })
+                reason: ErrorKind::SendError(format!("{e:?}")),
+            })?;
+    }
+    Ok(())
+}
+
+/// Receives and deserializes an MPC message from the other party.
+pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
+    channel: &mut impl Channel,
+    party: usize,
+    phase: &str,
+) -> Result<Vec<T>, Error> {
+    let mut msg = vec![];
+    let mut i = 0;
+    loop {
+        let (chunk, remaining) = channel
+            .recv_bytes_from(party, phase, i)
+            .await
+            .map_err(|e| Error {
+                phase: phase.to_string(),
+                reason: ErrorKind::RecvError(format!("{e:?}")),
+            })?;
+        i += 1;
+        let chunk: Vec<T> = bincode::deserialize(&chunk).map_err(|e| Error {
+            phase: format!("receiving {phase}"),
+            reason: ErrorKind::SerdeError(format!("{e:?}")),
+        })?;
+        msg.extend(chunk);
+        if remaining == 0 {
+            return Ok(msg);
         }
+    }
+}
+
+/// Receives and deserializes a Vec from the other party (while checking the length).
+pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
+    channel: &mut impl Channel,
+    party: usize,
+    phase: &str,
+    len: usize,
+) -> Result<Vec<T>, Error> {
+    let v: Vec<T> = recv_from(channel, party, phase).await?;
+    if v.len() == len {
+        Ok(v)
+    } else {
+        Err(Error {
+            phase: phase.to_string(),
+            reason: ErrorKind::InvalidLength,
+        })
     }
 }
 
@@ -146,6 +139,7 @@ impl<C: Channel> MsgChannel<C> {
 pub struct SimpleChannel {
     s: Vec<Option<Sender<ChunkAndRemaining>>>,
     r: Vec<Option<Receiver<ChunkAndRemaining>>>,
+    pub(crate) bytes_sent: usize,
 }
 
 impl SimpleChannel {
@@ -160,7 +154,8 @@ impl SimpleChannel {
                 s.push(None);
                 r.push(None);
             }
-            channels.push(SimpleChannel { s, r });
+            let bytes_sent = 0;
+            channels.push(SimpleChannel { s, r, bytes_sent });
         }
         for a in 0..parties {
             for b in 0..parties {
@@ -200,6 +195,7 @@ impl Channel for SimpleChannel {
         remaining: usize,
         msg: Vec<u8>,
     ) -> Result<(), SendError<ChunkAndRemaining>> {
+        self.bytes_sent += msg.len();
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         let i = i + 1;
         let total = i + remaining;
