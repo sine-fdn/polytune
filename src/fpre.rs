@@ -467,12 +467,8 @@ mod tests {
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
                 let auth_r1_corrupted = Share(!r1, Auth(vec![None, Some((mac_r1, key_s1))]));
-                a.send_to(
-                    fpre_party,
-                    "AND shares",
-                    &[(auth_r1_corrupted, auth_r2)],
-                )
-                .await?;
+                a.send_to(fpre_party, "AND shares", &[(auth_r1_corrupted, auth_r2)])
+                    .await?;
                 b.send_to(fpre_party, "AND shares", &[(auth_s1, auth_s2)])
                     .await?;
                 assert_eq!(
@@ -488,12 +484,8 @@ mod tests {
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
                 let auth_r1_corrupted =
                     Share(!r1, Auth(vec![None, Some((mac_r1_corrupted, key_s1))]));
-                a.send_to(
-                    fpre_party,
-                    "AND shares",
-                    &[(auth_r1_corrupted, auth_r2)],
-                )
-                .await?;
+                a.send_to(fpre_party, "AND shares", &[(auth_r1_corrupted, auth_r2)])
+                    .await?;
                 b.send_to(fpre_party, "AND shares", &[(auth_s1, auth_s2)])
                     .await?;
                 assert_eq!(

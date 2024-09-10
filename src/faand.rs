@@ -225,14 +225,12 @@ pub(crate) async fn fabitn(
 
     // Step 3 including verification of macs and keys.
     let (rbits, xjs): (Vec<_>, Vec<_>) = (0..two_rho)
-    .map(|_| {
-        let r: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
-        let xj = x.iter()
-            .zip(&r)
-            .fold(false, |acc, (&xb, &rb)| acc ^ (xb & rb));
-        (r, xj)
-    })
-    .unzip();
+        .map(|_| {
+            let r: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
+            let xj = x.iter().zip(&r).fold(false, |acc, (&x, &r)| acc ^ (x & r));
+            (r, xj)
+        })
+        .unzip();
 
     for p in (0..p_max).filter(|p| *p != p_own) {
         let mut msg = Vec::with_capacity(two_rho);
