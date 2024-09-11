@@ -60,7 +60,6 @@ pub(crate) fn generate_kosots(deltas: Vec<Block>, bs: Vec<bool>) -> (Vec<(u128, 
     let mut recver_out: Vec<u128> = vec![];
     for i in recver_out_block.iter() {
         recver_out.push(block_to_u128(*i));
-        println!("Recver: {:?}", block_to_u128(*i));
     }
     let mut sender_out: Vec<(u128, u128)> = vec![];
     for (i, j) in sender_out_block.iter() {

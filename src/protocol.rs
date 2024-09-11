@@ -333,15 +333,10 @@ pub async fn mpc(
     let faand_len = lprime + 3 * RHO;
 
     let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
-    let mut receiver_ot: Vec<(Vec<bool>, Vec<u128>)> = vec![
-        (
-            vec![false; secret_bits_ot + 3 * faand_len],
-            vec![0; secret_bits_ot + 3 * faand_len]
-        );
-        p_max
-    ];
+    let mut receiver_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
+    let mut sender_ot_own: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
 
-    let delta: Delta;
+    let mut delta: Delta;
     let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
         .map(|_| random())
         .collect();
@@ -352,16 +347,19 @@ pub async fn mpc(
             .pop()
             .ok_or(Error::EmptyMsg)?;
     } else {
-        delta = Delta(random());
+        //delta = Delta(random());
         for p in (0..p_max).filter(|p| *p != p_own) {
+            delta = Delta(p as u128); //TODO random delta once communication is there for OT
             let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
             let (sender_out, recver_out) = generate_kosots(deltas, x.clone());
             let sender: Vec<u128> = sender_out.iter().map(|(first, _)| *first).collect();
-            sender_ot[p] = sender; //sender is p_own, receiver p
-                                   //send_to(channel,p, "ot", &(b, w)).await?;
-                                   //receiver_ot[p] = recv_from(channel,p, "ot").await?;
-            receiver_ot[p] = (x.clone(), recver_out);
+            sender_ot[p] = sender;
+
+            receiver_ot[p] = recver_out;
+            send_to(channel, p, "ot", &sender_ot[p]).await?;
+            sender_ot_own[p] = recv_from(channel, p, "ot").await?;
         }
+        delta = Delta(p_own as u128);
     }
 
     let random_shares: Vec<Share>;
@@ -384,7 +382,7 @@ pub async fn mpc(
             secret_bits + 3 * lprime,
             delta,
             &mut shared_rng,
-            sender_ot,
+            sender_ot_own,
             receiver_ot,
         )
         .await?;

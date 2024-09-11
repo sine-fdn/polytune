@@ -105,54 +105,6 @@ pub(crate) async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
-/// Performs an insecure F_abit, practically the ideal functionality of correlated OT.
-///
-/// The receiver sends bit x, the sender inputs delta, and the sender receives a random key,
-/// whereas the receiver receives a MAC, which is the key XOR the bit times delta. This protocol
-/// performs multiple of these at once.
-pub(crate) async fn fabit(
-    channel: &mut impl Channel,
-    p_to: usize,
-    delta: Delta,
-    c: &[bool], //xbits
-    role: bool,
-    (b, r0, _r1, rb): (&[bool], &[u128], &[u128], &[u128]),
-) -> Result<Vec<u128>, Error> {
-    match role {
-        true => {
-            let mut k: Vec<bool> = vec![false; b.len()];
-            for i in 0..b.len() {
-                k[i] = b[i] ^ c[i];
-            }
-            send_to(channel, p_to, "fabit bits", &k).await?;
-
-            let y0y1: Vec<(u128, u128)> = recv_from(channel, p_to, "fabit y0y1").await?;
-
-            let mut xc: Vec<u128> = vec![0; rb.len()];
-            for (i, (y0, y1)) in y0y1.into_iter().enumerate() {
-                if c[i] {
-                    xc[i] ^= y1;
-                } else {
-                    xc[i] ^= y0;
-                }
-            }
-            Ok(xc)
-        }
-        false => {
-            let x0x1: Vec<(u128, u128)> = (0..r0.len())
-                .map(|_| {
-                    let x0 = random::<u128>();
-                    (x0, x0 ^ delta.0)
-                })
-                .collect();
-            let _kbits: Vec<bool> = recv_from(channel, p_to, "fabit bits").await?;
-            send_to(channel, p_to, "fabit y0y1", &x0x1).await?;
-
-            Ok(x0x1.into_iter().map(|(x0, _)| x0).collect())
-        }
-    }
-}
-
 /// Protocol PI_aBit^n that performs F_aBit^n.
 ///
 /// A random bit-string is generated as well as the corresponding keys and MACs are sent to all
@@ -167,7 +119,7 @@ pub(crate) async fn fabitn(
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
     sender_ot: Vec<Vec<u128>>,
-    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
+    receiver_ot: Vec<Vec<u128>>,
 ) -> Result<Vec<Share>, Error> {
     // Step 1 initialize random bitstring.
     let two_rho = 2 * RHO;
@@ -177,48 +129,11 @@ pub(crate) async fn fabitn(
     let mut xkeys: Vec<Vec<u128>> = vec![vec![]; p_max];
     let mut xmacs: Vec<Vec<u128>> = vec![vec![]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let delta_added: Vec<u128> = sender_ot[p].iter().map(|x| x ^ delta.0).collect();
-        let macvec: Vec<u128>;
-        let keyvec: Vec<u128>;
-        if p_own < p {
-            macvec = fabit(
-                channel,
-                p,
-                delta,
-                x,
-                true,
-                (&receiver_ot[p].0, &[], &[], &receiver_ot[p].1),
-            )
-            .await?;
-            keyvec = fabit(
-                channel,
-                p,
-                delta,
-                x,
-                false,
-                (&[], &sender_ot[p], &delta_added, &[]),
-            )
-            .await?;
-        } else {
-            keyvec = fabit(
-                channel,
-                p,
-                delta,
-                x,
-                false,
-                (&[], &sender_ot[p], &delta_added, &[]),
-            )
-            .await?;
-            macvec = fabit(
-                channel,
-                p,
-                delta,
-                x,
-                true,
-                (&receiver_ot[p].0, &[], &[], &receiver_ot[p].1),
-            )
-            .await?;
-        }
+        let macvec: Vec<u128> = receiver_ot[p].clone();
+        let keyvec: Vec<u128> = sender_ot[p].clone();
+
+        println!("{:?} macvec: {:?}", p, macvec);
+        println!("{:?} keyvec: {:?}", p_own, keyvec);
         xmacs[p] = macvec;
         xkeys[p] = keyvec;
     }
@@ -296,7 +211,7 @@ pub(crate) async fn fashare(
     delta: Delta,
     shared_rng: &mut ChaCha20Rng,
     sender_ot: Vec<Vec<u128>>,
-    receiver_ot: Vec<(Vec<bool>, Vec<u128>)>,
+    receiver_ot: Vec<Vec<u128>>,
 ) -> Result<Vec<Share>, Error> {
     // Step 1 pick random bit-string x (input).
     // Step 2 run Pi_aBit^n for each pair of parties.
@@ -766,6 +681,28 @@ pub(crate) async fn faand(
     for p in (0..p_max).filter(|p| *p != p_own) {
         faand_vec[p] =
             recv_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, p, "faand").await?;
+        for (i, &(_e, _f, ref emac, ref fmac)) in faand_vec[p].iter().enumerate() {
+            let Some(_emacp) = emac else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((_, _ekey)) = ef[i].0 .1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some(_fmacp) = fmac else {
+                return Err(Error::MissingMacKey);
+            };
+            let Some((_, _fkey)) = ef[i].1 .1 .0[p] else {
+                return Err(Error::MissingMacKey);
+            };
+            /*if e && (emacp.0 != ekey.0 ^ delta.0) || !e && (emacp.0 != ekey.0) {
+                println!("{:?} {:?} {:?}", emacp.0, ekey.0 ^ delta.0, ekey.0);
+                return Err(Error::AANDWrongEFMAC);
+            }
+            if f && (fmacp.0 != fkey.0 ^ delta.0) || !f && (fmacp.0 != fkey.0) {
+                println!("{:?} {:?} {:?}", fmacp.0, fkey.0 ^ delta.0, fkey.0);
+                return Err(Error::AANDWrongEFMAC);
+            }*/ // TODO for some reason this still fails for 3 or more parties
+        }
     }
     ef_with_macs
         .iter_mut()
