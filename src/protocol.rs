@@ -8,7 +8,7 @@ use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
-    faand::{self, bucket_size, faand, fashare, shared_rng, RHO},
+    faand::{self, beaver_aand, bucket_size, fashare, shared_rng, RHO},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
     ot::{generate_kosots, u128_to_block},
@@ -368,7 +368,7 @@ pub async fn mpc(
     let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
     let mut shared_rng = shared_rng(channel, p_own, p_max).await?;
-    let mut xyzbits: Vec<Share> = vec![];
+    let mut xyz_shares: Vec<Share> = vec![];
 
     if trusted {
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
@@ -387,7 +387,7 @@ pub async fn mpc(
 
         let (random_shares_vec, xyzbits_vec) = rand_shares.split_at(secret_bits);
         random_shares = random_shares_vec.to_vec();
-        xyzbits = xyzbits_vec.to_vec();
+        xyz_shares = xyzbits_vec.to_vec();
     }
 
     let mut random_shares = random_shares.into_iter();
@@ -428,15 +428,14 @@ pub async fn mpc(
         send_to(channel, p_fpre, "AND shares", &and_shares).await?;
         auth_bits = recv_from(channel, p_fpre, "AND shares").await?;
     } else {
-        auth_bits = faand(
+        auth_bits = beaver_aand(
             (channel, delta),
             and_shares.clone(),
             p_own,
             p_max,
-            num_and_gates, //TODO figure this out
             num_and_gates,
             &mut shared_rng,
-            xyzbits,
+            xyz_shares,
         )
         .await?;
     }
