@@ -39,6 +39,8 @@ pub enum Error {
     EmptyBucketError,
     /// A message was sent, but it contained no data.
     EmptyMsg,
+    /// Invalid array length.
+    InvalidLength,
 }
 
 impl From<channel::Error> for Error {
@@ -109,91 +111,102 @@ pub(crate) async fn shared_rng(
 ///
 /// A random bit-string is generated as well as the corresponding keys and MACs are sent to all
 /// parties.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn fabitn(
-    channel: &mut impl Channel,
+    (channel, delta): (&mut impl Channel, Delta),
     x: &mut Vec<bool>,
-    p_own: usize,
-    p_max: usize,
-    length: usize,
-    delta: Delta,
+    i: usize,
+    n: usize,
+    l: usize,
     shared_rng: &mut ChaCha20Rng,
-    sender_ot: Vec<Vec<u128>>,
-    receiver_ot: Vec<Vec<u128>>,
+    (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1 initialize random bitstring.
+    // Step 1 pick random bit-string x (input) of length lprime.
     let two_rho = 2 * RHO;
-    let len_abit = length + two_rho;
+    let lprime = l + two_rho;
 
-    // Steps 2 running Pi_aBit^2 for each pair of parties.
-    let mut xkeys: Vec<Vec<u128>> = vec![vec![]; p_max];
-    let mut xmacs: Vec<Vec<u128>> = vec![vec![]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        let macvec: Vec<u128> = receiver_ot[p].clone();
-        let keyvec: Vec<u128> = sender_ot[p].clone();
+    // Steps 2 use the output of the oblivious transfers between each pair of parties to generate keys and macs.
+    let mut kk: Vec<Vec<u128>> = vec![vec![]; n];
+    let mut mm: Vec<Vec<u128>> = vec![vec![]; n];
+    for k in (0..n).filter(|k| *k != i) {
+        let macvec: Vec<u128> = receiver_ot[k].clone();
+        let keyvec: Vec<u128> = sender_ot[k].clone();
 
-        println!("{:?} macvec: {:?}", p, macvec);
-        println!("{:?} keyvec: {:?}", p_own, keyvec);
-        xmacs[p] = macvec;
-        xkeys[p] = keyvec;
+        mm[k] = macvec;
+        kk[k] = keyvec;
     }
 
-    // Step 3 including verification of macs and keys.
-    let (rbits, xjs): (Vec<_>, Vec<_>) = (0..two_rho)
-        .map(|_| {
-            let r: Vec<bool> = (0..len_abit).map(|_| shared_rng.gen()).collect();
-            let xj = x.iter().zip(&r).fold(false, |acc, (&x, &r)| acc ^ (x & r));
-            (r, xj)
-        })
-        .unzip();
+    // Step 3 verification of macs and keys.
+    // Step 3 a) sample 2*RHO random l'-bit strings r.
+    let mut r = Vec::with_capacity(two_rho);
+    for _ in 0..two_rho {
+        let rbits: Vec<bool> = (0..lprime).map(|_| shared_rng.gen()).collect();
+        r.push(rbits);
+    }
 
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        let mut msg = Vec::with_capacity(two_rho);
-        for (r, xj) in rbits.iter().zip(xjs.iter()) {
-            let mut macint = 0;
+    // Step 3 b) compute xj and xjmac for each party, broadcast xj.
+    // Broadcast include sending xjmac as well, as from Step 3 d).
+    if x.len() < lprime {
+        return Err(Error::InvalidLength);
+    }
+
+    let mut xj = Vec::with_capacity(two_rho);
+    for rbits in &r {
+        let mut xm = false;
+        for (xi, ri) in x.iter().zip(rbits) {
+            xm ^= xi & ri;
+        }
+        xj.push(xm);
+    }
+
+    for k in (0..n).filter(|k| *k != i) {
+        let mut xj_xjmac = Vec::with_capacity(two_rho);
+        for (r, xj) in r.iter().zip(xj.iter()) {
+            let mut xjmac = 0;
             for (j, &rbit) in r.iter().enumerate() {
                 if rbit {
-                    macint ^= xmacs[p][j];
+                    xjmac ^= mm[k][j];
                 }
             }
-            msg.push((*xj, macint));
+            xj_xjmac.push((*xj, xjmac));
         }
-        send_to(channel, p, "fabitn", &msg).await?;
+        send_to(channel, k, "fabitn", &xj_xjmac).await?;
     }
 
-    let mut fabitn_msg_p: Vec<Vec<(bool, u128)>> = vec![vec![(false, 0); two_rho]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        fabitn_msg_p[p] = recv_from(channel, p, "fabitn").await?;
+    let mut xj_xjmac_k: Vec<Vec<(bool, u128)>> = vec![vec![(false, 0); two_rho]; n];
+    for p in (0..n).filter(|p| *p != i) {
+        xj_xjmac_k[p] = recv_from(channel, p, "fabitn").await?;
     }
 
-    for (j, rbits) in rbits.iter().enumerate() {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            let (xj, macint) = &fabitn_msg_p[p][j];
-            let mut keyint: u128 = 0;
+    // Step 3 c) compute keys.
+    for (j, rbits) in r.iter().enumerate() {
+        for k in (0..n).filter(|k| *k != i) {
+            let (xj, xjmac) = &xj_xjmac_k[k][j];
+            let mut xjkey: u128 = 0;
             for (i, rbit) in rbits.iter().enumerate() {
                 if *rbit {
-                    keyint ^= xkeys[p][i];
+                    xjkey ^= kk[k][i];
                 }
             }
-            if *macint != keyint ^ ((*xj as u128) * delta.0) {
+            // Step 3 d) validity check of macs.
+            if *xjmac != xjkey ^ ((*xj as u128) * delta.0) {
                 return Err(Error::ABitMacMisMatch);
             }
         }
     }
 
     // Step 4 return first l objects.
-    x.truncate(length);
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        xkeys[p].truncate(length);
-        xmacs[p].truncate(length);
+    x.truncate(l);
+    for k in (0..n).filter(|k| *k != i) {
+        kk[k].truncate(l);
+        mm[k].truncate(l);
     }
-    let mut res: Vec<Share> = vec![];
-    for (l, xx) in x.iter().enumerate().take(length) {
-        let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; p_max];
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            authvec[p] = Some((Mac(xmacs[p][l]), Key(xkeys[p][l])));
+    let mut res: Vec<Share> = Vec::with_capacity(l);
+    for (l, xi) in x.iter().enumerate().take(l) {
+        let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; n];
+        for p in (0..n).filter(|p| *p != i) {
+            authvec[p] = Some((Mac(mm[p][l]), Key(kk[p][l])));
         }
-        res.push(Share(*xx, Auth(authvec)));
+        res.push(Share(*xi, Auth(authvec)));
     }
     Ok(res)
 }
@@ -201,30 +214,25 @@ pub(crate) async fn fabitn(
 /// Protocol PI_aShare that performs F_aShare.
 ///
 /// Random bit strings are picked and random authenticated shares are distributed to the parties.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn fashare(
-    channel: &mut impl Channel,
+    (channel, delta): (&mut impl Channel, Delta),
     x: &mut Vec<bool>,
     p_own: usize,
     p_max: usize,
     length: usize,
-    delta: Delta,
     shared_rng: &mut ChaCha20Rng,
-    sender_ot: Vec<Vec<u128>>,
-    receiver_ot: Vec<Vec<u128>>,
+    (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
     // Step 1 pick random bit-string x (input).
     // Step 2 run Pi_aBit^n for each pair of parties.
     let mut shares = fabitn(
-        channel,
+        (channel, delta),
         x,
         p_own,
         p_max,
         length + RHO,
-        delta,
         shared_rng,
-        sender_ot,
-        receiver_ot,
+        (sender_ot, receiver_ot),
     )
     .await?;
 
@@ -336,10 +344,9 @@ pub(crate) async fn fashare(
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
 pub(crate) async fn fhaand(
-    channel: &mut impl Channel,
+    (channel, delta): (&mut impl Channel, Delta),
     p_own: usize,
     p_max: usize,
-    delta: Delta,
     length: usize,
     x: &[Share],
     y: Vec<bool>,
@@ -408,12 +415,9 @@ pub(crate) fn hash128(input: u128) -> u128 {
 ///
 /// Generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that the AND of the XORs of the
 /// x and y values equals to the XOR of the z values.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn flaand(
     channel: &mut impl Channel,
-    xbits: &[Share],
-    ybits: &[Share],
-    rbits: &[Share],
+    (xbits, ybits, rbits): (&[Share], &[Share], &[Share]),
     p_own: usize,
     p_max: usize,
     delta: Delta,
@@ -427,7 +431,7 @@ pub(crate) async fn flaand(
     }
 
     // Step 2 run Pi_HaAND for each pair of parties.
-    let v = fhaand(channel, p_own, p_max, delta, length, xbits, yvec).await?;
+    let v = fhaand((channel, delta), p_own, p_max, length, xbits, yvec).await?;
 
     // Step 3 a) compute z and e.
     let mut flaand_msg: Vec<(bool, Vec<u128>)> = vec![(false, vec![0; p_max]); length];
@@ -569,15 +573,13 @@ fn transform(x: &[Share], y: &[Share], z: &[Share], length: usize) -> Vec<(Share
 /// Protocol Pi_aAND that performs F_aAND.
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand_precomp(
-    channel: &mut impl Channel,
+    (channel, delta): (&mut impl Channel, Delta),
     p_own: usize,
     p_max: usize,
     circuit_size: usize,
     length: usize,
     shared_rng: &mut ChaCha20Rng,
-    delta: Delta,
     xyzbits: Vec<Share>,
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     let b = bucket_size(circuit_size);
@@ -588,7 +590,7 @@ pub(crate) async fn faand_precomp(
 
     // Step 1 generate all leaky and triples.
     let zbits: Vec<Share> =
-        flaand(channel, xbits, ybits, rbits, p_own, p_max, delta, lprime).await?;
+        flaand(channel, (xbits, ybits, rbits), p_own, p_max, delta, lprime).await?;
     let triples = transform(xbits, ybits, &zbits, lprime);
 
     // Step 2 assign objects to buckets.
@@ -607,7 +609,7 @@ pub(crate) async fn faand_precomp(
     }
 
     // Step 3 check d-values.
-    let dvalues = check_dvalue(channel, p_own, p_max, &buckets, delta).await?;
+    let dvalues = check_dvalue((channel, delta), p_own, p_max, &buckets).await?;
 
     let mut combined: Vec<(Share, Share, Share)> = Vec::with_capacity(buckets.len());
 
@@ -623,24 +625,22 @@ pub(crate) async fn faand_precomp(
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn faand(
-    channel: &mut impl Channel,
+    (channel, delta): (&mut impl Channel, Delta),
     bits_rand: Vec<(Share, Share)>,
     p_own: usize,
     p_max: usize,
     circuit_size: usize,
     length: usize,
     shared_rng: &mut ChaCha20Rng,
-    delta: Delta,
     xyzbits: Vec<Share>,
 ) -> Result<Vec<Share>, Error> {
     let vectriples = faand_precomp(
-        channel,
+        (channel, delta),
         p_own,
         p_max,
         circuit_size,
         length,
         shared_rng,
-        delta,
         xyzbits,
     )
     .await?;
@@ -755,11 +755,10 @@ pub(crate) fn combine_bucket(
 
 /// Check and return d-values for a vector of shares.
 pub(crate) async fn check_dvalue(
-    channel: &mut impl Channel,
+    (channel, delta): (&mut impl Channel, Delta),
     p_own: usize,
     p_max: usize,
     buckets: &[SmallVec<[(Share, Share, Share); 3]>],
-    delta: Delta,
 ) -> Result<Vec<Vec<bool>>, Error> {
     // Step (a) compute and check macs of d-values.
     let mut d_values = vec![vec![]; buckets.len()];

@@ -375,15 +375,13 @@ pub async fn mpc(
         random_shares = recv_from(channel, p_fpre, "random shares").await?;
     } else {
         rand_shares = fashare(
-            channel,
+            (channel, delta),
             &mut x,
             p_own,
             p_max,
             secret_bits + 3 * lprime,
-            delta,
             &mut shared_rng,
-            sender_ot_own,
-            receiver_ot,
+            (sender_ot_own, receiver_ot),
         )
         .await?;
 
@@ -431,14 +429,13 @@ pub async fn mpc(
         auth_bits = recv_from(channel, p_fpre, "AND shares").await?;
     } else {
         auth_bits = faand(
-            channel,
+            (channel, delta),
             and_shares.clone(),
             p_own,
             p_max,
             num_and_gates, //TODO figure this out
             num_and_gates,
             &mut shared_rng,
-            delta,
             xyzbits,
         )
         .await?;
