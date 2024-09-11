@@ -120,31 +120,26 @@ pub(crate) async fn fabitn(
     shared_rng: &mut ChaCha20Rng,
     (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1 pick random bit-string x (input) of length lprime.
+    // Step 1) Pick random bit-string x (input) of length lprime.
     let two_rho = 2 * RHO;
     let lprime = l + two_rho;
 
-    // Steps 2 use the output of the oblivious transfers between each pair of parties to generate keys and macs.
+    // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
     let mut kk: Vec<Vec<u128>> = vec![vec![]; n];
     let mut mm: Vec<Vec<u128>> = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
-        let macvec: Vec<u128> = receiver_ot[k].clone();
-        let keyvec: Vec<u128> = sender_ot[k].clone();
-
-        mm[k] = macvec;
-        kk[k] = keyvec;
+        mm[k] = receiver_ot[k].clone();
+        kk[k] = sender_ot[k].clone();
     }
 
-    // Step 3 verification of macs and keys.
-    // Step 3 a) sample 2*RHO random l'-bit strings r.
-    let mut r = Vec::with_capacity(two_rho);
-    for _ in 0..two_rho {
-        let rbits: Vec<bool> = (0..lprime).map(|_| shared_rng.gen()).collect();
-        r.push(rbits);
-    }
+    // Step 3) Verification of macs and keys.
+    // Step 3 a) Sample 2*RHO random l'-bit strings r.
+    let r: Vec<Vec<bool>> = (0..two_rho)
+        .map(|_| (0..lprime).map(|_| shared_rng.gen()).collect())
+        .collect();
 
-    // Step 3 b) compute xj and xjmac for each party, broadcast xj.
-    // Broadcast include sending xjmac as well, as from Step 3 d).
+    // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
+    // Broadcast includes sending xjmac as well, as from Step 3 d).
     if x.len() < lprime {
         return Err(Error::InvalidLength);
     }
@@ -173,11 +168,11 @@ pub(crate) async fn fabitn(
     }
 
     let mut xj_xjmac_k: Vec<Vec<(bool, u128)>> = vec![vec![(false, 0); two_rho]; n];
-    for p in (0..n).filter(|p| *p != i) {
-        xj_xjmac_k[p] = recv_from(channel, p, "fabitn").await?;
+    for k in (0..n).filter(|k| *k != i) {
+        xj_xjmac_k[k] = recv_from(channel, k, "fabitn").await?;
     }
 
-    // Step 3 c) compute keys.
+    // Step 3 c) Compute keys.
     for (j, rbits) in r.iter().enumerate() {
         for k in (0..n).filter(|k| *k != i) {
             let (xj, xjmac) = &xj_xjmac_k[k][j];
@@ -187,14 +182,14 @@ pub(crate) async fn fabitn(
                     xjkey ^= kk[k][i];
                 }
             }
-            // Step 3 d) validity check of macs.
+            // Step 3 d) Validity check of macs.
             if *xjmac != xjkey ^ ((*xj as u128) * delta.0) {
                 return Err(Error::ABitMacMisMatch);
             }
         }
     }
 
-    // Step 4 return first l objects.
+    // Step 4) Return first l objects.
     x.truncate(l);
     for k in (0..n).filter(|k| *k != i) {
         kk[k].truncate(l);
@@ -203,8 +198,8 @@ pub(crate) async fn fabitn(
     let mut res: Vec<Share> = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
         let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; n];
-        for p in (0..n).filter(|p| *p != i) {
-            authvec[p] = Some((Mac(mm[p][l]), Key(kk[p][l])));
+        for k in (0..n).filter(|k| *k != i) {
+            authvec[k] = Some((Mac(mm[k][l]), Key(kk[k][l])));
         }
         res.push(Share(*xi, Auth(authvec)));
     }
@@ -217,37 +212,39 @@ pub(crate) async fn fabitn(
 pub(crate) async fn fashare(
     (channel, delta): (&mut impl Channel, Delta),
     x: &mut Vec<bool>,
-    p_own: usize,
-    p_max: usize,
-    length: usize,
+    i: usize,
+    n: usize,
+    l: usize,
     shared_rng: &mut ChaCha20Rng,
     (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1 pick random bit-string x (input).
-    // Step 2 run Pi_aBit^n for each pair of parties.
-    let mut shares = fabitn(
+    // Step 1) Pick random bit-string x (input).
+
+    // Step 2) Run Pi_aBit^n to compute shares.
+    let mut xishares = fabitn(
         (channel, delta),
         x,
-        p_own,
-        p_max,
-        length + RHO,
+        i,
+        n,
+        l + RHO,
         shared_rng,
         (sender_ot, receiver_ot),
     )
     .await?;
 
-    // Step 3 commitments and checks.
-    let mut d0: Vec<u128> = vec![0; RHO]; // xorkeys
-    let mut d1: Vec<u128> = vec![0; RHO]; // xorkeysdelta
-    let mut own_commitments = Vec::with_capacity(RHO); // c0, c1, cm, dm
+    // Step 3) Compute commitments and verify consistency.
+    // Step 3 a) Compute d0, d1, dm, c0, c1, cm and send commitments to all parties.
+    let mut d0: Vec<u128> = vec![0; RHO];
+    let mut d1: Vec<u128> = vec![0; RHO];
+    let mut c0_c1_cm_dm = Vec::with_capacity(RHO); // c0, c1, cm, dm
 
-    // Step 3/(a) compute d0, d1, dm, c0, c1, cm and send commitments to all parties.
     for r in 0..RHO {
-        let mut dm = Vec::with_capacity(p_max * 16);
-        dm.push(shares[length + r].0 as u8);
-        for p in 0..p_max {
-            if p != p_own {
-                if let Some((mac, key)) = shares[length + r].1 .0[p] {
+        let xishare = &xishares[l + r];
+        let mut dm = Vec::with_capacity(n * 16);
+        dm.push(xishare.0 as u8);
+        for k in 0..n {
+            if k != i {
+                if let Some((mac, key)) = xishare.1 .0[k] {
                     d0[r] ^= key.0;
                     dm.extend(&mac.0.to_be_bytes());
                 } else {
@@ -261,71 +258,69 @@ pub(crate) async fn fashare(
         let c0 = commit(&d0[r].to_be_bytes());
         let c1 = commit(&d1[r].to_be_bytes());
         let cm = commit(&dm);
-        own_commitments.push((c0, c1, cm, dm))
+        c0_c1_cm_dm.push((c0, c1, cm, dm))
     }
 
-    // 3/(b) After receiving all commitments, Pi broadcasts decommitment for macs.
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        send_to(channel, p, "fashare commitverify", &own_commitments).await?;
+    // 3 b) After receiving all commitments, Pi broadcasts decommitment for macs.
+    for k in (0..n).filter(|k| *k != i) {
+        send_to(channel, k, "fashare commitverify", &c0_c1_cm_dm).await?;
     }
-    let mut commitments = vec![vec![]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        commitments[p] = recv_from::<(Commitment, Commitment, Commitment, Vec<u8>)>(
+    let mut c0_c1_cm_dm_k = vec![vec![]; n];
+    for k in (0..n).filter(|k| *k != i) {
+        c0_c1_cm_dm_k[k] = recv_from::<(Commitment, Commitment, Commitment, Vec<u8>)>(
             channel,
-            p,
+            k,
             "fashare commitverify",
         )
         .await?;
     }
-    commitments[p_own] = own_commitments;
+    c0_c1_cm_dm_k[i] = c0_c1_cm_dm;
 
-    // 3/(c) compute xorkeysbit and send to all parties.
-    let mut combit: Vec<u8> = vec![0; RHO];
-    let mut xorkeysbit: Vec<u128> = vec![0; RHO];
+    // 3 c) Compute di_bi and send to all parties.
+    let mut bi: Vec<u8> = vec![0; RHO];
+    let mut di_bi: Vec<u128> = vec![0; RHO];
     for r in 0..RHO {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            combit[r] ^= commitments[p][r].3[0];
+        for k in (0..n).filter(|k| *k != i) {
+            bi[r] ^= c0_c1_cm_dm_k[k][r].3[0];
         }
-        if combit[r] == 0 {
-            xorkeysbit[r] = d0[r];
-        } else if combit[r] == 1 {
-            xorkeysbit[r] = d1[r];
+        if bi[r] == 0 {
+            di_bi[r] = d0[r];
+        } else if bi[r] == 1 {
+            di_bi[r] = d1[r];
         }
     }
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        send_to(channel, p, "fashare bitcom", &xorkeysbit).await?;
+    for k in (0..n).filter(|k| *k != i) {
+        send_to(channel, k, "fashare di_bi", &di_bi).await?;
     }
-    let mut xorkeysbitp: Vec<Vec<u128>> = vec![vec![0; RHO]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        xorkeysbitp[p] = recv_from(channel, p, "fashare bitcom").await?;
+    let mut di_bi_k: Vec<Vec<u128>> = vec![vec![0; RHO]; n];
+    for k in (0..n).filter(|k| *k != i) {
+        di_bi_k[k] = recv_from(channel, k, "fashare di_bi").await?;
     }
 
-    // 3/(d) consistency check of macs.
-    let mut xormacs: Vec<Vec<u128>> = vec![vec![0; RHO]; p_max];
+    // 3 d) Consistency check of macs.
+    let mut xor_xk_macs: Vec<Vec<u128>> = vec![vec![0; RHO]; n];
     for r in 0..RHO {
-        for (p, commitments) in commitments.iter().enumerate().take(p_max) {
-            for pp in (0..p_max).filter(|pp| *pp != p) {
-                if !commitments.is_empty() {
-                    let (_, _, _, pitem) = &commitments[r];
-                    if let Ok(b) = pitem[(1 + pp * 16)..(17 + pp * 16)]
+        for (p, c0_c1_cm_dm) in c0_c1_cm_dm_k.iter().enumerate().take(n) {
+            for pp in (0..n).filter(|pp| *pp != p) {
+                if !c0_c1_cm_dm.is_empty() {
+                    let (_, _, _, dm) = &c0_c1_cm_dm[r];
+                    if let Ok(b) = dm[(1 + pp * 16)..(17 + pp * 16)]
                         .try_into()
                         .map(u128::from_be_bytes)
                     {
-                        xormacs[pp][r] ^= b;
+                        xor_xk_macs[pp][r] ^= b;
                     } else {
                         return Err(Error::ConversionError);
                     }
                 }
             }
         }
-    }
-    for r in 0..RHO {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            let bj = &xorkeysbitp[p][r].to_be_bytes();
-            if open_commitment(&commitments[p][r].0, bj)
-                || open_commitment(&commitments[p][r].1, bj)
+        for p in (0..n).filter(|p| *p != i) {
+            let bj = &di_bi_k[p][r].to_be_bytes();
+            if open_commitment(&c0_c1_cm_dm_k[p][r].0, bj)
+                || open_commitment(&c0_c1_cm_dm_k[p][r].1, bj)
             {
-                if xormacs[p][r] != xorkeysbitp[p][r] {
+                if xor_xk_macs[p][r] != di_bi_k[p][r] {
                     return Err(Error::AShareMacsMismatch);
                 }
             } else {
@@ -334,9 +329,9 @@ pub(crate) async fn fashare(
         }
     }
 
-    // Step 4 return first l objects.
-    shares.truncate(length);
-    Ok(shares)
+    // Step 4) Return first l objects.
+    xishares.truncate(l);
+    Ok(xishares)
 }
 
 /// Protocol Pi_HaAND that performs F_HaAND.
