@@ -20,7 +20,7 @@ serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["full"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
-smallvec = "1.13.2"
+smallvec = { version = "1.13.2", features = ["serde"] }
 
 ocelot = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
 scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }

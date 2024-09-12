@@ -206,7 +206,7 @@ pub(crate) async fn fabitn(
     }
     let mut res: Vec<Share> = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
-        let mut authvec: Vec<Option<(Mac, Key)>> = vec![None; n];
+        let mut authvec = smallvec![None; n];
         for k in (0..n).filter(|k| *k != i) {
             authvec[k] = Some((Mac(mm[k][l]), Key(kk[k][l])));
         }
@@ -448,7 +448,7 @@ pub(crate) async fn flaand(
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
     }
-    let mut zshares = vec![Share(false, Auth(vec![None; n])); l];
+    let mut zshares = vec![Share(false, Auth(smallvec![None; n])); l];
     for ll in 0..l {
         zshares[ll].0 = z[ll];
     }
@@ -718,7 +718,7 @@ pub(crate) async fn beaver_aand(
                 *f ^= fa_f;
             }
         });
-    let mut and_share = vec![Share(false, Auth(vec![])); rand_triples.len()];
+    let mut and_share = vec![Share(false, Auth(smallvec![])); rand_triples.len()];
 
     for j in 0..rand_triples.len() {
         let (a, _b, c) = &rand_triples[j];
@@ -831,7 +831,7 @@ pub(crate) fn combine_two_leaky_ands(
 ) -> Result<(Share, Share, Share), Error> {
     //Step (b) compute x, y, z.
     let xbit = x1.0 ^ x2.0;
-    let mut xauth = Auth(vec![None; n]);
+    let mut xauth = Auth(smallvec![None; n]);
     for k in (0..n).filter(|k| *k != i) {
         let Some((mk_x1, ki_x1)) = x1.1 .0[k] else {
             return Err(Error::MissingMacKey);
@@ -844,7 +844,7 @@ pub(crate) fn combine_two_leaky_ands(
     let xshare: Share = Share(xbit, xauth);
 
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
-    let mut zauth: Auth = Auth(vec![None; n]);
+    let mut zauth: Auth = Auth(smallvec![None; n]);
     for k in (0..n).filter(|k| *k != i) {
         let Some((mk_z1, ki_z1)) = z1.1 .0[k] else {
             return Err(Error::MissingMacKey);

@@ -4,6 +4,7 @@ use std::ops::BitXor;
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::random;
 use serde::{Deserialize, Serialize};
+use smallvec::smallvec;
 use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
@@ -365,7 +366,7 @@ pub async fn mpc(
     let random_shares: Vec<Share>;
     let rand_shares: Vec<Share>;
     let auth_bits: Vec<Share>;
-    let mut shares: Vec<Share> = vec![Share(false, Auth(vec![])); num_gates];
+    let mut shares: Vec<Share> = vec![Share(false, Auth(smallvec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
     let mut shared_rng = shared_rng(channel, p_own, p_max).await?;
     let mut xyz_shares: Vec<Share> = vec![];

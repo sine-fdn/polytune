@@ -4,6 +4,7 @@ use std::ops::{BitAnd, BitXor};
 
 use rand::random;
 use serde::{Deserialize, Serialize};
+use smallvec::{smallvec, SmallVec};
 
 use crate::channel::{self, recv_from, send_to, Channel};
 
@@ -84,7 +85,7 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = vec![None; parties];
+            let mut mac_and_key = smallvec![None; parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
@@ -174,7 +175,7 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = vec![None; parties];
+            let mut mac_and_key = smallvec![None; parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
@@ -280,7 +281,7 @@ impl Share {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Auth(pub(crate) Vec<Option<(Mac, Key)>>);
+pub(crate) struct Auth(pub(crate) SmallVec<[Option<(Mac, Key)>; 2]>);
 
 impl BitXor for &Auth {
     type Output = Auth;
@@ -288,7 +289,7 @@ impl BitXor for &Auth {
     fn bitxor(self, rhs: Self) -> Self::Output {
         let Auth(auth0) = self;
         let Auth(auth1) = rhs;
-        let mut xor = Vec::with_capacity(auth0.len());
+        let mut xor = SmallVec::with_capacity(auth0.len());
         for (a, b) in auth0.iter().zip(auth1.iter()) {
             xor.push(match (a, b) {
                 (Some((mac1, key1)), Some((mac2, key2))) => Some((*mac1 ^ *mac2, *key1 ^ *key2)),
@@ -330,6 +331,7 @@ mod tests {
         channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
         fpre::{fpre, Auth, Delta, Error, Share},
     };
+    use smallvec::smallvec;
 
     #[tokio::test]
     async fn xor_homomorphic_mac() -> Result<(), Error> {
@@ -453,7 +455,7 @@ mod tests {
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted = Share(!r1, Auth(vec![None, Some((mac_r1, key_s1))]));
+                let auth_r1_corrupted = Share(!r1, Auth(smallvec![None, Some((mac_r1, key_s1))]));
                 send_to(
                     &mut a,
                     fpre_party,
@@ -474,7 +476,7 @@ mod tests {
                 // A would need knowledge of B's key and delta to corrupt the shared secret:
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
                 let auth_r1_corrupted =
-                    Share(!r1, Auth(vec![None, Some((mac_r1_corrupted, key_s1))]));
+                    Share(!r1, Auth(smallvec![None, Some((mac_r1_corrupted, key_s1))]));
                 send_to(
                     &mut a,
                     fpre_party,
