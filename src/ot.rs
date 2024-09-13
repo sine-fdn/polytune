@@ -1,5 +1,8 @@
 //! KOS OT implementation from the Swanky framework
-use ocelot::ot::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender};
+use crate::{
+    //channel::{self, recv_from, send_to, Channel},
+    swankyot::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender},
+};
 
 use std::{
     io::{BufReader, BufWriter},
@@ -34,7 +37,7 @@ pub(crate) fn kos_ot_sender(sender: UnixStream, deltas: Vec<Block>) -> Vec<(Bloc
     let reader = BufReader::new(sender.try_clone().unwrap());
     let writer = BufWriter::new(sender);
     let mut channel = Channel::new(reader, writer);
-    let mut ot = ot::KosSender::init(&mut channel, &mut rng).unwrap();
+    let mut ot = swankyot::KosSender::init(&mut channel, &mut rng).unwrap();
 
     ot.send_correlated(&mut channel, &deltas, &mut rng).unwrap()
 }
@@ -44,7 +47,7 @@ pub(crate) fn kos_ot_receiver(receiver: UnixStream, bs: Vec<bool>) -> Vec<Block>
     let reader = BufReader::new(receiver.try_clone().unwrap());
     let writer = BufWriter::new(receiver);
     let mut channel = Channel::new(reader, writer);
-    let mut ot = ot::KosReceiver::init(&mut channel, &mut rng).unwrap();
+    let mut ot = swankyot::KosReceiver::init(&mut channel, &mut rng).unwrap();
 
     ot.receive_correlated(&mut channel, &bs, &mut rng).unwrap()
 }

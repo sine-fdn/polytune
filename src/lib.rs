@@ -12,4 +12,6 @@ pub mod fpre;
 pub mod ot;
 pub mod protocol;
 
+pub mod swankyot;
+
 mod garble;

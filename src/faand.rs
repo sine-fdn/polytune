@@ -495,6 +495,7 @@ pub(crate) async fn flaand(
                 return Err(Error::MissingMacKey);
             };
             ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_hi_dhi_k[ll].1);
+            // mi_xj_phi added here
         }
         for ll in 0..ei_hi_dhi_k.len() {
             let Some((mac, key)) = rshares[ll].1 .0[j] else {
