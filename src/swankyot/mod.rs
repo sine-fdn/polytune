@@ -11,14 +11,16 @@
 //!
 
 pub mod alsz;
-pub mod chou_orlandi;
 pub mod kos;
+pub mod chou_orlandi;
 pub mod utils;
 
 use curve25519_dalek::RistrettoPoint;
-use ocelot::Error;
 use rand::{CryptoRng, Rng};
-use scuttlebutt::{AbstractChannel, Block};
+use scuttlebutt::Block;
+
+use crate::channel::Channel;
+use crate::faand::Error;
 
 pub(crate) fn hash_pt(tweak: u128, pt: &RistrettoPoint) -> Block {
     let h = blake3::keyed_hash(pt.compress().as_bytes(), &tweak.to_le_bytes());
@@ -48,16 +50,18 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    fn init<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Self, Error>;
     /// Sends messages.
-    fn send<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn send<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<(), Error>;
 }
 
@@ -68,10 +72,11 @@ where
 {
     /// Runs any one-time initialization to create the oblivious transfer
     /// object with a fixed key.
-    fn init_fixed_key<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Self, Error>;
 }
 
@@ -86,16 +91,18 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    fn init<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Self, Error>;
     /// Receives messages.
-    fn receive<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn receive<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error>;
 }
 
@@ -107,11 +114,12 @@ where
 {
     /// Correlated oblivious transfer send. Takes as input an array `deltas`
     /// which specifies the offset between the zero and one message.
-    fn send_correlated<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<(Self::Msg, Self::Msg)>, Error>;
 }
 
@@ -122,10 +130,11 @@ where
     Self: Sized,
 {
     /// Correlated oblivious transfer receive.
-    fn receive_correlated<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error>;
 }

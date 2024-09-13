@@ -1,15 +1,18 @@
 //! Implementation of the Keller-Orsini-Scholl oblivious transfer extension
 //! protocol (cf. <https://eprint.iacr.org/2015/546>).
 
-use crate::swankyot::{
-    alsz::{Receiver as AlszReceiver, Sender as AlszSender},
-    utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
-    Sender as OtSender,
+use crate::{
+    channel::{recv_from, send_to, Channel},
+    faand::Error,
+    swankyot::{
+        alsz::{Receiver as AlszReceiver, Sender as AlszSender},
+        utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
+        Sender as OtSender,
+    },
 };
 
-use ocelot::Error;
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
-use scuttlebutt::{cointoss, AbstractChannel, AesRng, Block, Malicious, SemiHonest};
+use scuttlebutt::{AesRng, Block, Malicious, SemiHonest};
 use std::io::ErrorKind;
 
 // The statistical security parameter.
@@ -26,20 +29,22 @@ pub struct Receiver<OT: OtSender<Msg = Block> + Malicious> {
 }
 
 impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
-    pub(super) fn send_setup<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    pub(super) async fn send_setup<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         m: usize,
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<u8>, Error> {
         let m = if m % 8 != 0 { m + (8 - m % 8) } else { m };
         let ncols = m + 128 + SSP;
-        let qs = self.ot.send_setup(channel, ncols)?;
+        let qs = self.ot.send_setup(channel, ncols, p_to).await?;
         // Check correlation
         let mut seed = Block::default();
         rng.fill_bytes(seed.as_mut());
-        let seed = cointoss::send(channel, &[seed])?;
-        let mut rng = AesRng::from_seed(seed[0]);
+        //let seed = cointoss::send(channel, &[seed])?;
+        //let mut rng = AesRng::from_seed(seed[0]);
+        let mut rng = AesRng::from_seed(seed);
         let mut check = (Block::default(), Block::default());
         let mut chi = Block::default();
         for j in 0..ncols {
@@ -50,9 +55,10 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
             let [lo, hi] = q.carryless_mul_wide(chi);
             check = utils::xor_two_blocks(&check, &(lo, hi));
         }
-        let x = channel.read_block()?;
-        let t0 = channel.read_block()?;
-        let t1 = channel.read_block()?;
+        let (x, t0, t1): (Block, Block, Block) = recv_from(channel, p_to, "KOS_OT_x_t0_t1")
+                .await?
+                .pop()
+                .ok_or(Error::EmptyMsg)?;
         let [lo, hi] = x.carryless_mul_wide(self.ot.s_);
         let check = utils::xor_two_blocks(&check, &(lo, hi));
         if check != (t0, t1) {
@@ -66,12 +72,13 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
 }
 
 impl<OT: OtReceiver<Msg = Block> + Malicious> FixedKeyInitializer for Sender<OT> {
-    fn init_fixed_key<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Self, Error> {
-        let ot = AlszSender::<OT>::init_fixed_key(channel, s_, rng)?;
+        let ot = AlszSender::<OT>::init_fixed_key(channel, s_, rng, p_to).await?;
         Ok(Self { ot })
     }
 }
@@ -79,22 +86,24 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> FixedKeyInitializer for Sender<OT>
 impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
     type Msg = Block;
 
-    fn init<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Self, Error> {
-        let ot = AlszSender::<OT>::init(channel, rng)?;
+        let ot = AlszSender::<OT>::init(channel, rng, p_to).await?;
         Ok(Self { ot })
     }
 
-    fn send<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn send<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[(Block, Block)],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<(), Error> {
         let m = inputs.len();
-        let qs = self.send_setup(channel, m, rng)?;
+        let qs = self.send_setup(channel, m, rng, p_to).await?;
         // Output result
         for (j, input) in inputs.iter().enumerate() {
             let q = &qs[j * 16..(j + 1) * 16];
@@ -103,23 +112,22 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
             let y0 = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ input.0;
             let q = q ^ self.ot.s_;
             let y1 = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ input.1;
-            channel.write_block(&y0)?;
-            channel.write_block(&y1)?;
+            send_to(channel, p_to, "KOS_OT_send", &[(y0, y1)]).await?;
         }
-        channel.flush()?;
         Ok(())
     }
 }
 
 impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
-    fn send_correlated<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<(Self::Msg, Self::Msg)>, Error> {
         let m = deltas.len();
-        let qs = self.send_setup(channel, m, rng)?;
+        let qs = self.send_setup(channel, m, rng, p_to).await?;
         let mut out = Vec::with_capacity(m);
         for (j, delta) in deltas.iter().enumerate() {
             let q = &qs[j * 16..(j + 1) * 16];
@@ -129,10 +137,9 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
             let x1 = x0 ^ *delta;
             let q = q ^ self.ot.s_;
             let y = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ x1;
-            channel.write_block(&y)?;
+            send_to(channel, p_to, "KOS_OT_corr", &[y]).await?;
             out.push((x0, x1));
         }
-        channel.flush()?;
         Ok(out)
     }
 }
@@ -144,23 +151,25 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> std::fmt::Display for Sender<OT> {
 }
 
 impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
-    pub(super) fn receive_setup<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    pub(super) async fn receive_setup<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<u8>, Error> {
         let m = inputs.len();
         let m = if m % 8 != 0 { m + (8 - m % 8) } else { m };
         let m_ = m + 128 + SSP;
         let mut r = utils::boolvec_to_u8vec(inputs);
         r.extend((0..(m_ - m) / 8).map(|_| rand::random::<u8>()));
-        let ts = self.ot.receive_setup(channel, &r, m_)?;
+        let ts = self.ot.receive_setup(channel, &r, m_, p_to).await?;
         // Check correlation
         let mut seed = Block::default();
         rng.fill_bytes(seed.as_mut());
-        let seed = cointoss::receive(channel, &[seed])?;
-        let mut rng = AesRng::from_seed(seed[0]);
+        //let seed = cointoss::receive(channel, &[seed])?;
+        //let mut rng = AesRng::from_seed(seed[0]);
+        let mut rng = AesRng::from_seed(seed);
         let mut x = Block::default();
         let mut t = (Block::default(), Block::default());
         let r_ = utils::u8vec_to_boolvec(&r);
@@ -174,10 +183,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
             let [lo, hi] = tj.carryless_mul_wide(chi);
             t = utils::xor_two_blocks(&t, &(lo, hi));
         }
-        channel.write_block(&x)?;
-        channel.write_block(&t.0)?;
-        channel.write_block(&t.1)?;
-        channel.flush()?;
+        send_to(channel, p_to, "KOS_OT_x_t0_t1", &[(x, t.0, t.1)]).await?;
         Ok(ts)
     }
 }
@@ -185,28 +191,32 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
 impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
     type Msg = Block;
 
-    fn init<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Self, Error> {
-        let ot = AlszReceiver::<OT>::init(channel, rng)?;
+        let ot = AlszReceiver::<OT>::init(channel, rng, p_to).await?;
         Ok(Self { ot })
     }
 
-    fn receive<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn receive<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<Block>, Error> {
-        let ts = self.receive_setup(channel, inputs, rng)?;
+        let ts = self.receive_setup(channel, inputs, rng, p_to).await?;
         // Output result
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
-            let y0 = channel.read_block()?;
-            let y1 = channel.read_block()?;
+            let (y0, y1): (Block, Block) = recv_from(channel, p_to, "KOS_OT_send")
+                .await?
+                .pop()
+                .ok_or(Error::EmptyMsg)?;
             let y = if *b { y1 } else { y0 };
             let y = y ^ self
                 .ot
@@ -219,18 +229,22 @@ impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
 }
 
 impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> {
-    fn receive_correlated<C: AbstractChannel, RNG: CryptoRng + Rng>(
+    async fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error> {
-        let ts = self.receive_setup(channel, inputs, rng)?;
+        let ts = self.receive_setup(channel, inputs, rng, p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
-            let y = channel.read_block()?;
+            let y = recv_from(channel, p_to, "KOS_OT_corr")
+                .await?
+                .pop()
+                .ok_or(Error::EmptyMsg)?;
             let y = if *b { y } else { Block::default() };
             let h = self
                 .ot
