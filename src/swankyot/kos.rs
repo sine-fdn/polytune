@@ -144,12 +144,6 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
     }
 }
 
-impl<OT: OtReceiver<Msg = Block> + Malicious> std::fmt::Display for Sender<OT> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "KOS Sender")
-    }
-}
-
 impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
     pub(super) async fn receive_setup<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -253,12 +247,6 @@ impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> 
             out.push(y ^ h);
         }
         Ok(out)
-    }
-}
-
-impl<OT: OtSender<Msg = Block> + Malicious> std::fmt::Display for Receiver<OT> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "KOS Receiver")
     }
 }
 

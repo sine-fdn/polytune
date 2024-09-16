@@ -112,12 +112,6 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     }
 }
 
-impl<OT: OtReceiver<Msg = Block> + SemiHonest> std::fmt::Display for Sender<OT> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "ALSZ Sender")
-    }
-}
-
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
     async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -246,12 +240,6 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT>
             out.push(y ^ h);
         }
         Ok(out)
-    }
-}
-
-impl<OT: OtSender<Msg = Block> + SemiHonest> std::fmt::Display for Receiver<OT> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "ALSZ Receiver")
     }
 }
 

@@ -12,11 +12,10 @@
 //! during the key derivation phase.
 
 use crate::{
-    channel::{recv_from, send_to, Channel},
+    channel::{recv_from, send_to, recv_vec_from, Channel},
     swankyot::{Receiver as OtReceiver, Sender as OtSender},
+    faand::Error,
 };
-
-use crate::faand::Error;
 
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_TABLE,
@@ -43,7 +42,7 @@ impl OtSender for Sender {
     ) -> Result<Self, Error> {
         let y = Scalar::random(&mut rng);
         let s = &y * RISTRETTO_BASEPOINT_TABLE;
-        send_to(channel, p_to, "CO_OT_s", &[s.compress().as_bytes()]).await?;
+        send_to(channel, p_to, "CO_OT_s", &s.compress().as_bytes().to_vec()).await?;
         Ok(Self { y, s, counter: 0 })
     }
 
@@ -59,7 +58,7 @@ impl OtSender for Sender {
 
         // Replace map with a loop to support async/await
         for i in 0..inputs.len() {
-            let r_bytes: Vec<u8> = recv_from(channel, p_to, "CO_OT_r").await?;
+            let r_bytes: Vec<u8> = recv_vec_from(channel, p_to, "CO_OT_r", 32).await?;
             let r = convert_vec_to_point(r_bytes)?;
             let yr = self.y * r;
             let k0 = super::hash_pt(self.counter + i as u128, &yr);
@@ -77,11 +76,6 @@ impl OtSender for Sender {
     }
 }
 
-impl std::fmt::Display for Sender {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Chou-Orlandi Sender")
-    }
-}
 
 /// Oblivious transfer receiver.
 pub struct Receiver {
@@ -97,7 +91,7 @@ impl OtReceiver for Receiver {
         _: &mut RNG,
         p_to: usize,
     ) -> Result<Self, Error> {
-        let s_bytes: Vec<u8> = recv_from(channel, p_to, "CO_OT_s").await?;
+        let s_bytes: Vec<u8> = recv_vec_from(channel, p_to, "CO_OT_s", 32).await?;
         let s = convert_vec_to_point(s_bytes)?;
         let s = RistrettoBasepointTable::create(&s);
         Ok(Self { s, counter: 0 })
@@ -120,7 +114,8 @@ impl OtReceiver for Receiver {
             let c = if *b { one } else { zero };
             let r = c + &x * RISTRETTO_BASEPOINT_TABLE;
 
-            send_to(channel, p_to, "CO_OT_r", &[r.compress().as_bytes()]).await?;
+            let send_vec = r.compress().as_bytes().to_vec();
+            send_to(channel, p_to, "CO_OT_r", &send_vec).await?;
 
             let k = super::hash_pt(self.counter + i as u128, &(&x * &self.s));
             ks.push(k);
@@ -142,23 +137,20 @@ impl OtReceiver for Receiver {
     }
 }
 
-impl std::fmt::Display for Receiver {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Chou-Orlandi Receiver")
-    }
-}
-
 impl SemiHonest for Sender {}
 impl Malicious for Sender {}
 impl SemiHonest for Receiver {}
 impl Malicious for Receiver {}
 
-fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
-    let pt = match CompressedRistretto::from_slice(&data)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-        .decompress()
+pub(crate) fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
+    let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidOTData)?;
+    let pt = match CompressedRistretto::from_slice(&dataarr)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+            .decompress()
     {
-        Some(pt) => pt,
+        Some(pt) => {
+            pt
+        }
         None => {
             return Err(Error::InvalidOTData);
         }

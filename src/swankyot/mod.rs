@@ -11,16 +11,16 @@
 //!
 
 pub mod alsz;
-pub mod kos;
 pub mod chou_orlandi;
+pub mod kos;
 pub mod utils;
 
 use curve25519_dalek::RistrettoPoint;
 use rand::{CryptoRng, Rng};
+
 use scuttlebutt::Block;
 
-use crate::channel::Channel;
-use crate::faand::Error;
+use crate::{channel::Channel, faand::Error};
 
 pub(crate) fn hash_pt(tweak: u128, pt: &RistrettoPoint) -> Block {
     let h = blake3::keyed_hash(pt.compress().as_bytes(), &tweak.to_le_bytes());
@@ -50,19 +50,19 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    async fn init<C: Channel, RNG: CryptoRng + Rng>(
+    fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<Self, Error>;
+    ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Sends messages.
-    async fn send<C: Channel, RNG: CryptoRng + Rng>(
+    fn send<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<(), Error>;
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
 }
 
 /// Trait for initializing an oblivious transfer object with a fixed key.
@@ -72,12 +72,12 @@ where
 {
     /// Runs any one-time initialization to create the oblivious transfer
     /// object with a fixed key.
-    async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
+    fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<Self, Error>;
+    ) -> impl std::future::Future<Output = Result<Self, Error>>;
 }
 
 /// Trait for one-out-of-two oblivious transfer from the receiver's
@@ -91,19 +91,19 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    async fn init<C: Channel, RNG: CryptoRng + Rng>(
+    fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<Self, Error>;
+    ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Receives messages.
-    async fn receive<C: Channel, RNG: CryptoRng + Rng>(
+    fn receive<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<Vec<Self::Msg>, Error>;
+    ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
 }
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the sender's
@@ -114,13 +114,13 @@ where
 {
     /// Correlated oblivious transfer send. Takes as input an array `deltas`
     /// which specifies the offset between the zero and one message.
-    async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<Vec<(Self::Msg, Self::Msg)>, Error>;
+    ) -> impl std::future::Future<Output = Result<Vec<(Self::Msg, Self::Msg)>, Error>>;
 }
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the receiver's
@@ -130,11 +130,11 @@ where
     Self: Sized,
 {
     /// Correlated oblivious transfer receive.
-    async fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
-    ) -> Result<Vec<Self::Msg>, Error>;
+    ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
 }
