@@ -2,7 +2,7 @@
 //! protocol (cf. <https://eprint.iacr.org/2015/546>).
 
 use crate::{
-    channel::{recv_from, send_to, Channel},
+    channel::{recv_from, send_to, recv_vec_from, Channel},
     faand::Error,
     swankyot::{
         alsz::{Receiver as AlszReceiver, Sender as AlszSender},
@@ -129,6 +129,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
         let m = deltas.len();
         let qs = self.send_setup(channel, m, rng, p_to).await?;
         let mut out = Vec::with_capacity(m);
+        let mut ys: Vec<Block> = Vec::with_capacity(m);
         for (j, delta) in deltas.iter().enumerate() {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
@@ -137,9 +138,10 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
             let x1 = x0 ^ *delta;
             let q = q ^ self.ot.s_;
             let y = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ x1;
-            send_to(channel, p_to, "KOS_OT_corr", &[y]).await?;
+            ys.push(y);
             out.push((x0, x1));
         }
+        send_to(channel, p_to, "KOS_OT_corr", &ys).await?;
         Ok(out)
     }
 }
@@ -231,13 +233,11 @@ impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> 
     ) -> Result<Vec<Self::Msg>, Error> {
         let ts = self.receive_setup(channel, inputs, rng, p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
+        let ys: Vec<Block> = recv_vec_from(channel, p_to, "KOS_OT_corr", inputs.len()).await?;
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
-            let y = recv_from(channel, p_to, "KOS_OT_corr")
-                .await?
-                .pop()
-                .ok_or(Error::EmptyMsg)?;
+            let y = ys[j];
             let y = if *b { y } else { Block::default() };
             let h = self
                 .ot

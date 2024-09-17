@@ -34,9 +34,7 @@ pub(crate) async fn kos_ot_sender(
     p_to: usize,
 ) -> Result<Vec<(u128, u128)>, Error> {
     let mut rng: AesRng = AesRng::new();
-    println!("KOS OT Sender");
     let mut ot = swankyot::KosSender::init(channel, &mut rng, p_to).await?;
-    println!("KOS OT Sender Init done");
 
     let sender_out_block = ot
         .send_correlated(channel, &deltas, shared_rng, p_to)
@@ -55,9 +53,7 @@ pub(crate) async fn kos_ot_receiver(
     p_to: usize,
 ) -> Result<Vec<u128>, Error> {
     let mut rng = AesRng::new();
-    println!("KOS OT Receiver");
     let mut ot = swankyot::KosReceiver::init(channel, &mut rng, p_to).await?;
-    println!("KOS OT Receiver Init done");
 
     let recver_out_block = ot
         .receive_correlated(channel, &bs, shared_rng, p_to)

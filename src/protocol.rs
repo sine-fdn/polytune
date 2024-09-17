@@ -351,7 +351,6 @@ pub async fn mpc(
         delta = Delta(random());
         let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
         for p in (0..p_max).filter(|p| *p != p_own) {
-            println!("OT with party {p}");
             let sender_out: Vec<(u128, u128)>;
             let recver_out: Vec<u128>;
             if p_own < p {

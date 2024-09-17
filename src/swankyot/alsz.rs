@@ -4,7 +4,7 @@
 #![allow(non_upper_case_globals)]
 
 use crate::{
-    channel::{recv_from, send_to, Channel},
+    channel::{recv_from, recv_vec_from, send_to, Channel},
     faand::Error,
     swankyot::{
         utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
@@ -66,12 +66,12 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
         let ncols = if m % 8 != 0 { m + (8 - m % 8) } else { m };
         let mut qs = vec![0u8; nrows * ncols / 8];
         let zero = vec![0u8; ncols / 8];
+        let uvec: Vec<Vec<u8>> = recv_vec_from(channel, p_to, "ALSZ_OT_setup", 128).await?;
         for (j, (b, rng)) in self.s.iter().zip(self.rngs.iter_mut()).enumerate() {
             let range = j * ncols / 8..(j + 1) * ncols / 8;
             let q = &mut qs[range];
-            let u: Vec<u8> = recv_from(channel, p_to, "ALSZ_OT_setup").await?;
             rng.fill_bytes(q);
-            scutils::xor_inplace(q, if *b { &u } else { &zero });
+            scutils::xor_inplace(q, if *b { &uvec[j] } else { &zero });
         }
         Ok(utils::transpose(&qs, nrows, ncols))
     }
@@ -149,16 +149,19 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
         const nrows: usize = 128;
         let ncols = if m % 8 != 0 { m + (8 - m % 8) } else { m };
         let mut ts = vec![0u8; nrows * ncols / 8];
-        let mut g = vec![0u8; ncols / 8];
+        let mut gvec: Vec<Vec<u8>> = vec![];
         for j in 0..self.rngs.len() {
             let range = j * ncols / 8..(j + 1) * ncols / 8;
             let t = &mut ts[range];
             self.rngs[j].0.fill_bytes(t);
+
+            let mut g = vec![0u8; ncols / 8];
             self.rngs[j].1.fill_bytes(&mut g);
             scutils::xor_inplace(&mut g, t);
             scutils::xor_inplace(&mut g, r);
-            send_to(channel, p_to, "ALSZ_OT_setup", &g).await?;
+            gvec.push(g);
         }
+        send_to(channel, p_to, "ALSZ_OT_setup", &gvec).await?;
         Ok(utils::transpose(&ts, nrows, ncols))
     }
 }

@@ -57,8 +57,9 @@ impl OtSender for Sender {
         let mut ks = Vec::with_capacity(inputs.len());
 
         // Replace map with a loop to support async/await
+        let r_bytes_vec: Vec<Vec<u8>> = recv_vec_from(channel, p_to, "CO_OT_r", 128).await?;
         for i in 0..inputs.len() {
-            let r_bytes: Vec<u8> = recv_vec_from(channel, p_to, "CO_OT_r", 32).await?;
+            let r_bytes: Vec<u8> = r_bytes_vec[i].clone();
             let r = convert_vec_to_point(r_bytes)?;
             let yr = self.y * r;
             let k0 = super::hash_pt(self.counter + i as u128, &yr);
@@ -66,12 +67,13 @@ impl OtSender for Sender {
             ks.push((k0, k1));
         }
         self.counter += inputs.len() as u128;
+        let mut c0c1vec = vec![];
         for (input, k) in inputs.iter().zip(ks.into_iter()) {
             let c0 = k.0 ^ input.0;
             let c1 = k.1 ^ input.1;
-
-            send_to(channel, p_to, "CO_OT_c0c1", &[(c0, c1)]).await?;
+            c0c1vec.push((c0, c1));
         }
+        send_to(channel, p_to, "CO_OT_c0c1", &c0c1vec).await?;
         Ok(())
     }
 }
@@ -108,6 +110,7 @@ impl OtReceiver for Receiver {
         let one = &Scalar::ONE * &self.s;
         let mut ks = Vec::with_capacity(inputs.len());
 
+        let mut send_vec_vec: Vec<Vec<u8>> = vec![];
         for (i, b) in inputs.iter().enumerate() {
             //this part was changes from swanky to async
             let x = Scalar::random(&mut rng);
@@ -115,21 +118,19 @@ impl OtReceiver for Receiver {
             let r = c + &x * RISTRETTO_BASEPOINT_TABLE;
 
             let send_vec = r.compress().as_bytes().to_vec();
-            send_to(channel, p_to, "CO_OT_r", &send_vec).await?;
+            send_vec_vec.push(send_vec);
 
             let k = super::hash_pt(self.counter + i as u128, &(&x * &self.s));
             ks.push(k);
         }
+        send_to(channel, p_to, "CO_OT_r", &send_vec_vec).await?;
         self.counter += inputs.len() as u128;
 
         let mut result = Vec::with_capacity(inputs.len());
 
         // Now receive and calculate the result asynchronously
-        for (b, k) in inputs.iter().zip(ks.into_iter()) {
-            let (c0, c1): (Block, Block) = recv_from(channel, p_to, "CO_OT_c0c1")
-                .await?
-                .pop()
-                .ok_or(Error::EmptyMsg)?;
+        let c0c1vec: Vec<(Block, Block)> = recv_from(channel, p_to, "CO_OT_c0c1").await?;
+        for ((b, k), (c0, c1)) in inputs.iter().zip(ks).zip(c0c1vec) {
             let c = k ^ if *b { c1 } else { c0 };
             result.push(c);
         }
