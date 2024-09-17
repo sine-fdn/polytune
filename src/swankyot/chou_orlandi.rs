@@ -143,14 +143,8 @@ impl Malicious for Receiver {}
 
 pub(crate) fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
     let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidOTData)?;
-    let pt = match CompressedRistretto::from_slice(&dataarr)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-        .decompress()
-    {
-        Some(pt) => pt,
-        None => {
-            return Err(Error::InvalidOTData);
-        }
-    };
+    let compressed_pt = CompressedRistretto::from_slice(&dataarr)
+        .map_err(|_| Error::InvalidOTData)?;
+    let pt = compressed_pt.decompress().ok_or(Error::InvalidOTData)?;
     Ok(pt)
 }

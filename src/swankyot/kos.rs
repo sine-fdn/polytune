@@ -13,7 +13,6 @@ use crate::{
 
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use scuttlebutt::{AesRng, Block, Malicious, SemiHonest};
-use std::io::ErrorKind;
 
 // The statistical security parameter.
 const SSP: usize = 40;
@@ -61,10 +60,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
         let [lo, hi] = x.carryless_mul_wide(self.ot.s_);
         let check = utils::xor_two_blocks(&check, &(lo, hi));
         if check != (t0, t1) {
-            return Err(Error::from(std::io::Error::new(
-                ErrorKind::InvalidData,
-                "Consistency check failed",
-            )));
+            return Err(Error::ConsistencyCheckFailed);
         }
         Ok(qs)
     }

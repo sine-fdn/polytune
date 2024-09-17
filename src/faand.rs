@@ -1,5 +1,5 @@
 //! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
-use std::{io::Error as IoError, vec};
+use std::vec;
 
 use blake3::Hasher;
 use rand::{random, Rng, SeedableRng};
@@ -43,8 +43,6 @@ pub enum Error {
     InvalidLength,
     /// Invalid data in OT.
     InvalidOTData,
-    /// Std IO error.
-    IoError(IoError),
     /// KOS consistency check failed.
     ConsistencyCheckFailed,
 }
@@ -52,12 +50,6 @@ pub enum Error {
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelError(e)
-    }
-}
-
-impl From<IoError> for Error {
-    fn from(e: IoError) -> Self {
-        Self::IoError(e)
     }
 }
 
