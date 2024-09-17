@@ -12,7 +12,7 @@ use crate::{
     faand::{self, beaver_aand, bucket_size, fashare, shared_rng, RHO},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
-    ot::{generate_kosots, u128_to_block},
+    ot::{kos_ot_receiver, kos_ot_sender, u128_to_block},
 };
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
@@ -335,9 +335,9 @@ pub async fn mpc(
 
     let mut sender_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
     let mut receiver_ot: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
-    let mut sender_ot_own: Vec<Vec<u128>> = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
 
-    let mut delta: Delta;
+    let delta: Delta;
+    let mut shared_rand = shared_rng(channel, p_own, p_max).await?;
     let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
         .map(|_| random())
         .collect();
@@ -348,19 +348,23 @@ pub async fn mpc(
             .pop()
             .ok_or(Error::EmptyMsg)?;
     } else {
-        //delta = Delta(random());
+        delta = Delta(random());
+        let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
         for p in (0..p_max).filter(|p| *p != p_own) {
-            delta = Delta(p as u128); //TODO random delta once communication is there for OT
-            let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
-            let (sender_out, recver_out) = generate_kosots(deltas, x.clone());
+            let sender_out: Vec<(u128, u128)>;
+            let recver_out: Vec<u128>;
+            if p_own < p {
+                sender_out = kos_ot_sender(channel, &mut shared_rand, deltas.clone(), p).await?;
+                recver_out = kos_ot_receiver(channel, &mut shared_rand, x.clone(), p).await?;
+            } else {
+                recver_out = kos_ot_receiver(channel, &mut shared_rand, x.clone(), p).await?;
+                sender_out = kos_ot_sender(channel, &mut shared_rand, deltas.clone(), p).await?;
+            }
+
             let sender: Vec<u128> = sender_out.iter().map(|(first, _)| *first).collect();
             sender_ot[p] = sender;
-
             receiver_ot[p] = recver_out;
-            send_to(channel, p, "ot", &sender_ot[p]).await?;
-            sender_ot_own[p] = recv_from(channel, p, "ot").await?;
         }
-        delta = Delta(p_own as u128);
     }
 
     let random_shares: Vec<Share>;
@@ -368,7 +372,6 @@ pub async fn mpc(
     let auth_bits: Vec<Share>;
     let mut shares: Vec<Share> = vec![Share(false, Auth(smallvec![])); num_gates];
     let mut labels: Vec<Label> = vec![Label(0); num_gates];
-    let mut shared_rng = shared_rng(channel, p_own, p_max).await?;
     let mut xyz_shares: Vec<Share> = vec![];
 
     if trusted {
@@ -381,8 +384,8 @@ pub async fn mpc(
             p_own,
             p_max,
             secret_bits + 3 * lprime,
-            &mut shared_rng,
-            (sender_ot_own, receiver_ot),
+            &mut shared_rand,
+            (sender_ot, receiver_ot),
         )
         .await?;
 
@@ -435,7 +438,7 @@ pub async fn mpc(
             p_own,
             p_max,
             num_and_gates,
-            &mut shared_rng,
+            &mut shared_rand,
             xyz_shares,
         )
         .await?;
