@@ -40,8 +40,8 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
         let ncols = m + 128 + SSP;
         let qs = self.ot.send_setup(channel, ncols, p_to).await?;
         // Check correlation
-        let mut seed = Block::default();
-        rng.fill_bytes(seed.as_mut());
+        let seed = Block::default();
+        //rng.fill_bytes(seed.as_mut());
         //let seed = cointoss::send(channel, &[seed])?;
         //let mut rng = AesRng::from_seed(seed[0]);
         let mut rng = AesRng::from_seed(seed);
@@ -159,8 +159,8 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
         r.extend((0..(m_ - m) / 8).map(|_| rand::random::<u8>()));
         let ts = self.ot.receive_setup(channel, &r, m_, p_to).await?;
         // Check correlation
-        let mut seed = Block::default();
-        rng.fill_bytes(seed.as_mut());
+        let seed = Block::default();
+        //rng.fill_bytes(seed.as_mut());
         //let seed = cointoss::receive(channel, &[seed])?;
         //let mut rng = AesRng::from_seed(seed[0]);
         let mut rng = AesRng::from_seed(seed);
