@@ -8,6 +8,7 @@ use crate::{
         alsz::{Receiver as AlszReceiver, Sender as AlszSender},
         utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
         Sender as OtSender,
+        cointoss,
     },
 };
 
@@ -40,11 +41,10 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
         let ncols = m + 128 + SSP;
         let qs = self.ot.send_setup(channel, ncols, p_to).await?;
         // Check correlation
-        let seed = Block::default();
-        //rng.fill_bytes(seed.as_mut());
-        //let seed = cointoss::send(channel, &[seed])?;
-        //let mut rng = AesRng::from_seed(seed[0]);
-        let mut rng = AesRng::from_seed(seed);
+        let mut seed = Block::default();
+        rng.fill_bytes(seed.as_mut());
+        let seed = cointoss::send(channel, &[seed], p_to).await?;
+        let mut rng = AesRng::from_seed(seed[0]);
         let mut check = (Block::default(), Block::default());
         let mut chi = Block::default();
         for j in 0..ncols {
@@ -159,11 +159,10 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
         r.extend((0..(m_ - m) / 8).map(|_| rand::random::<u8>()));
         let ts = self.ot.receive_setup(channel, &r, m_, p_to).await?;
         // Check correlation
-        let seed = Block::default();
-        //rng.fill_bytes(seed.as_mut());
-        //let seed = cointoss::receive(channel, &[seed])?;
-        //let mut rng = AesRng::from_seed(seed[0]);
-        let mut rng = AesRng::from_seed(seed);
+        let mut seed = Block::default();
+        rng.fill_bytes(seed.as_mut());
+        let seed = cointoss::receive(channel, &[seed], p_to).await?;
+        let mut rng = AesRng::from_seed(seed[0]);
         let mut x = Block::default();
         let mut t = (Block::default(), Block::default());
         let r_ = utils::u8vec_to_boolvec(&r);

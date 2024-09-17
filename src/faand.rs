@@ -45,6 +45,8 @@ pub enum Error {
     InvalidOTData,
     /// Std IO error.
     IoError(IoError),
+    /// KOS consistency check failed.
+    ConsistencyCheckFailed,
 }
 
 impl From<channel::Error> for Error {

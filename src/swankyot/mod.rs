@@ -14,6 +14,7 @@ pub mod alsz;
 pub mod chou_orlandi;
 pub mod kos;
 pub mod utils;
+pub mod cointoss;
 
 use curve25519_dalek::RistrettoPoint;
 use rand::{CryptoRng, Rng};
