@@ -1,5 +1,5 @@
 //! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
-use std::{vec, io::Error as IoError};
+use std::{io::Error as IoError, vec};
 
 use blake3::Hasher;
 use rand::{random, Rng, SeedableRng};

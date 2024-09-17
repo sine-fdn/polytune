@@ -2,13 +2,12 @@
 //! protocol (cf. <https://eprint.iacr.org/2015/546>).
 
 use crate::{
-    channel::{recv_from, send_to, recv_vec_from, Channel},
+    channel::{recv_from, recv_vec_from, send_to, Channel},
     faand::Error,
     swankyot::{
         alsz::{Receiver as AlszReceiver, Sender as AlszSender},
-        utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
-        Sender as OtSender,
-        cointoss,
+        cointoss, utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer,
+        Receiver as OtReceiver, Sender as OtSender,
     },
 };
 
@@ -56,9 +55,9 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
             check = utils::xor_two_blocks(&check, &(lo, hi));
         }
         let (x, t0, t1): (Block, Block, Block) = recv_from(channel, p_to, "KOS_OT_x_t0_t1")
-                .await?
-                .pop()
-                .ok_or(Error::EmptyMsg)?;
+            .await?
+            .pop()
+            .ok_or(Error::EmptyMsg)?;
         let [lo, hi] = x.carryless_mul_wide(self.ot.s_);
         let check = utils::xor_two_blocks(&check, &(lo, hi));
         if check != (t0, t1) {

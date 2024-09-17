@@ -12,9 +12,9 @@
 //! during the key derivation phase.
 
 use crate::{
-    channel::{recv_from, send_to, recv_vec_from, Channel},
-    swankyot::{Receiver as OtReceiver, Sender as OtSender},
+    channel::{recv_from, recv_vec_from, send_to, Channel},
     faand::Error,
+    swankyot::{Receiver as OtReceiver, Sender as OtSender},
 };
 
 use curve25519_dalek::{
@@ -42,7 +42,7 @@ impl OtSender for Sender {
     ) -> Result<Self, Error> {
         let y = Scalar::random(&mut rng);
         let s = &y * RISTRETTO_BASEPOINT_TABLE;
-        send_to(channel, p_to, "CO_OT_s", &s.compress().as_bytes().to_vec()).await?;
+        send_to(channel, p_to, "CO_OT_s", s.compress().as_bytes().as_ref()).await?;
         Ok(Self { y, s, counter: 0 })
     }
 
@@ -58,8 +58,7 @@ impl OtSender for Sender {
 
         // Replace map with a loop to support async/await
         let r_bytes_vec: Vec<Vec<u8>> = recv_vec_from(channel, p_to, "CO_OT_r", 128).await?;
-        for i in 0..inputs.len() {
-            let r_bytes: Vec<u8> = r_bytes_vec[i].clone();
+        for (i, r_bytes) in r_bytes_vec.into_iter().enumerate() {
             let r = convert_vec_to_point(r_bytes)?;
             let yr = self.y * r;
             let k0 = super::hash_pt(self.counter + i as u128, &yr);
@@ -77,7 +76,6 @@ impl OtSender for Sender {
         Ok(())
     }
 }
-
 
 /// Oblivious transfer receiver.
 pub struct Receiver {
@@ -146,12 +144,10 @@ impl Malicious for Receiver {}
 pub(crate) fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
     let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidOTData)?;
     let pt = match CompressedRistretto::from_slice(&dataarr)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-            .decompress()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+        .decompress()
     {
-        Some(pt) => {
-            pt
-        }
+        Some(pt) => pt,
         None => {
             return Err(Error::InvalidOTData);
         }
