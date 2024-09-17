@@ -142,7 +142,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
 }
 
 impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
-    pub(super) async fn receive_setup<C: Channel, RNG: CryptoRng + Rng>(
+    pub(super) async fn recv_setup<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -154,11 +154,11 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
         let m_ = m + 128 + SSP;
         let mut r = utils::boolvec_to_u8vec(inputs);
         r.extend((0..(m_ - m) / 8).map(|_| rand::random::<u8>()));
-        let ts = self.ot.receive_setup(channel, &r, m_, p_to).await?;
+        let ts = self.ot.recv_setup(channel, &r, m_, p_to).await?;
         // Check correlation
         let mut seed = Block::default();
         rng.fill_bytes(seed.as_mut());
-        let seed = cointoss::receive(channel, &[seed], p_to).await?;
+        let seed = cointoss::recv(channel, &[seed], p_to).await?;
         let mut rng = AesRng::from_seed(seed[0]);
         let mut x = Block::default();
         let mut t = (Block::default(), Block::default());
@@ -190,14 +190,14 @@ impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
         Ok(Self { ot })
     }
 
-    async fn receive<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
     ) -> Result<Vec<Block>, Error> {
-        let ts = self.receive_setup(channel, inputs, rng, p_to).await?;
+        let ts = self.recv_setup(channel, inputs, rng, p_to).await?;
         // Output result
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
@@ -219,14 +219,14 @@ impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
 }
 
 impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> {
-    async fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error> {
-        let ts = self.receive_setup(channel, inputs, rng, p_to).await?;
+        let ts = self.recv_setup(channel, inputs, rng, p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
         let ys: Vec<Block> = recv_vec_from(channel, p_to, "KOS_OT_corr", inputs.len()).await?;
         for (j, b) in inputs.iter().enumerate() {

@@ -55,9 +55,7 @@ pub(crate) async fn kos_ot_receiver(
     let mut rng = AesRng::new();
     let mut ot = swankyot::KosReceiver::init(channel, &mut rng, p_to).await?;
 
-    let recver_out_block = ot
-        .receive_correlated(channel, &bs, shared_rng, p_to)
-        .await?;
+    let recver_out_block = ot.recv_correlated(channel, &bs, shared_rng, p_to).await?;
     let mut recver_out: Vec<u128> = vec![];
     for i in recver_out_block.iter() {
         recver_out.push(block_to_u128(*i));

@@ -40,7 +40,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
     ) -> Result<Self, Error> {
         let mut ot = OT::init(channel, rng, p_to).await?;
         let s = utils::u8vec_to_boolvec(&s_);
-        let ks = ot.receive(channel, &s, rng, p_to).await?;
+        let ks = ot.recv(channel, &s, rng, p_to).await?;
         let rngs = ks
             .into_iter()
             .map(AesRng::from_seed)
@@ -139,7 +139,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
 }
 
 impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
-    pub(super) async fn receive_setup<C: Channel>(
+    pub(super) async fn recv_setup<C: Channel>(
         &mut self,
         channel: &mut C,
         r: &[u8],
@@ -195,7 +195,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         })
     }
 
-    async fn receive<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -203,7 +203,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error> {
         let r = utils::boolvec_to_u8vec(inputs);
-        let ts = self.receive_setup(channel, &r, inputs.len(), p_to).await?;
+        let ts = self.recv_setup(channel, &r, inputs.len(), p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
@@ -221,7 +221,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
 }
 
 impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT> {
-    async fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -229,7 +229,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT>
         p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error> {
         let r = utils::boolvec_to_u8vec(inputs);
-        let ts = self.receive_setup(channel, &r, inputs.len(), p_to).await?;
+        let ts = self.recv_setup(channel, &r, inputs.len(), p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];

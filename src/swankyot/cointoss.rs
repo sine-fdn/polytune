@@ -43,7 +43,7 @@ pub async fn send<C: Channel>(
 
 /// Coin tossing receiver.
 #[inline]
-pub async fn receive<C: Channel>(
+pub async fn recv<C: Channel>(
     channel: &mut C,
     seeds: &[Block],
     p_to: usize,

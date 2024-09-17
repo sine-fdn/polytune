@@ -98,7 +98,7 @@ where
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Receives messages.
-    fn receive<C: Channel, RNG: CryptoRng + Rng>(
+    fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -131,7 +131,7 @@ where
     Self: Sized,
 {
     /// Correlated oblivious transfer receive.
-    fn receive_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],

@@ -97,7 +97,7 @@ impl OtReceiver for Receiver {
         Ok(Self { s, counter: 0 })
     }
 
-    async fn receive<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -143,8 +143,8 @@ impl Malicious for Receiver {}
 
 pub(crate) fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
     let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidOTData)?;
-    let compressed_pt = CompressedRistretto::from_slice(&dataarr)
-        .map_err(|_| Error::InvalidOTData)?;
+    let compressed_pt =
+        CompressedRistretto::from_slice(&dataarr).map_err(|_| Error::InvalidOTData)?;
     let pt = compressed_pt.decompress().ok_or(Error::InvalidOTData)?;
     Ok(pt)
 }
