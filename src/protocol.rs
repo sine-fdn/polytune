@@ -497,7 +497,7 @@ pub async fn mpc(
         send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
     } else {
         for p in (0..p_max).filter(|p| *p != p_eval) {
-            garbled_gates[p] = recv_from(channel, p, "preprocessed gates").await?
+            garbled_gates[p] = recv_vec_from(channel, p, "preprocessed gates", num_gates).await?
         }
         for (w, gate) in circuit.wires().iter().enumerate() {
             if let Wire::And(x, y) = gate {
