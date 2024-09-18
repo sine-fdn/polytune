@@ -124,7 +124,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
         let m = deltas.len();
         let qs = self.send_setup(channel, m, rng, p_to).await?;
         let mut out = Vec::with_capacity(m);
-        let mut ys: Vec<Block> = Vec::with_capacity(m);
+        let mut ys = Vec::with_capacity(m);
         for (j, delta) in deltas.iter().enumerate() {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
@@ -228,7 +228,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> 
     ) -> Result<Vec<Self::Msg>, Error> {
         let ts = self.recv_setup(channel, inputs, rng, p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
-        let ys: Vec<Block> = recv_vec_from(channel, p_to, "KOS_OT_corr", inputs.len()).await?;
+        let ys = recv_vec_from::<Block>(channel, p_to, "KOS_OT_corr", inputs.len()).await?;
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();

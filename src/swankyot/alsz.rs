@@ -149,7 +149,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
         const nrows: usize = 128;
         let ncols = if m % 8 != 0 { m + (8 - m % 8) } else { m };
         let mut ts = vec![0u8; nrows * ncols / 8];
-        let mut gvec: Vec<Vec<u8>> = vec![];
+        let mut gvec = vec![];
         for j in 0..self.rngs.len() {
             let range = j * ncols / 8..(j + 1) * ncols / 8;
             let t = &mut ts[range];
@@ -208,7 +208,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
-            let (y0, y1): (Block, Block) = recv_from(channel, p_to, "ALSZ_OT_y0y1")
+            let (y0, y1) = recv_from::<(Block, Block)>(channel, p_to, "ALSZ_OT_y0y1")
                 .await?
                 .pop()
                 .ok_or(Error::EmptyMsg)?;
