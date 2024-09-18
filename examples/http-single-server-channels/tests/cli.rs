@@ -10,13 +10,14 @@ const ENDPOINT: &str = "http://127.0.0.1:8000";
 #[test]
 fn simulate() {
     let mut child = Command::new("cargo")
-        .args(["run", "--", "serve"])
+        .args(["run", "--release", "--", "serve"])
         .spawn()
         .unwrap();
     sleep(Duration::from_millis(500));
     let mut cmd = Command::new("cargo")
         .args([
             "run",
+            "--release",
             "--",
             "pre",
             ENDPOINT,
@@ -44,6 +45,7 @@ fn simulate() {
         let party_arg = format!("--party={p}");
         let args = vec![
             "run",
+            "--release",
             "--",
             "party",
             ENDPOINT,
@@ -73,6 +75,7 @@ fn simulate() {
     }
     let args = vec![
         "run",
+        "--release",
         "--",
         "party",
         ENDPOINT,

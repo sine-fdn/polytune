@@ -137,8 +137,8 @@ async fn main() -> Result<()> {
                 .map(|c| c.map(|(c, _)| c))
                 .collect();
 
-            let channel = IrohChannel::new(conns, MAX_MSG_BYTES);
-            fpre(channel, parties).await.unwrap();
+            let mut channel = IrohChannel::new(conns, MAX_MSG_BYTES);
+            fpre(&mut channel, parties).await.unwrap();
             Ok(())
         }
         Commands::Party {
@@ -240,17 +240,16 @@ async fn main() -> Result<()> {
 
             let p_eval = 0;
             let fpre = Preprocessor::TrustedDealer(conns.len() - 1);
-            let channel = IrohChannel::new(conns, MAX_MSG_BYTES);
+            let mut channel = IrohChannel::new(conns, MAX_MSG_BYTES);
             let p_out: Vec<_> = (0..parties).collect();
             let output = mpc(
-                channel,
+                &mut channel,
                 &prg.circuit,
                 &input,
                 fpre,
                 p_eval,
                 party,
                 &p_out,
-                true,
             )
             .await
             .unwrap();
