@@ -598,6 +598,8 @@ fn transform<'a>(
     triples
 }
 
+type Bucket<'a> = SmallVec<[(&'a Share, &'a Share, &'a Share); 3]>;
+
 /// Protocol Pi_aAND that performs F_aAND.
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
@@ -620,7 +622,7 @@ pub(crate) async fn faand(
     let triples = transform(xshares, yshares, &zshares, lprime);
 
     // Step 2) Randomly partition all objects into l buckets, each with b objects.
-    let mut buckets: Vec<SmallVec<[(&Share, &Share, &Share); 3]>> = vec![smallvec![]; l];
+    let mut buckets: Vec<Bucket> = vec![smallvec![]; l];
 
     for obj in triples {
         let mut j = shared_rng.gen_range(0..buckets.len());
@@ -745,7 +747,7 @@ pub(crate) async fn check_dvalue(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
     n: usize,
-    buckets: &[SmallVec<[(&Share, &Share, &Share); 3]>],
+    buckets: &[Bucket<'_>],
 ) -> Result<Vec<Vec<bool>>, Error> {
     // Step (a) compute and check macs of d-values.
     let len = buckets.len();
