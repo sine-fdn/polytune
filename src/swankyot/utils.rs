@@ -54,32 +54,6 @@ pub fn transpose(m: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
     {
         transpose_naive(m, nrows, ncols)
     }
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        let mut m_ = vec![0u8; nrows * ncols / 8];
-        _transpose(
-            m_.as_mut_ptr() as *mut u8,
-            m.as_ptr(),
-            nrows as u64,
-            ncols as u64,
-        );
-        m_
-    }
-}
-
-#[inline(always)]
-#[cfg(target_arch = "x86_64")]
-unsafe fn _transpose(out: *mut u8, inp: *const u8, nrows: u64, ncols: u64) {
-    assert!(nrows >= 16);
-    assert_eq!(nrows % 8, 0);
-    assert_eq!(ncols % 8, 0);
-    sse_trans(out, inp, nrows, ncols)
-}
-
-#[link(name = "transpose")]
-#[cfg(target_arch = "x86_64")]
-extern "C" {
-    fn sse_trans(out: *mut u8, inp: *const u8, nrows: u64, ncols: u64);
 }
 
 /// boolvec to u8vec
