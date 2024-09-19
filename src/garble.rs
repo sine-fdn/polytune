@@ -66,10 +66,10 @@ fn key_and_nonce(
         row,
     }: &GarblingKey,
 ) -> (Key, Nonce) {
-    let mut key: [u8; 32] = [0; 32];
+    let mut key = [0; 32];
     key[..16].copy_from_slice(&label_x.0.to_be_bytes());
     key[16..].copy_from_slice(&label_y.0.to_be_bytes());
-    let mut nonce: [u8; 12] = [0; 12];
+    let mut nonce = [0; 12];
     nonce[..8].copy_from_slice(&(*w as u64).to_be_bytes());
     nonce[8] = *row;
     (key.into(), nonce.into())

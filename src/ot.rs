@@ -9,7 +9,7 @@ use scuttlebutt::{AesRng, Block};
 /// Transform Block to u128
 pub fn block_to_u128(inp: Block) -> u128 {
     let array: [u8; 16] = inp.into();
-    let mut value: u128 = 0;
+    let mut value = 0;
     for &byte in array.iter() {
         value = (value << 8) | byte as u128;
     }
@@ -18,7 +18,7 @@ pub fn block_to_u128(inp: Block) -> u128 {
 
 /// Transform u128 to Block
 pub fn u128_to_block(inp: u128) -> Block {
-    let mut array: [u8; 16] = [0; 16];
+    let mut array = [0; 16];
     let mut value = inp;
     for byte in array.iter_mut().rev() {
         *byte = (value & 0xff) as u8;
@@ -33,13 +33,13 @@ pub(crate) async fn kos_ot_sender(
     deltas: Vec<Block>,
     p_to: usize,
 ) -> Result<Vec<(u128, u128)>, Error> {
-    let mut rng: AesRng = AesRng::new();
+    let mut rng = AesRng::new();
     let mut ot = swankyot::KosSender::init(channel, &mut rng, p_to).await?;
 
     let sender_out_block = ot
         .send_correlated(channel, &deltas, shared_rng, p_to)
         .await?;
-    let mut sender_out: Vec<(u128, u128)> = vec![];
+    let mut sender_out = vec![];
     for (i, j) in sender_out_block.iter() {
         sender_out.push((block_to_u128(*i), block_to_u128(*j)));
     }
@@ -56,7 +56,7 @@ pub(crate) async fn kos_ot_receiver(
     let mut ot = swankyot::KosReceiver::init(channel, &mut rng, p_to).await?;
 
     let recver_out_block = ot.recv_correlated(channel, &bs, shared_rng, p_to).await?;
-    let mut recver_out: Vec<u128> = vec![];
+    let mut recver_out = vec![];
     for i in recver_out_block.iter() {
         recver_out.push(block_to_u128(*i));
     }

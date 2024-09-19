@@ -12,7 +12,7 @@
 //! during the key derivation phase.
 
 use crate::{
-    channel::{recv_from, recv_vec_from, send_to, Channel},
+    channel::{recv_vec_from, send_to, Channel},
     faand::Error,
     swankyot::{Receiver as OtReceiver, Sender as OtSender},
 };
@@ -56,8 +56,7 @@ impl OtSender for Sender {
         let ys = self.y * self.s;
         let mut ks = Vec::with_capacity(inputs.len());
 
-        // Replace map with a loop to support async/await
-        let r_bytes_vec: Vec<Vec<u8>> = recv_vec_from(channel, p_to, "CO_OT_r", 128).await?;
+        let r_bytes_vec = recv_vec_from::<Vec<u8>>(channel, p_to, "CO_OT_r", 128).await?;
         for (i, r_bytes) in r_bytes_vec.into_iter().enumerate() {
             let r = convert_vec_to_point(r_bytes)?;
             let yr = self.y * r;
@@ -91,7 +90,7 @@ impl OtReceiver for Receiver {
         _: &mut RNG,
         p_to: usize,
     ) -> Result<Self, Error> {
-        let s_bytes: Vec<u8> = recv_vec_from(channel, p_to, "CO_OT_s", 32).await?;
+        let s_bytes = recv_vec_from::<u8>(channel, p_to, "CO_OT_s", 32).await?;
         let s = convert_vec_to_point(s_bytes)?;
         let s = RistrettoBasepointTable::create(&s);
         Ok(Self { s, counter: 0 })
@@ -108,9 +107,8 @@ impl OtReceiver for Receiver {
         let one = &Scalar::ONE * &self.s;
         let mut ks = Vec::with_capacity(inputs.len());
 
-        let mut send_vec_vec: Vec<Vec<u8>> = vec![];
+        let mut send_vec_vec = vec![];
         for (i, b) in inputs.iter().enumerate() {
-            //this part was changes from swanky to async
             let x = Scalar::random(&mut rng);
             let c = if *b { one } else { zero };
             let r = c + &x * RISTRETTO_BASEPOINT_TABLE;
@@ -126,8 +124,7 @@ impl OtReceiver for Receiver {
 
         let mut result = Vec::with_capacity(inputs.len());
 
-        // Now receive and calculate the result asynchronously
-        let c0c1vec: Vec<(Block, Block)> = recv_from(channel, p_to, "CO_OT_c0c1").await?;
+        let c0c1vec = recv_vec_from::<(Block, Block)>(channel, p_to, "CO_OT_c0c1", inputs.len()).await?;
         for ((b, k), (c0, c1)) in inputs.iter().zip(ks).zip(c0c1vec) {
             let c = k ^ if *b { c1 } else { c0 };
             result.push(c);

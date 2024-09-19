@@ -29,7 +29,7 @@ pub async fn send<C: Channel>(
         send_to(channel, p_to, "com", &[com]).await?;
     }
     for seed in seeds.iter() {
-        let seed_: Block = recv_from(channel, p_to, "seed_")
+        let seed_ = recv_from::<Block>(channel, p_to, "seed_")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
@@ -51,7 +51,7 @@ pub async fn recv<C: Channel>(
     let mut coms = Vec::with_capacity(seeds.len());
     let mut out = Vec::with_capacity(seeds.len());
     for _ in 0..seeds.len() {
-        let com: Block = recv_from(channel, p_to, "com")
+        let com = recv_from::<Block>(channel, p_to, "com")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
@@ -61,7 +61,7 @@ pub async fn recv<C: Channel>(
         send_to(channel, p_to, "seed_", &[seed]).await?;
     }
     for (seed, com) in seeds.iter().zip(coms.into_iter()) {
-        let seed_: Block = recv_from(channel, p_to, "seed")
+        let seed_ = recv_from::<Block>(channel, p_to, "seed")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
