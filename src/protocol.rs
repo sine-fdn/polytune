@@ -210,6 +210,11 @@ pub async fn simulate_mpc_async(
     let Some(evaluator) = parties.next() else {
         return Ok(vec![]);
     };
+    let p_fpre = if trusted {
+        Preprocessor::TrustedDealer(p_pre)
+    } else {
+        Preprocessor::Untrusted
+    };
 
     let mut computation: JoinSet<Vec<bool>> = JoinSet::new();
     for (p_own, (mut channel, inputs)) in parties {
@@ -221,11 +226,10 @@ pub async fn simulate_mpc_async(
                 &mut channel,
                 &circuit,
                 &inputs,
-                Preprocessor::TrustedDealer(p_pre),
+                p_fpre,
                 p_eval,
                 p_own,
                 &output_parties,
-                trusted,
             )
             .await;
             let mut res_party = Vec::new();
@@ -247,11 +251,10 @@ pub async fn simulate_mpc_async(
         &mut party_channel,
         circuit,
         inputs,
-        Preprocessor::TrustedDealer(p_pre),
+        p_fpre,
         p_eval,
         p_eval,
         output_parties,
-        trusted,
     )
     .await;
     match eval_result {
@@ -279,10 +282,12 @@ pub async fn simulate_mpc_async(
 }
 
 /// Specifies how correlated randomness is provided in the prepocessing phase.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Preprocessor {
     /// Correlated randomness is provided by the (semi-)trusted party with the given index.
     TrustedDealer(usize),
+    /// The preprocessing is done using OT extension among the parties, no third party necessary.
+    Untrusted,
 }
 
 /// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
@@ -295,7 +300,6 @@ pub async fn mpc(
     p_eval: usize,
     p_own: usize,
     p_out: &[usize],
-    trusted: bool,
 ) -> Result<Vec<bool>, Error> {
     let p_max = circuit.input_gates.len();
     let is_contrib = p_own != p_eval;
@@ -319,8 +323,6 @@ pub async fn mpc(
         }
     }
 
-    let Preprocessor::TrustedDealer(p_fpre) = p_fpre;
-
     // fn-independent preprocessing:
 
     let num_input_gates: usize = circuit.input_gates.iter().sum();
@@ -341,7 +343,7 @@ pub async fn mpc(
     let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
         .map(|_| random())
         .collect();
-    if trusted {
+    if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to::<()>(channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(channel, p_fpre, "delta")
             .await?
@@ -374,7 +376,7 @@ pub async fn mpc(
     let mut labels = vec![Label(0); num_gates];
     let mut xyz_shares = vec![];
 
-    if trusted {
+    if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
         random_shares = recv_from(channel, p_fpre, "random shares").await?;
     } else {
@@ -428,7 +430,7 @@ pub async fn mpc(
         }
     }
 
-    if trusted {
+    if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to(channel, p_fpre, "AND shares", &and_shares).await?;
         auth_bits = recv_from(channel, p_fpre, "AND shares").await?;
     } else {

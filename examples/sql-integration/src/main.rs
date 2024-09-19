@@ -10,7 +10,6 @@ use clap::Parser;
 use handlebars::Handlebars;
 use parlay::{
     channel::Channel,
-    fpre::fpre,
     garble_lang::{
         ast::{Type, Variant},
         compile_with_constants,
@@ -45,7 +44,7 @@ use tokio::{
     time::{self, sleep, timeout},
 };
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
@@ -117,13 +116,6 @@ async fn main() -> Result<(), Error> {
         sleep,
     } = Cli::parse();
     let local_policies = load_policies(config).await?;
-    if local_policies.accepted.len() == 1 {
-        let policy = &local_policies.accepted[0];
-        if policy.input.is_empty() {
-            info!("Running as preprocessor...");
-            return run_fpre(port, policy.participants.clone()).await;
-        }
-    }
 
     let state = Arc::new(Mutex::new(MpcComms {
         consts: HashMap::new(),
@@ -165,7 +157,7 @@ async fn main() -> Result<(), Error> {
                     program_hash: hash,
                 };
                 let mut participant_missing = false;
-                for party in policy.participants.iter().rev().skip(1).rev() {
+                for party in policy.participants.iter() {
                     if party != &policy.participants[policy.party] {
                         info!("Waiting for confirmation from party {party}");
                         let url = format!("{party}run");
@@ -279,49 +271,6 @@ async fn main() -> Result<(), Error> {
     }
 }
 
-async fn run_fpre(port: u16, urls: Vec<Url>) -> Result<(), Error> {
-    let parties = urls.len() - 1;
-
-    let mut senders = vec![];
-    let mut receivers = vec![];
-    for _ in 0..parties {
-        let (s, r) = channel(1);
-        senders.push(s);
-        receivers.push(r);
-    }
-
-    let policies = Policies { accepted: vec![] };
-    let app = Router::new()
-        .route("/msg/:from", post(msg))
-        .with_state((
-            policies,
-            Arc::new(Mutex::new(MpcComms {
-                consts: HashMap::new(),
-                senders,
-            })),
-        ))
-        .layer(DefaultBodyLimit::disable())
-        .layer(TraceLayer::new_for_http());
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    info!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-    let mut channel = HttpChannel {
-        urls,
-        party: parties,
-        recv: receivers,
-        enable_log: false,
-        send_count: 0,
-        recv_count: 0,
-    };
-    loop {
-        info!("Running FPre...");
-        channel = fpre(channel, parties).await.context("FPre")?;
-    }
-}
-
 async fn load_policies(path: PathBuf) -> Result<Policies, Error> {
     let Ok(policies) = fs::read_to_string(&path).await else {
         error!("Could not find '{}', exiting...", path.display());
@@ -397,7 +346,7 @@ async fn execute_mpc(
                 .insert(format!("PARTY_{party}"), my_consts.clone());
         }
         let client = reqwest::Client::new();
-        for p in participants.iter().rev().skip(1).rev() {
+        for p in participants.iter() {
             if p != &participants[*party] {
                 info!("Sending constants to party {p}");
                 let url = format!("{p}consts/{party}");
@@ -630,9 +579,9 @@ async fn execute_mpc(
         let input = prg.parse_arg(*party, input)?.as_bits();
         (prg, input)
     };
-    let fpre = Preprocessor::TrustedDealer(participants.len() - 1);
+    let fpre = Preprocessor::Untrusted;
     let p_out: Vec<_> = vec![*leader];
-    let channel = {
+    let mut channel = {
         let mut locked = state.lock().await;
         let state = locked.borrow_mut();
         if !state.senders.is_empty() {
@@ -649,12 +598,9 @@ async fn execute_mpc(
             urls: participants.clone(),
             party: *party,
             recv: receivers,
-            enable_log: *party == 0,
-            send_count: 0,
-            recv_count: 0,
         }
     };
-    let output = mpc(channel, &prg.circuit, &input, fpre, 0, *party, &p_out, true).await?;
+    let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, *party, &p_out).await?;
     state.lock().await.senders.clear();
     let elapsed = now.elapsed();
     info!(
@@ -775,103 +721,61 @@ struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
     recv: Vec<Receiver<Vec<u8>>>,
-    enable_log: bool,
-    send_count: u32,
-    recv_count: u32,
 }
 
 impl Channel for HttpChannel {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
 
-    async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), Self::SendError> {
+    async fn send_bytes_to(
+        &mut self,
+        p: usize,
+        phase: &str,
+        i: usize,
+        remaining: usize,
+        msg: Vec<u8>,
+    ) -> Result<(), Self::SendError> {
         let simulated_delay_in_ms = 300;
-        let expected_msgs = (self.urls.len() - 2) * 2 + 3;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        trace!("sending msg from {} to {} ({:.2}MB)", self.party, p, mb,);
-        if self.enable_log {
-            self.send_count += 1;
-            info!(
-                "Sending msg {}/{} to party {} ({:.2}MB)",
-                self.send_count, expected_msgs, p, mb
-            );
+        let i = i + 1;
+        let total = i + remaining;
+        if i == 1 {
+            info!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
+        } else {
+            info!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
         }
-        let chunk_size = 100 * 1024 * 1024;
-        let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
-        if chunks.is_empty() {
-            chunks.push(&[]);
-        }
-        let len = chunks.len();
-        for (i, chunk) in chunks.into_iter().enumerate() {
-            if len > 1 && self.enable_log {
-                info!("  (Sending chunk {}/{} to party {})", i + 1, len, p);
-            }
-            let mut msg = Vec::with_capacity(2 * 4 + chunk.len());
-            msg.extend((i as u32).to_be_bytes());
-            msg.extend((len as u32).to_be_bytes());
-            msg.extend(chunk);
-            loop {
-                sleep(Duration::from_millis(simulated_delay_in_ms)).await;
-                let req = client.post(&url).body(msg.clone()).send();
-                let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
-                    warn!("  req timeout: chunk {}/{} for party {}", i + 1, len, p);
-                    continue;
-                };
-                match res.status() {
-                    StatusCode::OK => break,
-                    StatusCode::NOT_FOUND => {
-                        error!("Could not reach party {p} at {url}...");
-                        sleep(Duration::from_millis(1000)).await;
-                    }
-                    status => {
-                        error!("Unexpected status code: {status}");
-                        anyhow::bail!("Unexpected status code: {status}")
-                    }
+        loop {
+            sleep(Duration::from_millis(simulated_delay_in_ms)).await;
+            let req = client.post(&url).body(msg.clone()).send();
+            let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
+                warn!("  req timeout: chunk {}/{} for party {}", i + 1, total, p);
+                continue;
+            };
+            match res.status() {
+                StatusCode::OK => break Ok(()),
+                StatusCode::NOT_FOUND => {
+                    error!("Could not reach party {p} at {url}...");
+                    sleep(Duration::from_millis(1000)).await;
+                }
+                status => {
+                    error!("Unexpected status code: {status}");
+                    anyhow::bail!("Unexpected status code: {status}")
                 }
             }
         }
-        Ok(())
     }
 
-    async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, Self::RecvError> {
-        let expected_msgs = (self.urls.len() - 2) * 5 + 3;
-        if self.enable_log {
-            self.recv_count += 1;
-            info!(
-                "Waiting for message {} from party {}...",
-                self.recv_count, p
-            );
-        }
-        let mut msg: Vec<u8> = vec![];
-        loop {
-            let Some(chunk) = timeout(Duration::from_secs(30 * 60), self.recv[p].recv())
-                .await
-                .context(format!("recv_bytes_from(p = {p})"))?
-            else {
-                anyhow::bail!("Expected a message, but received `None`!");
-            };
-            if chunk.len() < 2 * 4 {
-                anyhow::bail!("Received message without index and size information!");
-            }
-            let i = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-            let length = u32::from_be_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
-            if length > 1 && self.enable_log {
-                info!("  (Received chunk {}/{} from party {})", i + 1, length, p);
-            }
-            msg.extend(&chunk[8..]);
-            if i == length - 1 {
-                break;
-            }
-        }
-        if self.enable_log {
-            let mb = msg.len() as f64 / 1024.0 / 1024.0;
-            info!(
-                "Received msg {}/{} from {} ({:.2}MB)",
-                self.recv_count, expected_msgs, p, mb
-            );
-        }
-        Ok(msg)
+    async fn recv_bytes_from(
+        &mut self,
+        p: usize,
+        _phase: &str,
+        _i: usize,
+    ) -> Result<Vec<u8>, Self::RecvError> {
+        timeout(Duration::from_secs(30 * 60), self.recv[p].recv())
+            .await
+            .context(format!("recv_bytes_from(p = {p})"))?
+            .ok_or_else(|| anyhow!("Expected a message, but received `None`!"))
     }
 }

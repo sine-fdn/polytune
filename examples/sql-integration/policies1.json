@@ -1,11 +1,7 @@
 {
   "accepted": [
     {
-      "participants": [
-        "http://localhost:8000",
-        "http://localhost:8001",
-        "http://localhost:8002"
-      ],
+      "participants": ["http://localhost:8000", "http://localhost:8001"],
       "program": ".example.garble.rs",
       "leader": 0,
       "party": 1,

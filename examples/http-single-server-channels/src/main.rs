@@ -71,7 +71,7 @@ async fn main() {
             session,
             parties,
         } => {
-            let channel = PollingHttpChannel::new(&url, &session, P_DEALER);
+            let mut channel = PollingHttpChannel::new(&url, &session, P_DEALER);
             channel.join().await.unwrap();
             loop {
                 let joined = channel.participants().await.unwrap();
@@ -82,7 +82,7 @@ async fn main() {
                     sleep(Duration::from_secs(1)).await;
                 }
             }
-            fpre(channel, parties).await.unwrap();
+            fpre(&mut channel, parties).await.unwrap();
         }
         Commands::Party {
             url,
@@ -98,7 +98,7 @@ async fn main() {
             let prg = compile(&prg).unwrap();
             let input = prg.parse_arg(party, &input).unwrap().as_bits();
             let p_eval = 0;
-            let channel = PollingHttpChannel::new(&url, &session, party);
+            let mut channel = PollingHttpChannel::new(&url, &session, party);
             channel.join().await.unwrap();
             let parties = prg.circuit.input_gates.len();
             loop {
@@ -113,14 +113,13 @@ async fn main() {
             let fpre = Preprocessor::TrustedDealer(P_DEALER);
             let p_out: Vec<_> = (0..parties).collect();
             let output = mpc(
-                channel,
+                &mut channel,
                 &prg.circuit,
                 &input,
                 fpre,
                 p_eval,
                 party,
                 &p_out,
-                true,
             )
             .await
             .unwrap();
