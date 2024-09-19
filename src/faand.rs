@@ -283,7 +283,9 @@ pub(crate) async fn fashare(
     }
     let mut c0_c1_cm_k = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
-        c0_c1_cm_k[k] = recv_vec_from::<(Commitment, Commitment, Commitment)>(channel, k, "fashare comm", RHO).await?;
+        c0_c1_cm_k[k] =
+            recv_vec_from::<(Commitment, Commitment, Commitment)>(channel, k, "fashare comm", RHO)
+                .await?;
     }
     c0_c1_cm_k[i] = c0_c1_cm;
 
@@ -297,7 +299,7 @@ pub(crate) async fn fashare(
     dm_k[i] = dmvec;
 
     // 3 c) Compute di_bi and send to all parties.
-    let mut bi = vec![0; RHO];
+    let mut bi = [0; RHO];
     let mut di_bi = vec![0; RHO];
     for r in 0..RHO {
         for k in (0..n).filter(|k| *k != i) {
@@ -623,7 +625,6 @@ pub(crate) async fn faand(
     // Step 2) Randomly partition all objects into l buckets, each with b objects.
     let mut buckets: Vec<Bucket> = vec![smallvec![]; l];
 
-
     for obj in triples {
         let mut j = shared_rng.gen_range(0..buckets.len());
         while buckets[j].len() >= b {
@@ -692,7 +693,8 @@ pub(crate) async fn beaver_aand(
     let mut e_f_emac_fmac_k = vec![vec![(false, false, None, None); len]; n];
     for k in (0..n).filter(|k| *k != i) {
         e_f_emac_fmac_k[k] =
-            recv_vec_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, k, "faand", len).await?;
+            recv_vec_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, k, "faand", len)
+                .await?;
         for (j, &(_e, _f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
             let Some(_emacp) = emac else {
                 return Err(Error::MissingMacKey);

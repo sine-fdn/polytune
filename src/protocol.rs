@@ -527,8 +527,7 @@ pub async fn mpc(
 
     // input processing:
 
-    let mut wire_shares_for_others =
-        vec![vec![None; num_gates]; p_max];
+    let mut wire_shares_for_others = vec![vec![None; num_gates]; p_max];
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(i) = gate {
             let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
@@ -544,10 +543,10 @@ pub async fn mpc(
         send_to(channel, p, "wire shares", &wire_shares_for_others[p]).await?;
     }
 
-    let mut wire_shares_from_others =
-        vec![vec![None; num_gates]; p_max];
+    let mut wire_shares_from_others = vec![vec![None; num_gates]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        wire_shares_from_others[p] = recv_vec_from::<Option<(bool, Mac)>>(channel, p, "wire shares", num_gates).await?;
+        wire_shares_from_others[p] =
+            recv_vec_from::<Option<(bool, Mac)>>(channel, p, "wire shares", num_gates).await?;
     }
 
     let mut inputs = inputs.iter();

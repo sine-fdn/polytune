@@ -124,7 +124,8 @@ impl OtReceiver for Receiver {
 
         let mut result = Vec::with_capacity(inputs.len());
 
-        let c0c1vec = recv_vec_from::<(Block, Block)>(channel, p_to, "CO_OT_c0c1", inputs.len()).await?;
+        let c0c1vec =
+            recv_vec_from::<(Block, Block)>(channel, p_to, "CO_OT_c0c1", inputs.len()).await?;
         for ((b, k), (c0, c1)) in inputs.iter().zip(ks).zip(c0c1vec) {
             let c = k ^ if *b { c1 } else { c0 };
             result.push(c);
