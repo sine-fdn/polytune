@@ -50,10 +50,7 @@ fn transpose_naive(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
 /// transpose a matrix of bits
 #[inline]
 pub fn transpose(m: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        transpose_naive(m, nrows, ncols)
-    }
+    transpose_naive(m, nrows, ncols)
 }
 
 /// boolvec to u8vec
