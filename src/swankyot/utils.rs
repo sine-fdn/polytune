@@ -3,7 +3,6 @@
 use scuttlebutt::Block;
 
 #[inline]
-#[cfg(not(target_arch = "x86_64"))]
 fn get_bit(src: &[u8], i: usize) -> u8 {
     let byte = src[i / 8];
     let bit_pos = i % 8;
@@ -11,7 +10,6 @@ fn get_bit(src: &[u8], i: usize) -> u8 {
 }
 
 #[inline]
-#[cfg(not(target_arch = "x86_64"))]
 fn set_bit(dst: &mut [u8], i: usize, b: u8) {
     let bit_pos = i % 8;
     if b == 1 {
@@ -22,7 +20,6 @@ fn set_bit(dst: &mut [u8], i: usize, b: u8) {
 }
 
 #[inline]
-#[cfg(not(target_arch = "x86_64"))]
 fn transpose_naive_inplace(dst: &mut [u8], src: &[u8], m: usize) {
     assert_eq!(src.len() % m, 0);
     let l = src.len() * 8;
@@ -36,7 +33,6 @@ fn transpose_naive_inplace(dst: &mut [u8], src: &[u8], m: usize) {
 }
 
 #[inline]
-#[cfg(not(target_arch = "x86_64"))]
 fn transpose_naive(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
     assert_eq!(nrows % 8, 0);
     assert_eq!(ncols % 8, 0);
