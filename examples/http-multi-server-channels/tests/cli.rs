@@ -46,6 +46,7 @@ fn simulate() {
         }
         let args = vec![
             "run",
+            "--release",
             "--",
             URLS,
             "--program=.add.garble.rs",
