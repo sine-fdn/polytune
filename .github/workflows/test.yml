@@ -11,8 +11,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - run: cargo build --verbose
-      - run: cargo test --verbose
+      - run: cargo build --release
+      - run: cargo test --release
       - run: cargo clippy -- -Dwarnings
       - run: cargo build --release && cargo test --release -- --nocapture
         working-directory: ./examples/http-multi-server-channels
