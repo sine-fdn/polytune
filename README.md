@@ -1,6 +1,6 @@
-# Parlay MPC Engine
+# Sooon MPC Engine
 
-Parlay is an MPC engine for garbled circuits. It is being actively developed, so expect breaking changes.
+Sooon is an MPC engine for garbled circuits. It is being actively developed, so expect breaking changes.
 
 ## Benchmarks
 

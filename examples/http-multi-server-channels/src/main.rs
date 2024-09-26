@@ -6,12 +6,12 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use parlay::{
+use reqwest::StatusCode;
+use sooon::{
     channel::Channel,
     garble_lang::compile,
     protocol::{mpc, Preprocessor},
 };
-use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
 use tokio::{
     fs,
@@ -21,9 +21,9 @@ use tokio::{
 use tower_http::trace::TraceLayer;
 use url::Url;
 
-/// A CLI for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Sooon engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "sooon")]
 struct Cli {
     /// The endpoints of all the parties, including this one (as the last url).
     #[arg(required = true, value_delimiter = ';')]

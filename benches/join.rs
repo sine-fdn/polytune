@@ -6,7 +6,7 @@ use garble_lang::{
     literal::{Literal, VariantLiteral},
     token::UnsignedNumType,
 };
-use parlay::protocol::simulate_mpc_async;
+use sooon::protocol::simulate_mpc_async;
 
 fn join_benchmark(c: &mut Criterion) {
     let n_records = 10;

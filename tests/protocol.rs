@@ -2,7 +2,7 @@ use garble_lang::{
     circuit::{Circuit, Gate},
     compile,
 };
-use parlay::protocol::{simulate_mpc, Error};
+use sooon::protocol::{simulate_mpc, Error};
 
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {

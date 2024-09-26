@@ -1,4 +1,4 @@
-use parlay::channel::Channel;
+use sooon::channel::Channel;
 use quinn::Connection;
 use tracing::info;
 

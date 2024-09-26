@@ -2,7 +2,7 @@ use std::{path::PathBuf, process::exit, time::Duration};
 
 use clap::{Parser, Subcommand};
 use http_channel::PollingHttpChannel;
-use parlay::{
+use sooon::{
     fpre::fpre,
     garble_lang::compile,
     protocol::{mpc, Preprocessor},
@@ -13,9 +13,9 @@ use tracing::debug;
 mod http_channel;
 mod server;
 
-/// A CLI for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Sooon engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "sooon")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

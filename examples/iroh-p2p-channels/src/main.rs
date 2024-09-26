@@ -4,21 +4,21 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use iroh_channel::IrohChannel;
 use iroh_net::{derp::DerpMode, key::SecretKey, MagicEndpoint, NodeAddr};
-use parlay::{
+use quinn::Connection;
+use serde::{Deserialize, Serialize};
+use sooon::{
     fpre::fpre,
     garble_lang::compile,
     protocol::{mpc, Preprocessor},
 };
-use quinn::Connection;
-use serde::{Deserialize, Serialize};
 use tokio::{fs, sync::Mutex, time::sleep};
 use url::Url;
 
 mod iroh_channel;
 
-/// A CLI for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Sooon engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "sooon")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -57,7 +57,7 @@ enum Commands {
     },
 }
 
-const ALPN: &[u8] = b"parlay/p2p/iroh";
+const ALPN: &[u8] = b"sooon/p2p/iroh";
 const MAX_MSG_BYTES: usize = 1_024_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

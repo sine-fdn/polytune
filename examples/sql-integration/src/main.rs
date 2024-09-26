@@ -8,7 +8,10 @@ use axum::{
 };
 use clap::Parser;
 use handlebars::Handlebars;
-use parlay::{
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sooon::{
     channel::Channel,
     garble_lang::{
         ast::{Type, Variant},
@@ -18,9 +21,6 @@ use parlay::{
     },
     protocol::{mpc, Preprocessor},
 };
-use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::{
     any::{install_default_drivers, AnyQueryResult, AnyRow},
     AnyPool, Pool, Row, ValueRef,
@@ -47,9 +47,9 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
-/// A CLI for Multi-Party Computation using the Parlay engine.
+/// A CLI for Multi-Party Computation using the Sooon engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "sooon")]
 struct Cli {
     /// The port to listen on for connection attempts from other parties.
     #[arg(required = true, long, short)]

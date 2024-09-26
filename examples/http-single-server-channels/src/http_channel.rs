@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use parlay::channel::Channel;
+use sooon::channel::Channel;
 use reqwest::StatusCode;
 use tokio::time::sleep;
 
