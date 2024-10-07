@@ -2,12 +2,10 @@ use anyhow::{anyhow, bail, Context, Error};
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
-    response::Html,
-    routing::{get, post},
+    routing::post,
     Json, Router,
 };
 use clap::Parser;
-use handlebars::Handlebars;
 use parlay::{
     channel::Channel,
     garble_lang::{
@@ -20,7 +18,6 @@ use parlay::{
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::{
     any::{install_default_drivers, AnyQueryResult, AnyRow},
     AnyPool, Pool, Row, ValueRef,
@@ -143,8 +140,6 @@ async fn main() -> Result<(), Error> {
         .route("/run", post(run))
         .route("/consts/:from", post(consts))
         .route("/msg/:from", post(msg))
-        .route("/policies", get(policies))
-        .route("/policies/:id", get(policy))
         .with_state((local_policies.clone(), Arc::clone(&state)))
         .layer(DefaultBodyLimit::disable())
         .layer(TraceLayer::new_for_http());
@@ -695,56 +690,6 @@ async fn msg(State((_, state)): State<(Policies, MpcState)>, Path(from): Path<u3
     } else {
         error!("No sender for party {from}");
     }
-}
-
-async fn policies(
-    State((policies, _)): State<(Policies, MpcState)>,
-) -> Result<Html<String>, axum::http::StatusCode> {
-    let mut accepted = vec![];
-    for (i, p) in policies.accepted.into_iter().enumerate() {
-        accepted.push(json!({
-            "id": i,
-            "num_participants": p.participants.len(),
-            "program": p.program.to_str().unwrap_or("<program>"),
-            "leader": p.leader,
-            "party": p.party,
-        }));
-    }
-    let params = json!({
-        "accepted": accepted
-    });
-    render_template(include_str!("../templates/policies.html"), &params)
-}
-
-async fn policy(
-    State((policies, _)): State<(Policies, MpcState)>,
-    Path(id): Path<usize>,
-) -> Result<Html<String>, axum::http::StatusCode> {
-    let Some(p) = policies.accepted.get(id) else {
-        return Err(axum::http::StatusCode::NOT_FOUND);
-    };
-    let params = json!({
-        "policy": {
-            "num_participants": p.participants.len(),
-            "participants": p.participants,
-            "program": p.program.to_str().unwrap_or("<program>"),
-            "code": fs::read_to_string(&p.program).await.unwrap_or("Program not found".to_string()),
-            "leader": p.leader,
-            "party": p.party,
-        }
-    });
-    render_template(include_str!("../templates/policy.html"), &params)
-}
-
-fn render_template(
-    template: &str,
-    params: &serde_json::Value,
-) -> Result<Html<String>, axum::http::StatusCode> {
-    let h = Handlebars::new();
-    let Ok(html) = h.render_template(template, &params) else {
-        return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-    };
-    Ok(Html(html))
 }
 
 struct HttpChannel {
