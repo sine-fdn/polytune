@@ -56,6 +56,7 @@ struct Cli {
     config: PathBuf,
 }
 
+/// A policy containing everything necessary to run an MPC session, read from a JSON config file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Policy {
     participants: Vec<Url>,
@@ -67,6 +68,7 @@ struct Policy {
     constants: HashMap<String, String>,
 }
 
+/// All the details required to connect to a database, with an optional setup step to run before.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct DbQuery {
     db: String,
@@ -74,6 +76,7 @@ struct DbQuery {
     query: String,
 }
 
+/// HTTP request coming from another party to start an MPC session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 struct PolicyRequest {
     participants: Vec<Url>,
@@ -81,6 +84,7 @@ struct PolicyRequest {
     leader: usize,
 }
 
+/// HTTP request to transmit constants necessary to compile a program.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ConstsRequest {
     consts: HashMap<String, Literal>,
@@ -115,8 +119,11 @@ async fn main() -> Result<(), Error> {
     }));
 
     let app = Router::new()
+        // to kick off an MPC session:
         .route("/run", post(run))
+        // to receive constants from other parties:
         .route("/consts/:from", post(consts))
+        // to receive MPC messages during the execution of the core protocol:
         .route("/msg/:from", post(msg))
         .with_state((policy.clone(), Arc::clone(&state)))
         .layer(DefaultBodyLimit::disable())
@@ -127,6 +134,7 @@ async fn main() -> Result<(), Error> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
+    // If we are not the policy leader we need to wait for HTTP messages and do nothing else.
     if policy.leader != policy.party {
         loop {
             info!("Listening for connection attempts from other parties");
@@ -144,6 +152,7 @@ async fn main() -> Result<(), Error> {
         leader: policy.leader,
         program_hash: hash,
     };
+    // As a leader, we first make sure that all other participants join the session:
     let mut participant_missing = false;
     for party in policy.participants.iter() {
         if party != &policy.participants[policy.party] {
@@ -168,6 +177,7 @@ async fn main() -> Result<(), Error> {
     if participant_missing {
         bail!("Some participants are missing, aborting...");
     }
+    // Now we start the MPC session, then decode the output and write it to the output DB:
     info!("All participants have accepted the session, starting calculation now...");
     match execute_mpc(Arc::clone(&state), code, &policy).await {
         Ok(Some(output)) => match decode_literal(output) {
@@ -229,6 +239,7 @@ async fn execute_mpc(
     let rows: Vec<AnyRow> = sqlx::query(query).fetch_all(&pool).await?;
     info!("'{query}' returned {} rows from {db}", rows.len());
 
+    // Compiling the circuit might require constants, so we compute them:
     let mut my_consts = HashMap::new();
     for (k, query) in constants {
         let row: AnyRow = sqlx::query(&query).fetch_one(&pool).await?;
@@ -261,6 +272,7 @@ async fn execute_mpc(
             .consts
             .insert(format!("PARTY_{party}"), my_consts.clone());
     }
+    // Now we sent around the constants to the other parties...
     let client = reqwest::Client::new();
     for p in participants.iter() {
         if p != &participants[*party] {
@@ -280,6 +292,7 @@ async fn execute_mpc(
             }
         }
     }
+    // ...and wait for their constants:
     loop {
         sleep(Duration::from_millis(500)).await;
         let locked = state.lock().await;
@@ -295,6 +308,7 @@ async fn execute_mpc(
         }
     }
 
+    // After receiving the constants, we can finally compile the circuit:
     let prg = {
         let locked = state.lock().await;
         info!("Compiling circuit with the following constants:");
@@ -306,6 +320,8 @@ async fn execute_mpc(
         compile_with_constants(&code, locked.consts.clone())
             .map_err(|e| anyhow!(e.prettify(&code)))?
     };
+
+    // Now we need to load our input rows from the DB and convert it to a Garble array:
     let input_ty = &prg.main.params[*party].ty;
     let Type::ArrayConst(row_type, _) = input_ty else {
         bail!("Expected an array input type (with const size) for party {party}, but found {input_ty}");
@@ -482,6 +498,8 @@ async fn execute_mpc(
     }
     let literal = Literal::Array(rows_as_literals);
     let input = prg.literal_arg(*party, literal)?.as_bits();
+
+    // Now that we have our input, we can start the actual session without a trusted third party:
     let fpre = Preprocessor::Untrusted;
     let p_out: Vec<_> = vec![*leader];
     let mut channel = {
@@ -503,7 +521,11 @@ async fn execute_mpc(
             recv: receivers,
         }
     };
+
+    // We run the computation using MPC, which might take some time...
     let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, *party, &p_out).await?;
+
+    // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();
     let elapsed = now.elapsed();
     info!(
