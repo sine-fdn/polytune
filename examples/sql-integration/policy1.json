@@ -8,13 +8,7 @@
     "db": "mysql://root:test@localhost:5551/test"
   },
   "constants": {
-    "ROWS": {
-      "query": "SELECT COUNT(id) FROM school_entry_examination",
-      "ty": "usize"
-    },
-    "ID_LEN": {
-      "query": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM school_entry_examination",
-      "ty": "usize"
-    }
+    "ROWS": "SELECT COUNT(id) FROM school_entry_examination",
+    "ID_LEN": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM school_entry_examination"
   }
 }

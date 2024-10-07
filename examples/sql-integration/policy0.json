@@ -13,13 +13,7 @@
     "db": "postgres://postgres:test@localhost:5555/postgres"
   },
   "constants": {
-    "ROWS": {
-      "query": "SELECT COUNT(id) FROM early_detection_screening",
-      "ty": "usize"
-    },
-    "ID_LEN": {
-      "query": "SELECT MAX(LENGTH(first_name || last_name || date_of_birth)) FROM early_detection_screening",
-      "ty": "usize"
-    }
+    "ROWS": "SELECT COUNT(id) FROM early_detection_screening",
+    "ID_LEN": "SELECT MAX(LENGTH(first_name || last_name || date_of_birth)) FROM early_detection_screening"
   }
 }

@@ -64,7 +64,7 @@ struct Policy {
     party: usize,
     input: Option<DbQuery>,
     output: Option<DbQuery>,
-    constants: HashMap<String, Constant>,
+    constants: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,25 +72,6 @@ struct DbQuery {
     db: String,
     setup: Option<String>,
     query: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-enum Constant {
-    Query(QueryConstant),
-    File(FileConstant),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct QueryConstant {
-    query: String,
-    ty: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct FileConstant {
-    file: String,
-    ty: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -302,52 +283,33 @@ async fn execute_mpc(
         info!("'{query}' returned {} rows from {db}", rows.len());
 
         let mut my_consts = HashMap::new();
-        for (k, c) in constants {
-            match c {
-                Constant::Query(c) => {
-                    let row: AnyRow = sqlx::query(&c.query).fetch_one(&pool).await?;
-                    if row.len() != 1 {
-                        bail!(
-                            "Expected a single scalar value, but got {} from query '{}'",
-                            row.len(),
-                            c.query
+        for (k, query) in constants {
+            let row: AnyRow = sqlx::query(&query).fetch_one(&pool).await?;
+            if row.len() != 1 {
+                bail!(
+                    "Expected a single scalar value, but got {} from query '{}'",
+                    row.len(),
+                    query
+                );
+            } else {
+                if let Ok(n) = row.try_get::<i32, _>(0) {
+                    if n >= 0 {
+                        my_consts.insert(
+                            k.clone(),
+                            Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
                         );
-                    } else {
-                        if let Ok(n) = row.try_get::<i32, _>(0) {
-                            if n >= 0 && c.ty == "usize" {
-                                my_consts.insert(
-                                    k.clone(),
-                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
-                                );
-                                continue;
-                            }
-                        } else if let Ok(n) = row.try_get::<i64, _>(0) {
-                            if n >= 0 && c.ty == "usize" {
-                                my_consts.insert(
-                                    k.clone(),
-                                    Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
-                                );
-                                continue;
-                            }
-                        }
-                        bail!("Could not decode scalar value as {} of '{}'", c.ty, c.query);
+                        continue;
+                    }
+                } else if let Ok(n) = row.try_get::<i64, _>(0) {
+                    if n >= 0 {
+                        my_consts.insert(
+                            k.clone(),
+                            Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
+                        );
+                        continue;
                     }
                 }
-                Constant::File(c) => {
-                    let Ok(file) = fs::read_to_string(&c.file).await else {
-                        bail!("Could not load constant from file {:?}", &c.file);
-                    };
-                    if c.ty == "usize" {
-                        if let Ok(n) = file.parse::<u32>() {
-                            my_consts.insert(
-                                k.clone(),
-                                Literal::NumUnsigned(n as u64, UnsignedNumType::Usize),
-                            );
-                            continue;
-                        }
-                    }
-                    bail!("Could not decode file {} as {}", c.file, c.ty);
-                }
+                bail!("Could not decode scalar value as usize using '{query}'");
             }
         }
         {
