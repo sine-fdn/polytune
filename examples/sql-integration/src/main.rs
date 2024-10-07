@@ -38,7 +38,7 @@ use tokio::{
         mpsc::{channel, Receiver, Sender},
         Mutex,
     },
-    time::{self, sleep, timeout},
+    time::{sleep, timeout},
 };
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
@@ -54,14 +54,6 @@ struct Cli {
     /// The location of the file with the policy configuration.
     #[arg(long, short)]
     config: PathBuf,
-    /// The time in minutes to wait before executing policies again.
-    #[arg(long, short, default_value = "30")]
-    sleep: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Policies {
-    accepted: Vec<Policy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,12 +116,8 @@ type MpcState = Arc<Mutex<MpcComms>>;
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
     install_default_drivers();
-    let Cli {
-        port,
-        config,
-        sleep,
-    } = Cli::parse();
-    let local_policies = load_policies(config).await?;
+    let Cli { port, config } = Cli::parse();
+    let policy = load_policy(config).await?;
 
     let state = Arc::new(Mutex::new(MpcComms {
         consts: HashMap::new(),
@@ -140,7 +128,7 @@ async fn main() -> Result<(), Error> {
         .route("/run", post(run))
         .route("/consts/:from", post(consts))
         .route("/msg/:from", post(msg))
-        .with_state((local_policies.clone(), Arc::clone(&state)))
+        .with_state((policy.clone(), Arc::clone(&state)))
         .layer(DefaultBodyLimit::disable())
         .layer(TraceLayer::new_for_http());
 
@@ -148,143 +136,138 @@ async fn main() -> Result<(), Error> {
     info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    info!("Found {} active policies", local_policies.accepted.len());
-    loop {
-        for policy in &local_policies.accepted {
-            if policy.leader == policy.party {
-                info!(
-                    "Acting as leader (party {}) for program {}",
-                    policy.leader,
-                    policy.program.display()
-                );
-                let Ok(code) = fs::read_to_string(&policy.program).await else {
-                    error!("Could not load program {:?}", &policy.program);
-                    continue;
-                };
-                let hash = blake3::hash(code.as_bytes()).to_string();
-                let client = reqwest::Client::new();
-                let policy_request = PolicyRequest {
-                    participants: policy.participants.clone(),
-                    leader: policy.leader,
-                    program_hash: hash,
-                };
-                let mut participant_missing = false;
-                for party in policy.participants.iter() {
-                    if party != &policy.participants[policy.party] {
-                        info!("Waiting for confirmation from party {party}");
-                        let url = format!("{party}run");
-                        let Ok(res) = client.post(&url).json(&policy_request).send().await else {
-                            error!("Could not reach {url}");
-                            participant_missing = true;
-                            continue;
-                        };
-                        match res.status() {
-                            StatusCode::OK => {}
-                            code => {
-                                error!("Unexpected response while trying to trigger execution for {url}: {code}");
-                                participant_missing = true;
-                            }
-                        }
-                    }
-                }
-                if participant_missing {
+
+    if policy.leader != policy.party {
+        loop {
+            info!("Listening for connection attempts from other parties");
+            sleep(Duration::from_secs(10)).await;
+        }
+    }
+    info!(
+        "Acting as leader (party {}) for program {}",
+        policy.leader,
+        policy.program.display()
+    );
+    let Ok(code) = fs::read_to_string(&policy.program).await else {
+        bail!("Could not load program {:?}", &policy.program);
+    };
+    let hash = blake3::hash(code.as_bytes()).to_string();
+    let client = reqwest::Client::new();
+    let policy_request = PolicyRequest {
+        participants: policy.participants.clone(),
+        leader: policy.leader,
+        program_hash: hash,
+    };
+    let mut participant_missing = false;
+    for party in policy.participants.iter() {
+        if party != &policy.participants[policy.party] {
+            info!("Waiting for confirmation from party {party}");
+            let url = format!("{party}run");
+            let Ok(res) = client.post(&url).json(&policy_request).send().await else {
+                error!("Could not reach {url}");
+                participant_missing = true;
+                continue;
+            };
+            match res.status() {
+                StatusCode::OK => {}
+                code => {
                     error!(
-                        "Some participants of program {} are missing, skipping execution...",
-                        policy.program.display()
+                        "Unexpected response while trying to trigger execution for {url}: {code}"
                     );
-                    continue;
-                }
-                info!("All participants have accepted the session, starting calculation now...");
-                fn decode_literal(l: Literal) -> Result<Vec<Vec<String>>, String> {
-                    let Literal::Array(rows) = l else {
-                        return Err(format!("Expected an array of rows, but found {l}"));
-                    };
-                    let mut records = vec![];
-                    for row in rows {
-                        let row = match row {
-                            Literal::Tuple(row) => row,
-                            record => vec![record],
-                        };
-                        let mut record = vec![];
-                        fn stringify(elements: &[Literal]) -> Option<String> {
-                            let mut bytes = vec![];
-                            for e in elements {
-                                if let Literal::NumUnsigned(n, UnsignedNumType::U8) = e {
-                                    if *n != 0 {
-                                        bytes.push(*n as u8);
-                                    }
-                                } else {
-                                    return None;
-                                }
-                            }
-                            String::from_utf8(bytes).ok()
-                        }
-                        for col in row {
-                            record.push(match col {
-                                Literal::True => "true".to_string(),
-                                Literal::False => "false".to_string(),
-                                Literal::NumUnsigned(n, _) => n.to_string(),
-                                Literal::NumSigned(n, _) => n.to_string(),
-                                Literal::Array(elements) => match stringify(&elements) {
-                                    Some(s) => format!("'{s}'"),
-                                    None => format!("'{}'", Literal::Array(elements)),
-                                },
-                                l => format!("'{l}'"),
-                            });
-                        }
-                        records.push(record);
-                    }
-                    Ok(records)
-                }
-                match execute_mpc(Arc::clone(&state), code, policy).await {
-                    Ok(Some(output)) => match decode_literal(output) {
-                        Ok(rows) => {
-                            let n_rows = rows.len();
-                            if let Some(output) = &policy.output {
-                                let DbQuery { db, setup, query } = output;
-                                info!("Connecting to output db at {db}...");
-                                let pool: AnyPool = Pool::connect(db).await?;
-                                if let Some(setup) = setup {
-                                    let result: AnyQueryResult =
-                                        sqlx::query(setup).execute(&pool).await?;
-                                    let rows_affected = result.rows_affected();
-                                    debug!("{rows_affected} rows affected by '{setup}'");
-                                }
-                                for row in rows {
-                                    let mut query = sqlx::query(query);
-                                    for field in row {
-                                        query = query.bind(field);
-                                    }
-                                    let result: AnyQueryResult = query.execute(&pool).await?;
-                                    let rows = result.rows_affected();
-                                    debug!("Inserted {rows} row(s)");
-                                }
-                            } else {
-                                warn!("No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows");
-                            }
-                            info!("MPC Output: {n_rows} rows")
-                        }
-                        Err(e) => error!("MPC Error: {e}"),
-                    },
-                    Ok(None) => {}
-                    Err(e) => {
-                        error!("Error while executing MPC: {e}")
-                    }
+                    participant_missing = true;
                 }
             }
         }
-        info!("Waiting {sleep} minutes before checking MPC policies again...");
-        time::sleep(Duration::from_secs(60 * sleep)).await;
     }
+    if participant_missing {
+        bail!("Some participants of are missing, aborting...");
+    }
+    info!("All participants have accepted the session, starting calculation now...");
+    fn decode_literal(l: Literal) -> Result<Vec<Vec<String>>, String> {
+        let Literal::Array(rows) = l else {
+            return Err(format!("Expected an array of rows, but found {l}"));
+        };
+        let mut records = vec![];
+        for row in rows {
+            let row = match row {
+                Literal::Tuple(row) => row,
+                record => vec![record],
+            };
+            let mut record = vec![];
+            fn stringify(elements: &[Literal]) -> Option<String> {
+                let mut bytes = vec![];
+                for e in elements {
+                    if let Literal::NumUnsigned(n, UnsignedNumType::U8) = e {
+                        if *n != 0 {
+                            bytes.push(*n as u8);
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                String::from_utf8(bytes).ok()
+            }
+            for col in row {
+                record.push(match col {
+                    Literal::True => "true".to_string(),
+                    Literal::False => "false".to_string(),
+                    Literal::NumUnsigned(n, _) => n.to_string(),
+                    Literal::NumSigned(n, _) => n.to_string(),
+                    Literal::Array(elements) => match stringify(&elements) {
+                        Some(s) => format!("'{s}'"),
+                        None => format!("'{}'", Literal::Array(elements)),
+                    },
+                    l => format!("'{l}'"),
+                });
+            }
+            records.push(record);
+        }
+        Ok(records)
+    }
+    match execute_mpc(Arc::clone(&state), code, &policy).await {
+        Ok(Some(output)) => match decode_literal(output) {
+            Ok(rows) => {
+                let n_rows = rows.len();
+                if let Some(output) = &policy.output {
+                    let DbQuery { db, setup, query } = output;
+                    info!("Connecting to output db at {db}...");
+                    let pool: AnyPool = Pool::connect(db).await?;
+                    if let Some(setup) = setup {
+                        let result: AnyQueryResult = sqlx::query(setup).execute(&pool).await?;
+                        let rows_affected = result.rows_affected();
+                        debug!("{rows_affected} rows affected by '{setup}'");
+                    }
+                    for row in rows {
+                        let mut query = sqlx::query(query);
+                        for field in row {
+                            query = query.bind(field);
+                        }
+                        let result: AnyQueryResult = query.execute(&pool).await?;
+                        let rows = result.rows_affected();
+                        debug!("Inserted {rows} row(s)");
+                    }
+                } else {
+                    warn!("No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows");
+                }
+                info!("MPC Output: {n_rows} rows")
+            }
+            Err(e) => error!("MPC Error: {e}"),
+        },
+        Ok(None) => {}
+        Err(e) => {
+            error!("Error while executing MPC: {e}")
+        }
+    }
+    Ok(())
 }
 
-async fn load_policies(path: PathBuf) -> Result<Policies, Error> {
+async fn load_policy(path: PathBuf) -> Result<Policy, Error> {
     let Ok(policies) = fs::read_to_string(&path).await else {
         error!("Could not find '{}', exiting...", path.display());
         exit(-1);
     };
-    match serde_json::from_str::<Policies>(&policies) {
-        Ok(policies) => Ok(policies),
+    match serde_json::from_str::<Policy>(&policies) {
+        Ok(policy) => Ok(policy),
         Err(e) => {
             error!("'{}' has an invalid format: {e}", path.display());
             exit(-1);
@@ -641,38 +624,33 @@ async fn execute_mpc(
     }
 }
 
-async fn run(
-    State((policies, state)): State<(Policies, MpcState)>,
-    Json(body): Json<PolicyRequest>,
-) {
-    for policy in policies.accepted {
-        if policy.participants == body.participants && policy.leader == body.leader {
-            let Ok(code) = fs::read_to_string(&policy.program).await else {
-                error!("Could not load program {:?}", &policy.program);
-                return;
-            };
-            let expected = blake3::hash(code.as_bytes()).to_string();
-            if expected != body.program_hash {
-                error!("Aborting due to different hashes for program in policy {policy:?}");
-                return;
-            }
-            info!(
-                "Accepted policy for {}, starting execution",
-                policy.program.display()
-            );
-            tokio::spawn(async move {
-                if let Err(e) = execute_mpc(state, code, &policy).await {
-                    error!("{e}");
-                }
-            });
-            return;
-        }
+async fn run(State((policy, state)): State<(Policy, MpcState)>, Json(body): Json<PolicyRequest>) {
+    if policy.participants != body.participants || policy.leader != body.leader {
+        error!("Policy not accepted: {body:?}");
+        return;
     }
-    error!("Policy not accepted: {body:?}");
+    let Ok(code) = fs::read_to_string(&policy.program).await else {
+        error!("Could not load program {:?}", &policy.program);
+        return;
+    };
+    let expected = blake3::hash(code.as_bytes()).to_string();
+    if expected != body.program_hash {
+        error!("Aborting due to different hashes for program in policy {policy:?}");
+        return;
+    }
+    info!(
+        "Accepted policy for {}, starting execution",
+        policy.program.display()
+    );
+    tokio::spawn(async move {
+        if let Err(e) = execute_mpc(state, code, &policy).await {
+            error!("{e}");
+        }
+    });
 }
 
 async fn consts(
-    State((_, state)): State<(Policies, MpcState)>,
+    State((_, state)): State<(Policy, MpcState)>,
     Path(from): Path<u32>,
     Json(body): Json<ConstsRequest>,
 ) {
@@ -680,7 +658,7 @@ async fn consts(
     state.consts.insert(format!("PARTY_{from}"), body.consts);
 }
 
-async fn msg(State((_, state)): State<(Policies, MpcState)>, Path(from): Path<u32>, body: Bytes) {
+async fn msg(State((_, state)): State<(Policy, MpcState)>, Path(from): Path<u32>, body: Bytes) {
     let state = state.lock().await;
     if state.senders.len() > from as usize {
         state.senders[from as usize]
