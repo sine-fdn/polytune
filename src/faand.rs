@@ -645,7 +645,6 @@ pub(crate) async fn faand(
 }
 
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn beaver_aand(
     (channel, delta): (&mut impl Channel, Delta),
     and_shares: Vec<(Share, Share)>,
