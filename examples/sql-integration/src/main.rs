@@ -242,7 +242,7 @@ async fn execute_mpc(
     // Compiling the circuit might require constants, so we compute them:
     let mut my_consts = HashMap::new();
     for (k, query) in constants {
-        let row: AnyRow = sqlx::query(&query).fetch_one(&pool).await?;
+        let row: AnyRow = sqlx::query(query).fetch_one(&pool).await?;
         if row.len() != 1 {
             bail!(
                 "Expected a single value, but got {} from '{query}'",
@@ -252,7 +252,7 @@ async fn execute_mpc(
             let n = if let Ok(n) = row.try_get::<i32, _>(0) {
                 n as i64
             } else if let Ok(n) = row.try_get::<i64, _>(0) {
-                n as i64
+                n
             } else {
                 bail!("Could not decode scalar value as usize using '{query}'");
             };
