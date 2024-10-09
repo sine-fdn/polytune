@@ -11,37 +11,13 @@ fn simulate() {
     let millis = 2000;
     println!("\n\n--- {millis}ms ---\n\n");
     let mut children = vec![];
-    let mut cmd = Command::new("cargo")
-        .args([
-            "run",
-            "--release",
-            "--",
-            "--port=8002",
-            "--config=preprocessor.json",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-
-    sleep(Duration::from_millis(millis));
-    let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines();
-    let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
-    thread::spawn(move || {
-        while let Some(Ok(line)) = stdout.next() {
-            println!("   pre> {line}");
-        }
-    });
-    thread::spawn(move || {
-        while let Some(Ok(line)) = stderr.next() {
-            eprintln!("   pre> {line}");
-        }
-    });
-    children.push(cmd);
-
-    let port = "--port=8001".to_string();
-    let config = "--config=policies1.json".to_string();
-    let args = vec!["run", "--release", "--", &port, &config];
+    let args = vec![
+        "run",
+        "--release",
+        "--",
+        "--port=8001",
+        "--config=policies1.json",
+    ];
     let mut cmd = Command::new("cargo")
         .args(args)
         .stdout(Stdio::piped())

@@ -12,6 +12,7 @@ pub(crate) struct PollingHttpChannel {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum HttpChannelError {
     Timeout,
     Reqwest(reqwest::Error),
@@ -57,7 +58,14 @@ impl Channel for PollingHttpChannel {
     type SendError = HttpChannelError;
     type RecvError = HttpChannelError;
 
-    async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), HttpChannelError> {
+    async fn send_bytes_to(
+        &mut self,
+        p: usize,
+        _phase: &str,
+        _i: usize,
+        _remaining: usize,
+        msg: Vec<u8>,
+    ) -> Result<(), HttpChannelError> {
         let url = format!("{}/send/{}/{}/{}", self.url, self.session, self.party, p);
         let resp: reqwest::Response = self.client.post(url).body(msg).send().await?;
         if resp.status().is_success() {
@@ -67,7 +75,12 @@ impl Channel for PollingHttpChannel {
         }
     }
 
-    async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, HttpChannelError> {
+    async fn recv_bytes_from(
+        &mut self,
+        p: usize,
+        _phase: &str,
+        _i: usize,
+    ) -> Result<Vec<u8>, HttpChannelError> {
         let url = format!("{}/recv/{}/{}/{}", self.url, self.session, p, self.party);
         let mut attempts = 0;
         loop {

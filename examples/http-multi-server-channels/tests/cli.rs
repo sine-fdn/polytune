@@ -5,40 +5,19 @@ use std::{
     time::Duration,
 };
 
-const URLS: &str =
-    "http://127.0.0.1:8000;http://127.0.0.1:8001;http://127.0.0.1:8002;http://127.0.0.1:8003";
+const URLS: &str = "http://127.0.0.1:8000;http://127.0.0.1:8001;http://127.0.0.1:8002";
 
 #[test]
 fn simulate() {
     for millis in [50, 500, 2_000, 10_000] {
         println!("\n\n--- {millis}ms ---\n\n");
         let mut children = vec![];
-        let mut cmd = Command::new("cargo")
-            .args(["run", "--", "pre", URLS])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        sleep(Duration::from_millis(millis));
-        let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines();
-        let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
-        thread::spawn(move || {
-            while let Some(Ok(line)) = stdout.next() {
-                println!("pre> {line}");
-            }
-        });
-        thread::spawn(move || {
-            while let Some(Ok(line)) = stderr.next() {
-                eprintln!("pre> {line}");
-            }
-        });
-        children.push(cmd);
         for p in [1, 2] {
             let party_arg = format!("--party={p}");
             let args = vec![
                 "run",
+                "--release",
                 "--",
-                "party",
                 URLS,
                 "--program=.add.garble.rs",
                 "--input=2u32",
@@ -63,11 +42,12 @@ fn simulate() {
                 }
             });
             children.push(cmd);
+            sleep(Duration::from_millis(millis));
         }
         let args = vec![
             "run",
+            "--release",
             "--",
-            "party",
             URLS,
             "--program=.add.garble.rs",
             "--input=2u32",

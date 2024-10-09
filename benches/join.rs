@@ -9,7 +9,7 @@ use garble_lang::{
 use parlay::protocol::simulate_mpc_async;
 
 fn join_benchmark(c: &mut Criterion) {
-    let n_records = 1000;
+    let n_records = 10;
     let code = include_str!(".join.garble.rs");
 
     let bench_id = format!("join {n_records} records");
@@ -35,7 +35,7 @@ fn join_benchmark(c: &mut Criterion) {
                         )]),
                     ),
                 ]);
-                let prg = compile_with_constants(&code, consts).unwrap();
+                let prg = compile_with_constants(code, consts).unwrap();
                 println!("{}", prg.circuit.report_gates());
                 let elapsed = now.elapsed();
                 println!(
@@ -73,7 +73,7 @@ fn join_benchmark(c: &mut Criterion) {
 
                 let inputs = vec![input0.as_slice(), input1.as_slice()];
 
-                simulate_mpc_async(&prg.circuit, &inputs, &[0])
+                simulate_mpc_async(&prg.circuit, &inputs, &[0], false)
                     .await
                     .unwrap();
                 let elapsed = now.elapsed();

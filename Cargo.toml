@@ -11,13 +11,20 @@ edition = "2021"
 
 [dependencies]
 bincode = "1.3.3"
+blake3 = "1.5.0"
 chacha20poly1305 = "0.10.1"
 garble_lang = { version = "0.4.0", features = ["serde"] }
 rand = "0.8.5"
+rand_chacha = "0.3.1"
 serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["full"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
+smallvec = { version = "1.13.2", features = ["serde"] }
+curve25519-dalek = { version = "4.1.3", features = ["rand_core"] }
+
+ocelot = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
+scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }

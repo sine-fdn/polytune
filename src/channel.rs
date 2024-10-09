@@ -2,7 +2,7 @@
 
 use std::{fmt, future::Future, time::Duration};
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{
     sync::mpsc::{channel, error::SendError, Receiver, Sender},
     time::timeout,
@@ -30,6 +30,24 @@ pub enum ErrorKind {
     InvalidLength,
 }
 
+/// A chunk of a message as bytes and the number of chunks remaining to be sent.
+#[derive(Debug, Serialize)]
+struct SendChunk<'a, T> {
+    /// A chunk of a full message.
+    chunk: &'a [T],
+    /// The number of chunks that remain to be sent after the current one.
+    remaining_chunks: usize,
+}
+
+/// A chunk of a message as bytes and the number of chunks remaining to be sent.
+#[derive(Debug, Deserialize)]
+struct RecvChunk<T> {
+    /// A chunk of a full message.
+    chunk: Vec<T>,
+    /// The number of chunks that remain to be sent after the current one.
+    remaining_chunks: usize,
+}
+
 /// A communication channel used to send/receive messages to/from another party.
 pub trait Channel {
     /// The error that can occur sending messages over the channel.
@@ -41,70 +59,101 @@ pub trait Channel {
     fn send_bytes_to(
         &mut self,
         party: usize,
-        msg: Vec<u8>,
+        phase: &str,
+        i: usize,
+        remaining: usize,
+        chunk: Vec<u8>,
     ) -> impl Future<Output = Result<(), Self::SendError>> + Send;
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     fn recv_bytes_from(
         &mut self,
         party: usize,
+        phase: &str,
+        i: usize,
     ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
 }
 
-/// A wrapper around [`Channel`] that takes care of (de-)serializing messages.
-#[derive(Debug)]
-pub(crate) struct MsgChannel<C: Channel>(pub C);
-
-impl<C: Channel> MsgChannel<C> {
-    /// Serializes and sends an MPC message to the other party.
-    pub(crate) async fn send_to(
-        &mut self,
-        party: usize,
-        phase: &str,
-        msg: &impl Serialize,
-    ) -> Result<(), Error> {
-        let msg = bincode::serialize(msg).map_err(|e| Error {
+/// Serializes and sends an MPC message to the other party.
+pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
+    channel: &mut impl Channel,
+    party: usize,
+    phase: &str,
+    msg: &[S],
+) -> Result<(), Error> {
+    let chunk_size = 5_000_000;
+    let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
+    if chunks.is_empty() {
+        chunks.push(&[]);
+    }
+    let length = chunks.len();
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let remaining_chunks = length - i - 1;
+        let chunk = SendChunk {
+            chunk,
+            remaining_chunks,
+        };
+        let chunk = bincode::serialize(&chunk).map_err(|e| Error {
             phase: format!("sending {phase}"),
             reason: ErrorKind::SerdeError(format!("{e:?}")),
         })?;
-        self.0.send_bytes_to(party, msg).await.map_err(|e| Error {
-            phase: phase.to_string(),
-            reason: ErrorKind::SendError(format!("{e:?}")),
-        })
+        channel
+            .send_bytes_to(party, phase, i, remaining_chunks, chunk)
+            .await
+            .map_err(|e| Error {
+                phase: phase.to_string(),
+                reason: ErrorKind::SendError(format!("{e:?}")),
+            })?;
     }
+    Ok(())
+}
 
-    /// Receives and deserializes an MPC message from the other party.
-    pub(crate) async fn recv_from<T: DeserializeOwned>(
-        &mut self,
-        party: usize,
-        phase: &str,
-    ) -> Result<T, Error> {
-        let msg = self.0.recv_bytes_from(party).await.map_err(|e| Error {
-            phase: phase.to_string(),
-            reason: ErrorKind::RecvError(format!("{e:?}")),
-        })?;
-        bincode::deserialize(&msg).map_err(|e| Error {
+/// Receives and deserializes an MPC message from the other party.
+pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
+    channel: &mut impl Channel,
+    party: usize,
+    phase: &str,
+) -> Result<Vec<T>, Error> {
+    let mut msg = vec![];
+    let mut i = 0;
+    loop {
+        let chunk = channel
+            .recv_bytes_from(party, phase, i)
+            .await
+            .map_err(|e| Error {
+                phase: phase.to_string(),
+                reason: ErrorKind::RecvError(format!("{e:?}")),
+            })?;
+        let RecvChunk {
+            chunk,
+            remaining_chunks,
+        }: RecvChunk<T> = bincode::deserialize(&chunk).map_err(|e| Error {
             phase: format!("receiving {phase}"),
             reason: ErrorKind::SerdeError(format!("{e:?}")),
-        })
-    }
-
-    /// Receives and deserializes a Vec from the other party (while checking the length).
-    pub(crate) async fn recv_vec_from<T: DeserializeOwned>(
-        &mut self,
-        party: usize,
-        phase: &str,
-        len: usize,
-    ) -> Result<Vec<T>, Error> {
-        let v: Vec<T> = self.recv_from(party, phase).await?;
-        if v.len() == len {
-            Ok(v)
-        } else {
-            Err(Error {
-                phase: phase.to_string(),
-                reason: ErrorKind::InvalidLength,
-            })
+        })?;
+        msg.extend(chunk);
+        if remaining_chunks == 0 {
+            return Ok(msg);
         }
+        i += 1;
+    }
+}
+
+/// Receives and deserializes a Vec from the other party (while checking the length).
+pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
+    channel: &mut impl Channel,
+    party: usize,
+    phase: &str,
+    len: usize,
+) -> Result<Vec<T>, Error> {
+    let v: Vec<T> = recv_from(channel, party, phase).await?;
+    if v.len() == len {
+        Ok(v)
+    } else {
+        Err(Error {
+            phase: phase.to_string(),
+            reason: ErrorKind::InvalidLength,
+        })
     }
 }
 
@@ -113,6 +162,7 @@ impl<C: Channel> MsgChannel<C> {
 pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
     r: Vec<Option<Receiver<Vec<u8>>>>,
+    pub(crate) bytes_sent: usize,
 }
 
 impl SimpleChannel {
@@ -127,7 +177,8 @@ impl SimpleChannel {
                 s.push(None);
                 r.push(None);
             }
-            channels.push(SimpleChannel { s, r });
+            let bytes_sent = 0;
+            channels.push(SimpleChannel { s, r, bytes_sent });
         }
         for a in 0..parties {
             for b in 0..parties {
@@ -159,50 +210,44 @@ impl Channel for SimpleChannel {
     type SendError = SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
 
-    async fn send_bytes_to(&mut self, p: usize, msg: Vec<u8>) -> Result<(), SendError<Vec<u8>>> {
+    async fn send_bytes_to(
+        &mut self,
+        p: usize,
+        phase: &str,
+        i: usize,
+        remaining: usize,
+        msg: Vec<u8>,
+    ) -> Result<(), SendError<Vec<u8>>> {
+        self.bytes_sent += msg.len();
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        println!("Sending msg to party {p} ({mb:.2}MB)...");
-        let chunk_size = 100 * 1024 * 1024;
-        let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
-        if chunks.is_empty() {
-            chunks.push(&[]);
+        let i = i + 1;
+        let total = i + remaining;
+        if i == 1 {
+            println!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
+        } else {
+            println!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
         }
-        let length = chunks.len();
-        for (i, chunk) in chunks.into_iter().enumerate() {
-            if length > 1 {
-                println!("  (Sending chunk {}/{} to party {})", i + 1, length, p);
-            }
-            let mut msg = Vec::with_capacity(2 * 4 + chunk.len());
-            msg.extend((i as u32).to_be_bytes());
-            msg.extend((length as u32).to_be_bytes());
-            msg.extend(chunk);
-            self.s[p]
-                .as_ref()
-                .unwrap_or_else(|| panic!("No sender for party {p}"))
-                .send(msg)
-                .await?;
-        }
-        Ok(())
+        self.s[p]
+            .as_ref()
+            .unwrap_or_else(|| panic!("No sender for party {p}"))
+            .send(msg)
+            .await
     }
 
-    async fn recv_bytes_from(&mut self, p: usize) -> Result<Vec<u8>, AsyncRecvError> {
-        let mut msg: Vec<u8> = vec![];
-        loop {
-            let chunk = self.r[p]
-                .as_mut()
-                .unwrap_or_else(|| panic!("No receiver for party {p}"))
-                .recv();
-            let chunk = match timeout(Duration::from_secs(10 * 60), chunk).await {
-                Ok(Some(bytes)) => bytes,
-                Ok(None) => return Err(AsyncRecvError::Closed),
-                Err(_) => return Err(AsyncRecvError::TimeoutElapsed),
-            };
-            let i = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-            let length = u32::from_be_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
-            msg.extend(&chunk[8..]);
-            if i == length - 1 {
-                break Ok(msg);
-            }
+    async fn recv_bytes_from(
+        &mut self,
+        p: usize,
+        _phase: &str,
+        _i: usize,
+    ) -> Result<Vec<u8>, AsyncRecvError> {
+        let chunk = self.r[p]
+            .as_mut()
+            .unwrap_or_else(|| panic!("No receiver for party {p}"))
+            .recv();
+        match timeout(Duration::from_secs(10 * 60), chunk).await {
+            Ok(Some(chunk)) => Ok(chunk),
+            Ok(None) => Err(AsyncRecvError::Closed),
+            Err(_) => Err(AsyncRecvError::TimeoutElapsed),
         }
     }
 }
