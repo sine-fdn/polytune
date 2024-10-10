@@ -1,0 +1,14 @@
+{
+  "participants": ["http://localhost:8000", "http://localhost:8001"],
+  "program": ".example.garble.rs",
+  "leader": 0,
+  "party": 1,
+  "input": {
+    "query": "SELECT CONCAT(first_name, last_name, date_of_birth), special_educational_needs FROM school_entry_examination",
+    "db": "mysql://root:test@localhost:5551/test"
+  },
+  "constants": {
+    "ROWS": "SELECT COUNT(id) FROM school_entry_examination",
+    "ID_LEN": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM school_entry_examination"
+  }
+}

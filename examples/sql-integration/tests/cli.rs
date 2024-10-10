@@ -16,7 +16,7 @@ fn simulate() {
         "--release",
         "--",
         "--port=8001",
-        "--config=policies1.json",
+        "--config=policy1.json",
     ];
     let mut cmd = Command::new("cargo")
         .args(args)
@@ -44,7 +44,7 @@ fn simulate() {
         "--release",
         "--",
         "--port=8000",
-        "--config=policies0.json",
+        "--config=policy0.json",
     ];
     let mut cmd = Command::new("cargo")
         .args(args)
