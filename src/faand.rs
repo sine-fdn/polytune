@@ -669,23 +669,18 @@ pub(crate) async fn beaver_aand(
         *e = a.0 ^ x.0;
         *f = b.0 ^ y.0;
     }
-    let mut emacs = vec![];
-    let mut fmacs = vec![];
     for k in (0..n).filter(|k| *k != i) {
-        for (eshare, fshare) in &ef_shares {
+        for j in 0..len {
+            let (eshare, fshare) = &ef_shares[j];
+            let (_, _, eemac, ffmac) = &mut e_f_emac_fmac[j];
             let Some((emac, _)) = eshare.1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
             let Some((fmac, _)) = fshare.1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            emacs.push(Some(emac));
-            fmacs.push(Some(fmac));
-        }
-        for j in 0..len {
-            let (_, _, emac, fmac) = &mut e_f_emac_fmac[j];
-            *emac = emacs[j];
-            *fmac = fmacs[j];
+            *eemac = Some(emac);
+            *ffmac = Some(fmac);
         }
         send_to(channel, k, "faand", &e_f_emac_fmac).await?;
     }
@@ -694,27 +689,27 @@ pub(crate) async fn beaver_aand(
         e_f_emac_fmac_k[k] =
             recv_vec_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, k, "faand", len)
                 .await?;
-        for (j, &(_e, _f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
-            let Some(_emacp) = emac else {
+    }
+    for k in (0..n).filter(|k| *k != i) {
+        for (j, &(e, f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
+            let Some(emacp) = emac else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, _ekey)) = ef_shares[j].0 .1 .0[k] else {
+            let Some((_, ekey)) = ef_shares[j].0 .1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            let Some(_fmacp) = fmac else {
+            let Some(fmacp) = fmac else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, _fkey)) = ef_shares[j].1 .1 .0[k] else {
+            let Some((_, fkey)) = ef_shares[j].1 .1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            /*if e && (emacp.0 != ekey.0 ^ delta.0) || !e && (emacp.0 != ekey.0) {
-                println!("{:?} {:?} {:?}", emacp.0, ekey.0 ^ delta.0, ekey.0);
+            if (e && emacp.0 != ekey.0 ^ delta.0) || (!e && emacp.0 != ekey.0) {
                 return Err(Error::AANDWrongEFMAC);
             }
-            if f && (fmacp.0 != fkey.0 ^ delta.0) || !f && (fmacp.0 != fkey.0) {
-                println!("{:?} {:?} {:?}", fmacp.0, fkey.0 ^ delta.0, fkey.0);
+            if (f && fmacp.0 != fkey.0 ^ delta.0) || (!f && fmacp.0 != fkey.0) {
                 return Err(Error::AANDWrongEFMAC);
-            }*/ // TODO for some reason this still fails for 3 or more parties
+            }
         }
     }
     e_f_emac_fmac
