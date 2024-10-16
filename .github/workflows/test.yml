@@ -25,15 +25,6 @@ jobs:
       - run: cargo build --release
       - run: cargo test --release
       - run: cargo clippy --release -- -Dwarnings
-      - name: Build example http-multi-server-channels
-        run: cargo build --release
-        working-directory: ./examples/http-multi-server-channels
-      - name: Build example http-single-server-channels
-        run: cargo build --release
-        working-directory: ./examples/http-single-server-channels
-      - name: Build example iroh-p2p-channels
-        run: cargo build --release
-        working-directory: ./examples/iroh-p2p-channels
 
   example_multi_server_channels:
     runs-on: ubuntu-latest
