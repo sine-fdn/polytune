@@ -184,6 +184,48 @@ fn eval_large_and_circuit() -> Result<(), Error> {
 }
 
 #[test]
+fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
+    fn run_test(num_parties: usize) -> Result<(), Error> {
+        println!();
+        println!("Running test with {} parties", num_parties);
+        let output_parties: Vec<usize> = vec![0, 1];
+        let n = (1000.0 / num_parties as f32).ceil() as usize; 
+        let mut inputs = vec![Vec::new(); num_parties];
+        let mut gates = Vec::new();
+
+        for i in 0..num_parties {
+            let start_idx = i * n;
+            let end_idx = start_idx + n;
+            for _ in start_idx..end_idx {
+                inputs[i].push(true);
+            }
+        }
+        gates.push(Gate::And(0, 1));
+
+        for w in 2..(n * num_parties) {
+            gates.push(Gate::And(n * 2 + w - 2, w));
+        }
+        let output_gates = vec![num_parties * n + gates.len() - 1];
+        let circuit = Circuit {
+            input_gates: vec![n; num_parties],
+            gates: gates.clone(),
+            output_gates,
+        };
+        let input_refs: Vec<&[bool]> = inputs.iter().map(|v| v.as_slice()).collect();
+        let output_smpc = simulate_mpc(&circuit, &input_refs, &output_parties, false)?;
+        let output_direct = eval_directly(&circuit, &input_refs);
+        assert_eq!(output_smpc, vec![true]);
+        assert_eq!(output_smpc, output_direct);
+
+        println!("Gates: {}", gates.len());
+
+        Ok(())
+    }
+    run_test(4)?;
+    Ok(())
+}
+
+#[test]
 fn eval_mixed_circuits() -> Result<(), Error> {
     let circuits = gen_circuits_up_to(5);
     let mut circuits_with_inputs = Vec::new();
