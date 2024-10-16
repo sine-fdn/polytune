@@ -23,27 +23,70 @@ jobs:
       - run: cargo build --release
       - run: cargo test --release
       - run: cargo clippy --release -- -Dwarnings
+      - name: Build example http-multi-server-channels
+        run: cargo build --release
+        working-directory: ./examples/http-multi-server-channels
+      - name: Build example http-single-server-channels
+        run: cargo build --release
+        working-directory: ./examples/http-single-server-channels
+      - name: Run example iroh-p2p-channels
+        run: cargo build --release
+        working-directory: ./examples/iroh-p2p-channels
+
   example_multi_server_channels:
     runs-on: ubuntu-latest
     needs: ci
     steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run example http-multi-server-channels
-        run: cargo test -- --nocapture
+        run: cargo test --release -- --nocapture
         working-directory: ./examples/http-multi-server-channels
+
   example_single_server_channels:
     runs-on: ubuntu-latest
     needs: ci
     steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run example http-single-server-channels
-        run: cargo test -- --nocapture
+        run: cargo test --release -- --nocapture
         working-directory: ./examples/http-single-server-channels
+
   example_iroh_p2p_channels:
     runs-on: ubuntu-latest
     needs: ci
     steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run example iroh-p2p-channels
-        run: cargo test -- --nocapture
+        run: cargo test --release -- --nocapture
         working-directory: ./examples/iroh-p2p-channels
+
   example_sql_integration:
     runs-on: ubuntu-latest
     needs: ci
