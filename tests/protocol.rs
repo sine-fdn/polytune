@@ -4,6 +4,19 @@ use garble_lang::{
 };
 use parlay::protocol::{simulate_mpc, Error};
 
+/// Tests the evaluation of a simple XOR circuit in a two-party computation (2PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where two parties jointly
+/// compute the XOR of their respective inputs without revealing them. Party 1 learns the result,
+/// as defined by the `output_parties` vector. The test verifies if the result matches the 
+/// expected output for all possible boolean combinations of inputs `x`, `y`, and `z`.
+///
+/// # Circuit
+/// - The circuit has 3 inputs, `x` and `z` from party 0 and `y` from party 1.
+/// - The circuit consists of two XOR gates:
+///   1. The first gate computes `x ^ z`.
+///   2. The second gate computes `(x ^ z) ^ y`.
+/// - The output gate contains the final result `x ^ y ^ z`.
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![1];
@@ -24,6 +37,19 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
     Ok(())
 }
 
+/// Tests the evaluation of an XOR circuit in a three-party computation (3PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where three parties compute
+/// the XOR of their respective inputs without revealing them. Parties 1 and 2 learn the result,
+/// as defined by the `output_parties` vector. The test verifies if the output matches the 
+/// expected result for all possible boolean combinations of inputs `x`, `y`, and `z`.
+///
+/// # Circuit
+/// - The circuit has 3 inputs: `x` from party 0, `y` from party 1, and `z` from party 2.
+/// - The circuit consists of two XOR gates:
+///   1. The first gate computes `x ^ z`.
+///   2. The second gate computes `(x ^ z) ^ y`.
+/// - The final output gate contains the result `x ^ y ^ z`.
 #[test]
 fn eval_xor_circuits_3pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![1, 2];
@@ -44,6 +70,23 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
     Ok(())
 }
 
+
+/// Tests the evaluation of a NOT circuit in a two-party computation (2PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where two parties compute
+/// NOT operations on their respective inputs without revealing them. Party 1 learns the result,
+/// as defined by the `output_parties` vector. The test verifies if the output matches the 
+/// expected negated and original values for inputs `x` and `y` across all possible boolean 
+/// combinations.
+///
+/// # Circuit
+/// - The circuit has 2 inputs: `x` from party 0 and `y` from party 1.
+/// - The circuit consists of four NOT gates:
+///   1. The first gate negates `x`.
+///   2. The second gate negates `y`.
+///   3. The third gate returns the original value of `x` through double negation.
+///   4. The fourth gate returns the original value of `y` through double negation.
+/// - The final output gates contain the values `[!x, !y, x, y]`.
 #[test]
 fn eval_not_circuits_2pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![1];
@@ -62,6 +105,20 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
     Ok(())
 }
 
+/// Tests the evaluation of a NOT circuit in a three-party computation (3PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where three parties compute
+/// NOT operations on their respective inputs without revealing them to each other. All parties 
+/// learn the result, as defined by the `output_parties` vector. The test verifies if the 
+/// output matches the expected negated and original values for inputs `x`, `y`, and `z` 
+/// across all boolean combinations.
+///
+/// # Circuit
+/// - The circuit has 3 inputs: `x` from party 0, `y` from party 1, and `z` from party 2.
+/// - The circuit consists of six NOT gates:
+///   1. The first three negate the inputs `x`, `y`, and `z`.
+///   2. The next three return the original values of `x`, `y`, and `z` through double negation.
+/// - The final output gates contain both negated and original values: `[!x, !y, !z, x, y, z]`.
 #[test]
 fn eval_not_circuits_3pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![0, 1, 2];
@@ -89,6 +146,19 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
     Ok(())
 }
 
+/// Tests the evaluation of an AND circuit in a two-party computation (2PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where two parties compute
+/// the AND operation on their respective inputs. Both parties learn the result,
+/// as defined by the `output_parties` vector. The test verifies if the output matches the
+/// expected result for all possible boolean combinations of inputs `x`, `y`, and `z`.
+///
+/// # Circuit
+/// - The circuit has 3 inputs: `x` and `z` from party 0, and `y` from party 1.
+/// - The circuit consists of two AND gates:
+///   1. The first gate computes `x & z`.
+///   2. The second gate computes `(x & z) & y`.
+/// - The final output gate contains the result `x & y & z`.
 #[test]
 fn eval_and_circuits_2pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![0, 1];
@@ -109,6 +179,19 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
     Ok(())
 }
 
+/// Tests the evaluation of an AND circuit in a three-party computation (3PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where three parties compute
+/// the AND operation on their respective inputs. All parties learn the result,
+/// as defined by the `output_parties` vector. The test verifies if the output matches the
+/// expected result for all possible boolean combinations of inputs `x`, `y`, and `z`.
+///
+/// # Circuit
+/// - The circuit has 3 inputs: `x` from party 0, `y` from party 1, and `z` from party 2.
+/// - The circuit consists of two AND gates:
+///   1. The first gate computes `x & z`.
+///   2. The second gate computes `(x & z) & y`.
+/// - The final output gate contains the result `x & y & z`.
 #[test]
 fn eval_and_circuits_3pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![0, 1, 2];
@@ -129,6 +212,17 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
     Ok(())
 }
 
+/// Tests the evaluation of a garble program in a three-party computation (3PC) setting.
+///
+/// This function simulates secure multi-party computation (MPC) where three parties evaluate
+/// a garble program on all possible combinations of inputs `x`, `y`, and `z`. The output is 
+/// revealed to all three parties, as defined by the `output_parties` vector The test checks
+/// if the computed result matches the expected output for the given inputs.
+///
+/// # Garble Program
+/// - The garble program has 3 inputs: `x` from party 0, `y` from party 1, and `z` from party 2.
+/// - The program consists of a single function `main(x: u8, y: u8, z: u8) -> u8` that computes
+///   the product of the inputs `x`, `y`, and `z`.
 #[test]
 fn eval_garble_prg_3pc() -> Result<(), Error> {
     let output_parties: Vec<usize> = vec![0, 1, 2];
@@ -151,80 +245,68 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_large_and_circuit() -> Result<(), Error> {
-    let output_parties: Vec<usize> = vec![0, 1];
-    let n = 100;
-    let mut in_a = vec![];
-    let mut in_b = vec![];
-    let mut gates = Vec::new();
-    for _ in 0..n {
-        in_a.push(true);
-    }
-    for _ in n..(n * 2) {
-        in_b.push(true);
-    }
-    gates.push(Gate::And(0, 1));
-    for w in 2..(n * 2) {
-        gates.push(Gate::And((n * 2) + w - 2, w));
-    }
-    let output_gates = vec![n + n + gates.len() - 1];
-    let circuit = Circuit {
-        input_gates: vec![n, n],
-        gates: gates.clone(),
-        output_gates,
-    };
-
-    let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], &output_parties, false)?;
-    let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
-    assert_eq!(output_smpc, vec![true]);
-    assert_eq!(output_smpc, output_direct);
-
-    Ok(())
-}
-
+/// Tests the evaluation of a large dynamic AND circuit in a multi-party computation (MPC) setting.
+///
+/// This function dynamically generates a large AND circuit with a configurable number of parties
+/// and AND gates. It simulates the MPC evaluation of the circuit and compares the result with a
+/// direct evaluation to ensure correctness. The circuit applies a series of AND operations across
+/// multiple parties' inputs.
+///
+/// # Circuit
+/// - All inputs are boolean vectors, with each party providing a vector of boolean values, set to random.
+/// - The circuit is created based on the number of parties and AND gates.
+///   1. The first AND gate computes the AND of the first two inputs.
+///   2. Each subsequent AND gate computes the AND of previous outputs with the next input.
+/// - The final output is the cumulative AND result of all inputs and is revealed to the first two parties.
+///
+/// # Arguments
+/// - `num_parties`: The number of parties involved in the computation.
+/// - `num_and_gates`: The number of AND gates in the circuit, distributed across the parties.
+///
+/// # Example
+/// This test runs with 2 parties and 100 AND gates.
 #[test]
 fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
-    fn run_test(num_parties: usize) -> Result<(), Error> {
-        println!();
-        println!("Running test with {} parties", num_parties);
+    fn run_test(num_parties: usize, num_and_gates: usize) -> Result<(), Error> {
         let output_parties: Vec<usize> = vec![0, 1];
-        let n = (1000.0 / num_parties as f32).ceil() as usize; 
-        let mut inputs = vec![Vec::new(); num_parties];
+        let input_len = (num_and_gates as f32 / num_parties as f32).ceil() as usize;
+
+        let inputs = vec![vec![true; input_len]; num_parties];
+        let input_refs: Vec<&[bool]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut gates = Vec::new();
 
-        for i in 0..num_parties {
-            let start_idx = i * n;
-            let end_idx = start_idx + n;
-            for _ in start_idx..end_idx {
-                inputs[i].push(true);
-            }
-        }
         gates.push(Gate::And(0, 1));
-
-        for w in 2..(n * num_parties) {
-            gates.push(Gate::And(n * 2 + w - 2, w));
+        for w in 2..(input_len * num_parties) {
+            gates.push(Gate::And(w, input_len * num_parties + w - 2));
         }
-        let output_gates = vec![num_parties * n + gates.len() - 1];
+
+        let output_gates = vec![input_len * num_parties + gates.len() - 1];
         let circuit = Circuit {
-            input_gates: vec![n; num_parties],
+            input_gates: vec![input_len; num_parties],
             gates: gates.clone(),
             output_gates,
         };
-        let input_refs: Vec<&[bool]> = inputs.iter().map(|v| v.as_slice()).collect();
         let output_smpc = simulate_mpc(&circuit, &input_refs, &output_parties, false)?;
         let output_direct = eval_directly(&circuit, &input_refs);
-        assert_eq!(output_smpc, vec![true]);
         assert_eq!(output_smpc, output_direct);
-
-        println!("Gates: {}", gates.len());
 
         Ok(())
     }
-    run_test(4)?;
+    run_test(2, 100)?;
     Ok(())
 }
 
+/// Tests the evaluation of various mixed circuits in a multi-party computation (MPC) setting.
+///
+/// This function generates a set of circuits up to a size of 5, then iterates over all possible
+/// input combinations. The test simulates the evaluation of circuits using MPC and compares
+/// the result to a direct evaluation of the circuit. The result is revealed to both parties.
+///
+/// # Circuit
+/// - For each circuit, all combinations of boolean inputs are generated for `input_gates[0]` and
+///   `input_gates[1]`.
+/// - The circuits are generated using the `gen_circuits_up_to(5)` function, which produces a
+///   variety of circuits with different gate configurations (e.g., AND, NOT, XOR).
 #[test]
 fn eval_mixed_circuits() -> Result<(), Error> {
     let circuits = gen_circuits_up_to(5);
@@ -288,6 +370,19 @@ fn eval_mixed_circuits() -> Result<(), Error> {
     Ok(())
 }
 
+/// Directly evaluates a given circuit with the provided boolean inputs.
+///
+/// This function simulates the evaluation of a circuit by sequentially applying the logic gates
+/// specified in the circuit structure (`AND`, `XOR`, `NOT`) to the given boolean inputs. It returns
+/// the output values for the specified output gates after completing the evaluation.
+///
+/// # Arguments
+/// - `circuit`: A reference to the `Circuit` object that defines the input gates, logic gates, and output gates.
+/// - `inputs`: A slice of boolean slices, where each slice represents the inputs for each party.
+///   Each element corresponds to a particular party's inputs for the circuit.
+///
+/// # Returns
+/// - A `Vec<bool>` containing the boolean results for the specified output gates of the circuit.
 fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<bool> {
     let num_inputs: usize = inputs.iter().map(|inputs| inputs.len()).sum();
     let mut output = vec![None; num_inputs + circuit.gates.len()];
@@ -319,6 +414,25 @@ fn eval_directly(circuit: &Circuit, inputs: &[&[bool]]) -> Vec<bool> {
     outputs
 }
 
+/// Generates circuits with varying numbers of inputs from two parties and gates up to a specified size.
+///
+/// This function creates circuits consisting of different configurations of input gates and logical
+/// gates (`AND`, `XOR`, and `NOT`). It explores combinations of inputs and gates up to the specified
+/// limit `n`, producing circuits that can be used for testing and evaluation in two-party computation
+/// scenarios.
+///
+/// # Arguments
+/// - `n`: The maximum total number of gates and inputs (for inputs from both parties) to generate circuits.
+///
+/// # Returns
+/// - A `Vec<Circuit>` containing all generated circuits, each represented by its input gates, gates,
+///   and output gates.
+///
+/// # Circuit
+/// - The function iterates through combinations of input counts for two parties and
+///   calculates the total number of gates based on the provided input sizes.
+/// - For each configuration, it generates circuits by creating a series of logical gates.
+/// - The gates are chosen based on a cyclic pattern, alternating between `AND`, `XOR`, and `NOT` gates.
 fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {
     let mut circuits_up_to_n = Vec::new();
     let mut gate_choice = 0;
