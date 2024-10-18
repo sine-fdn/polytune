@@ -1,5 +1,5 @@
 //! MPC Engine based on the paper
-//! [Authenticated Garbling and Efficient Maliciously Secure Two-Party Computation](https://acmccs.github.io/papers/p21-wangA.pdf).
+//! [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]

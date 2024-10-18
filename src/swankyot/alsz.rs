@@ -1,5 +1,10 @@
 //! Implementation of the Asharov-Lindell-Schneider-Zohner oblivious transfer
 //! extension protocol (cf. <https://eprint.iacr.org/2016/602>, Protocol 4).
+//!
+//! This implementation is a modified version of the ocelot rust library
+//! from <https://github.com/GaloisInc/swanky>. The original implementation
+//! uses a different channel and is synchronous. We furthermore batched the
+//! messages to reduce the number of communication rounds.
 
 #![allow(non_upper_case_globals)]
 
@@ -7,7 +12,7 @@ use crate::{
     channel::{recv_from, recv_vec_from, send_to, Channel},
     faand::Error,
     swankyot::{
-        utils, CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
+        CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
         Sender as OtSender,
     },
 };
@@ -36,11 +41,12 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> Result<Self, Error> {
-        let mut ot = OT::init(channel, rng, p_to).await?;
-        let s = utils::u8vec_to_boolvec(&s_);
-        let ks = ot.recv(channel, &s, rng, p_to).await?;
+        let mut ot = OT::init(channel, rng, p_own, p_to).await?;
+        let s = u8vec_to_boolvec(&s_);
+        let ks = ot.recv(channel, &s, rng, p_own, p_to).await?;
         let rngs = ks
             .into_iter()
             .map(AesRng::from_seed)
@@ -73,7 +79,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
             rng.fill_bytes(q);
             scutils::xor_inplace(q, if *b { &uvec[j] } else { &zero });
         }
-        Ok(utils::transpose(&qs, nrows, ncols))
+        Ok(transpose(&qs, nrows, ncols))
     }
 }
 
@@ -83,11 +89,12 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> Result<Self, Error> {
         let mut s_ = [0u8; 16];
         rng.fill_bytes(&mut s_);
-        Sender::<OT>::init_fixed_key(channel, s_, rng, p_to).await
+        Sender::<OT>::init_fixed_key(channel, s_, rng, p_own, p_to).await
     }
 
     async fn send<C: Channel, RNG: CryptoRng + Rng>(
@@ -95,6 +102,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         _: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<(), Error> {
         let m = inputs.len();
@@ -118,6 +126,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
         channel: &mut C,
         deltas: &[Self::Msg],
         _: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<Vec<(Self::Msg, Self::Msg)>, Error> {
         let m = deltas.len();
@@ -162,7 +171,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
             gvec.push(g);
         }
         send_to(channel, p_to, "ALSZ_OT_setup", &gvec).await?;
-        Ok(utils::transpose(&ts, nrows, ncols))
+        Ok(transpose(&ts, nrows, ncols))
     }
 }
 
@@ -172,9 +181,10 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> Result<Self, Error> {
-        let mut ot = OT::init(channel, rng, p_to).await?;
+        let mut ot = OT::init(channel, rng, p_own, p_to).await?;
         let mut ks = Vec::with_capacity(128);
         let mut k0 = Block::default();
         let mut k1 = Block::default();
@@ -183,7 +193,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
             rng.fill_bytes(k1.as_mut());
             ks.push((k0, k1));
         }
-        ot.send(channel, &ks, rng, p_to).await?;
+        ot.send(channel, &ks, rng, p_own, p_to).await?;
         let rngs = ks
             .into_iter()
             .map(|(k0, k1)| (AesRng::from_seed(k0), AesRng::from_seed(k1)))
@@ -200,9 +210,10 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         channel: &mut C,
         inputs: &[bool],
         _: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error> {
-        let r = utils::boolvec_to_u8vec(inputs);
+        let r = boolvec_to_u8vec(inputs);
         let ts = self.recv_setup(channel, &r, inputs.len(), p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
@@ -226,9 +237,10 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT>
         channel: &mut C,
         inputs: &[bool],
         _: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<Vec<Self::Msg>, Error> {
-        let r = utils::boolvec_to_u8vec(inputs);
+        let r = boolvec_to_u8vec(inputs);
         let ts = self.recv_setup(channel, &r, inputs.len(), p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
         for (j, b) in inputs.iter().enumerate() {
@@ -248,3 +260,73 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT>
 
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> SemiHonest for Sender<OT> {}
 impl<OT: OtSender<Msg = Block> + SemiHonest> SemiHonest for Receiver<OT> {}
+
+/// u8vec to boolvec
+#[inline]
+pub fn u8vec_to_boolvec(v: &[u8]) -> Vec<bool> {
+    let mut bv = Vec::with_capacity(v.len() * 8);
+    for byte in v.iter() {
+        for i in 0..8 {
+            bv.push((1 << i) & byte != 0);
+        }
+    }
+    bv
+}
+
+/// boolvec to u8vec
+#[inline]
+pub fn boolvec_to_u8vec(bv: &[bool]) -> Vec<u8> {
+    let offset = if bv.len() % 8 == 0 { 0 } else { 1 };
+    let mut v = vec![0u8; bv.len() / 8 + offset];
+    for (i, b) in bv.iter().enumerate() {
+        v[i / 8] |= (*b as u8) << (i % 8);
+    }
+    v
+}
+
+#[inline]
+fn get_bit(src: &[u8], i: usize) -> u8 {
+    let byte = src[i / 8];
+    let bit_pos = i % 8;
+    (byte & (1 << bit_pos) != 0) as u8
+}
+
+#[inline]
+fn set_bit(dst: &mut [u8], i: usize, b: u8) {
+    let bit_pos = i % 8;
+    if b == 1 {
+        dst[i / 8] |= 1 << bit_pos;
+    } else {
+        dst[i / 8] &= !(1 << bit_pos);
+    }
+}
+
+#[inline]
+fn transpose_naive_inplace(dst: &mut [u8], src: &[u8], m: usize) {
+    assert_eq!(src.len() % m, 0);
+    let l = src.len() * 8;
+    let n = l / m;
+
+    for i in 0..l {
+        let bit = get_bit(src, i);
+        let (row, col) = (i / m, i % m);
+        set_bit(dst, col * n + row, bit);
+    }
+}
+
+#[inline]
+fn transpose_naive(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
+    assert_eq!(nrows % 8, 0);
+    assert_eq!(ncols % 8, 0);
+    assert_eq!(nrows * ncols, input.len() * 8);
+    let mut output = vec![0u8; nrows * ncols / 8];
+
+    transpose_naive_inplace(&mut output, input, ncols);
+    output
+}
+
+/// transpose a matrix of bits
+#[inline]
+pub fn transpose(m: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
+    transpose_naive(m, nrows, ncols)
+}
