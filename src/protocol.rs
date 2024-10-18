@@ -338,7 +338,7 @@ pub async fn mpc(
     let mut receiver_ot = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
 
     let delta: Delta;
-    let mut shared_rand = shared_rng(channel, p_own, p_max).await?;
+    let mut shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
     let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
         .map(|_| random())
         .collect();
@@ -355,11 +355,11 @@ pub async fn mpc(
             let sender_out: Vec<(u128, u128)>;
             let recver_out: Vec<u128>;
             if p_own < p {
-                sender_out = kos_ot_sender(channel, &mut shared_rand, deltas.clone(), p).await?;
-                recver_out = kos_ot_receiver(channel, &mut shared_rand, x.clone(), p).await?;
+                sender_out = kos_ot_sender(channel, deltas.clone(), p_own, p).await?;
+                recver_out = kos_ot_receiver(channel, x.clone(), p_own, p).await?;
             } else {
-                recver_out = kos_ot_receiver(channel, &mut shared_rand, x.clone(), p).await?;
-                sender_out = kos_ot_sender(channel, &mut shared_rand, deltas.clone(), p).await?;
+                recver_out = kos_ot_receiver(channel, x.clone(), p_own, p).await?;
+                sender_out = kos_ot_sender(channel, deltas.clone(), p_own, p).await?;
             }
 
             let sender = sender_out.iter().map(|(first, _)| *first).collect();

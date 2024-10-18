@@ -1,20 +1,20 @@
-//! Oblivious transfer traits + instantiations.
+//! Oblivious transfer traits + instantiations based on the swanky library suite.
 //!
 //! This module provides traits for standard oblivious transfer (OT), correlated
 //! OT, and random OT, alongside implementations of the following OT protocols:
 //!
-//! * `dummy`: a dummy and completely insecure OT for testing purposes.
-//! * `naor_pinkas`: Naor-Pinkas semi-honest OT.
 //! * `chou_orlandi`: Chou-Orlandi malicious OT.
 //! * `alsz`: Asharov-Lindell-Schneider-Zohner semi-honest OT extension (+ correlated and random OT).
 //! * `kos`: Keller-Orsini-Scholl malicious OT extension (+ correlated and random OT).
 //!
+//! This implementation is a modified version of the ocelot rust library
+//! from <https://github.com/GaloisInc/swanky>. The original implementation
+//! uses a different channel and is synchronous. We furthermore batched the
+//! messages to reduce the number of communication rounds.
 
 pub mod alsz;
 pub mod chou_orlandi;
-pub mod cointoss;
 pub mod kos;
-pub mod utils;
 
 use curve25519_dalek::RistrettoPoint;
 use rand::{CryptoRng, Rng};
@@ -54,6 +54,7 @@ where
     fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Sends messages.
@@ -62,6 +63,7 @@ where
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<(), Error>>;
 }
@@ -77,6 +79,7 @@ where
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
 }
@@ -95,6 +98,7 @@ where
     fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Receives messages.
@@ -103,6 +107,7 @@ where
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
 }
@@ -120,6 +125,7 @@ where
         channel: &mut C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
+        p_pwn: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Vec<(Self::Msg, Self::Msg)>, Error>>;
 }
@@ -136,6 +142,7 @@ where
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
+        p_own: usize,
         p_to: usize,
     ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
 }

@@ -10,6 +10,11 @@
 //! `x^i` produced by the receiver is not randomized, all the random-OTs
 //! produced by the protocol will be the same. We fix this by hashing in `i`
 //! during the key derivation phase.
+//!
+//! This implementation is a modified version of the ocelot rust library
+//! from <https://github.com/GaloisInc/swanky>. The original implementation
+//! uses a different channel and is synchronous. We furthermore batched the
+//! messages to reduce the number of communication rounds.
 
 use crate::{
     channel::{recv_vec_from, send_to, Channel},
@@ -38,6 +43,7 @@ impl OtSender for Sender {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         mut rng: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<Self, Error> {
         let y = Scalar::random(&mut rng);
@@ -51,6 +57,7 @@ impl OtSender for Sender {
         channel: &mut C,
         inputs: &[(Block, Block)],
         _: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<(), Error> {
         let ys = self.y * self.s;
@@ -88,6 +95,7 @@ impl OtReceiver for Receiver {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         _: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<Self, Error> {
         let s_bytes = recv_vec_from::<u8>(channel, p_to, "CO_OT_s", 32).await?;
@@ -101,6 +109,7 @@ impl OtReceiver for Receiver {
         channel: &mut C,
         inputs: &[bool],
         mut rng: &mut RNG,
+        _: usize,
         p_to: usize,
     ) -> Result<Vec<Block>, Error> {
         let zero = &Scalar::ZERO * &self.s;

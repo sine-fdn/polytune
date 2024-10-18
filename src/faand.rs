@@ -1,4 +1,4 @@
-//! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
+//! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
 use blake3::Hasher;
@@ -78,43 +78,43 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
 pub(crate) async fn shared_rng(
     channel: &mut impl Channel,
     i: usize,
-    n: usize,
+    indices: Vec<usize>,
 ) -> Result<ChaCha20Rng, Error> {
     let r = [random::<u128>(), random::<u128>()];
     let mut buf = [0u8; 32];
     buf[..16].copy_from_slice(&r[0].to_be_bytes());
     buf[16..].copy_from_slice(&r[1].to_be_bytes());
     let c = commit(&buf);
-    for k in (0..n).filter(|k| *k != i) {
+    for &k in indices.iter().filter(|&&k| k != i) {
         send_to(channel, k, "RNG comm", &[c]).await?;
     }
-    let mut commitments = vec![Commitment([0; 32]); n];
-    for k in (0..n).filter(|k| *k != i) {
+    let mut commitments = Vec::with_capacity(indices.len());
+    for &k in indices.iter().filter(|&&k| k != i) {
         let commitment = recv_from::<Commitment>(channel, k, "RNG comm")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        commitments[k] = commitment;
+        commitments.push(commitment);
     }
-    for k in (0..n).filter(|k| *k != i) {
+    for &k in indices.iter().filter(|&&k| k != i) {
         send_to(channel, k, "RNG ver", &[buf]).await?;
     }
-    let mut bufs = vec![[0; 32]; n];
-    for k in (0..n).filter(|k| *k != i) {
+    let mut bufs = Vec::with_capacity(indices.len());
+    for &k in indices.iter().filter(|&&k| k != i) {
         let buffer = recv_from::<[u8; 32]>(channel, k, "RNG ver")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        bufs[k] = buffer;
+        bufs.push(buffer);
     }
     let mut buf_xor = buf;
-    for k in (0..n).filter(|k| *k != i) {
-        if !open_commitment(&commitments[k], &bufs[k]) {
+    for (j, _) in indices.iter().filter(|&&k| k != i).enumerate() {
+        if !open_commitment(&commitments[j], &bufs[j]) {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
         buf_xor
             .iter_mut()
-            .zip(bufs[k].iter())
+            .zip(bufs[j].iter())
             .for_each(|(buf_xor_byte, buf_byte)| *buf_xor_byte ^= *buf_byte);
     }
     Ok(ChaCha20Rng::from_seed(buf_xor))
