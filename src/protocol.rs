@@ -386,7 +386,7 @@ pub async fn mpc(
             p_max,
             secret_bits + 3 * lprime,
             &mut shared_rand,
-            (sender_ot, receiver_ot),
+            (&mut sender_ot, &mut receiver_ot),
         )
         .await?;
 

@@ -136,19 +136,11 @@ async fn fabitn(
     n: usize,
     l: usize,
     shared_rng: &mut ChaCha20Rng,
-    (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
+    (sender_ot, receiver_ot): (&mut Vec<Vec<u128>>, &mut Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x (input) of length lprime.
     let two_rho = 2 * RHO;
     let lprime = l + two_rho;
-
-    // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
-    let mut kk = vec![vec![]; n];
-    let mut mm = vec![vec![]; n];
-    for k in (0..n).filter(|k| *k != i) {
-        mm[k] = receiver_ot[k].clone();
-        kk[k] = sender_ot[k].clone();
-    }
 
     // Step 3) Verification of macs and keys.
     // Step 3 a) Sample 2*RHO random l'-bit strings r.
@@ -177,7 +169,7 @@ async fn fabitn(
             let mut xjmac = 0;
             for (j, &rbit) in r.iter().enumerate() {
                 if rbit {
-                    xjmac ^= mm[k][j];
+                    xjmac ^= receiver_ot[k][j];
                 }
             }
             xj_xjmac.push((*xj, xjmac));
@@ -197,7 +189,7 @@ async fn fabitn(
             let mut xjkey = 0;
             for (i, rbit) in rbits.iter().enumerate() {
                 if *rbit {
-                    xjkey ^= kk[k][i];
+                    xjkey ^= sender_ot[k][i];
                 }
             }
             // Step 3 d) Validity check of macs.
@@ -210,14 +202,14 @@ async fn fabitn(
     // Step 4) Return first l objects.
     x.truncate(l);
     for k in (0..n).filter(|k| *k != i) {
-        kk[k].truncate(l);
-        mm[k].truncate(l);
+        sender_ot[k].truncate(l);
+        receiver_ot[k].truncate(l);
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
         let mut authvec = smallvec![None; n];
         for k in (0..n).filter(|k| *k != i) {
-            authvec[k] = Some((Mac(mm[k][l]), Key(kk[k][l])));
+            authvec[k] = Some((Mac(receiver_ot[k][l]), Key(sender_ot[k][l])));
         }
         res.push(Share(*xi, Auth(authvec)));
     }
@@ -234,7 +226,7 @@ pub(crate) async fn fashare(
     n: usize,
     l: usize,
     shared_rng: &mut ChaCha20Rng,
-    (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
+    (sender_ot, receiver_ot): (&mut Vec<Vec<u128>>, &mut Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x (input).
 
