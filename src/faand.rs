@@ -22,6 +22,8 @@ pub enum Error {
     ChannelError(channel::Error),
     /// The MAC is not the correct one in aBit.
     ABitMacMisMatch,
+    /// The value of bi is not 0 or 1.
+    InvalidBiValue,
     /// The xor of MACs is not equal to the XOR of corresponding keys or that XOR delta.
     AShareMacsMismatch,
     /// A commitment could not be opened.
@@ -225,24 +227,15 @@ pub(crate) async fn fashare(
     n: usize,
     l: usize,
     shared_rng: &mut ChaCha20Rng,
-    (sender_ot, receiver_ot): (&mut Vec<Vec<u128>>, &mut Vec<Vec<u128>>),
+    (keys, macs): (&mut Vec<Vec<u128>>, &mut Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1) Pick random bit-string x (input).
+    // Step 1) Pick random bit-string x [input parameter x].
 
     // Step 2) Run Pi_aBit^n to compute shares.
-    let mut xishares = fabitn(
-        (channel, delta),
-        x,
-        i,
-        n,
-        l + RHO,
-        shared_rng,
-        (sender_ot, receiver_ot),
-    )
-    .await?;
+    let mut xishares = fabitn((channel, delta), x, i, n, l + RHO, shared_rng, (keys, macs)).await?;
 
     // Step 3) Compute commitments and verify consistency.
-    // Step 3 a) Compute d0, d1, dm, c0, c1, cm and send commitments to all parties.
+    // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
     let mut d0 = vec![0; RHO];
     let mut d1 = vec![0; RHO];
     let mut c0_c1_cm = Vec::with_capacity(RHO); // c0, c1, cm
@@ -260,8 +253,6 @@ pub(crate) async fn fashare(
                 } else {
                     return Err(Error::MissingMacKey);
                 }
-            } else {
-                dm.extend(&[0; 16]);
             }
         }
         d1[r] = d0[r] ^ delta.0;
@@ -270,7 +261,7 @@ pub(crate) async fn fashare(
         let cm = commit(&dm);
 
         c0_c1_cm.push((c0, c1, cm));
-        dmvec.push(dm.clone());
+        dmvec.push(dm);
     }
 
     // 3 b) After receiving all commitments, Pi broadcasts decommitment for macs.
@@ -301,11 +292,11 @@ pub(crate) async fn fashare(
         for k in (0..n).filter(|k| *k != i) {
             bi[r] ^= dm_k[k][r][0];
         }
-        if bi[r] == 0 {
-            di_bi[r] = d0[r];
-        } else if bi[r] == 1 {
-            di_bi[r] = d1[r];
-        }
+        di_bi[r] = match bi[r] {
+            0 => d0[r],
+            1 => d1[r],
+            _ => return Err(Error::InvalidBiValue),
+        };
     }
     for k in (0..n).filter(|k| *k != i) {
         send_to(channel, k, "fashare di_bi", &di_bi).await?;
@@ -317,12 +308,18 @@ pub(crate) async fn fashare(
 
     // 3 d) Consistency check of macs.
     let mut xor_xk_macs = vec![vec![0; RHO]; n];
+    let mut offset: usize;
     for r in 0..RHO {
-        for (k, dm) in dm_k.iter().enumerate().take(n) {
+        for (k, dmv) in dm_k.iter().enumerate().take(n) {
             for kk in (0..n).filter(|pp| *pp != k) {
-                if !dm.is_empty() {
-                    let dm = &dm[r];
-                    if let Ok(b) = dm[(1 + kk * 16)..(17 + kk * 16)]
+                if kk > k {
+                    offset = 16;
+                } else {
+                    offset = 0;
+                }
+                if !dmv.is_empty() {
+                    let dm = &dmv[r];
+                    if let Ok(b) = dm[(1 + kk * 16 - offset)..(17 + kk * 16 - offset)]
                         .try_into()
                         .map(u128::from_be_bytes)
                     {
