@@ -136,24 +136,23 @@ async fn fabitn(
     n: usize,
     l: usize,
     shared_rng: &mut ChaCha20Rng,
-    (sender_ot, receiver_ot): (&mut Vec<Vec<u128>>, &mut Vec<Vec<u128>>),
+    (keys, macs): (&mut Vec<Vec<u128>>, &mut Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1) Pick random bit-string x (input) of length lprime.
+    // Step 1) Pick random bit-string x of length lprime [input parameter x].
     let two_rho = 2 * RHO;
     let lprime = l + two_rho;
-
-    // Step 3) Verification of macs and keys.
-    // Step 3 a) Sample 2*RHO random l'-bit strings r.
-    let r: Vec<Vec<bool>> = (0..two_rho)
-        .map(|_| (0..lprime).map(|_| shared_rng.gen()).collect())
-        .collect();
-
-    // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
-    // Broadcast includes sending xjmac as well, as from Step 3 d).
-    if x.len() < lprime {
+    if x.len() != lprime {
         return Err(Error::InvalidLength);
     }
 
+    // Step 2) Run 2-party OTs to compute keys and MACs [input parameters mm and kk].
+
+    // Step 3) Verification of MACs and keys.
+    // Step 3 a) Sample 2*RHO random l'-bit strings r.
+    let r: Vec<Vec<bool>> = vec![vec![shared_rng.gen(); lprime]; two_rho];
+
+    // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
+    // We batch messages and send xjmac with xj as well, as from Step 3 d).
     let mut xj = Vec::with_capacity(two_rho);
     for rbits in &r {
         let mut xm = false;
@@ -165,11 +164,11 @@ async fn fabitn(
 
     for k in (0..n).filter(|k| *k != i) {
         let mut xj_xjmac = Vec::with_capacity(two_rho);
-        for (r, xj) in r.iter().zip(xj.iter()) {
+        for (rbits, xj) in r.iter().zip(xj.iter()) {
             let mut xjmac = 0;
-            for (j, &rbit) in r.iter().enumerate() {
+            for (j, &rbit) in rbits.iter().enumerate() {
                 if rbit {
-                    xjmac ^= receiver_ot[k][j];
+                    xjmac ^= macs[k][j];
                 }
             }
             xj_xjmac.push((*xj, xjmac));
@@ -177,7 +176,7 @@ async fn fabitn(
         send_to(channel, k, "fabitn", &xj_xjmac).await?;
     }
 
-    let mut xj_xjmac_k = vec![vec![(false, 0); two_rho]; n];
+    let mut xj_xjmac_k: Vec<Vec<(bool, u128)>> = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
         xj_xjmac_k[k] = recv_vec_from(channel, k, "fabitn", two_rho).await?;
     }
@@ -189,11 +188,11 @@ async fn fabitn(
             let mut xjkey = 0;
             for (i, rbit) in rbits.iter().enumerate() {
                 if *rbit {
-                    xjkey ^= sender_ot[k][i];
+                    xjkey ^= keys[k][i];
                 }
             }
             // Step 3 d) Validity check of macs.
-            if *xjmac != xjkey ^ ((*xj as u128) * delta.0) {
+            if (*xj && *xjmac != xjkey ^ delta.0) || (!*xj && *xjmac != xjkey) {
                 return Err(Error::ABitMacMisMatch);
             }
         }
@@ -202,14 +201,14 @@ async fn fabitn(
     // Step 4) Return first l objects.
     x.truncate(l);
     for k in (0..n).filter(|k| *k != i) {
-        sender_ot[k].truncate(l);
-        receiver_ot[k].truncate(l);
+        keys[k].truncate(l);
+        macs[k].truncate(l);
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
         let mut authvec = smallvec![None; n];
         for k in (0..n).filter(|k| *k != i) {
-            authvec[k] = Some((Mac(receiver_ot[k][l]), Key(sender_ot[k][l])));
+            authvec[k] = Some((Mac(macs[k][l]), Key(keys[k][l])));
         }
         res.push(Share(*xi, Auth(authvec)));
     }
@@ -701,10 +700,11 @@ pub(crate) async fn beaver_aand(
             let Some((_, fkey)) = ef_shares[j].1 .1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            if (e && emacp.0 != ekey.0 ^ delta.0) || (!e && emacp.0 != ekey.0) {
-                return Err(Error::AANDWrongEFMAC);
-            }
-            if (f && fmacp.0 != fkey.0 ^ delta.0) || (!f && fmacp.0 != fkey.0) {
+            if (e && emacp.0 != ekey.0 ^ delta.0)
+                || (!e && emacp.0 != ekey.0)
+                || (f && fmacp.0 != fkey.0 ^ delta.0)
+                || (!f && fmacp.0 != fkey.0)
+            {
                 return Err(Error::AANDWrongEFMAC);
             }
         }

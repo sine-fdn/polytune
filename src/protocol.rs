@@ -2,7 +2,8 @@
 use std::ops::BitXor;
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use rand::random;
+use rand::{random, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 use tokio::{runtime::Runtime, task::JoinSet};
@@ -332,25 +333,32 @@ pub async fn mpc(
 
     let b = bucket_size(num_and_gates);
     let lprime = num_and_gates * b;
-    let faand_len = lprime + 3 * RHO;
 
-    let mut sender_ot = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
-    let mut receiver_ot = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
+    let mut sender_ot = vec![vec![0; secret_bits_ot + 3 * lprime]; p_max];
+    let mut receiver_ot = vec![vec![0; secret_bits_ot + 3 * lprime]; p_max];
 
     let delta: Delta;
-    let mut shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
-    let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
-        .map(|_| random())
-        .collect();
+    let random_shares: Vec<Share>;
+    let rand_shares: Vec<Share>;
+    let auth_bits: Vec<Share>;
+    let mut shares = vec![Share(false, Auth(smallvec![])); num_gates];
+    let mut labels = vec![Label(0); num_gates];
+    let mut xyz_shares = vec![];
+    let mut shared_rand: rand_chacha::ChaCha20Rng = ChaCha20Rng::from_entropy();
+
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to::<()>(channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(channel, p_fpre, "delta")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
+        send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
+        random_shares = recv_from(channel, p_fpre, "random shares").await?;
     } else {
+        shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
+        let mut x: Vec<bool> = (0..secret_bits_ot + 3 * lprime).map(|_| random()).collect();
         delta = Delta(random());
-        let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
+        let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * lprime];
         for p in (0..p_max).filter(|p| *p != p_own) {
             let sender_out: Vec<(u128, u128)>;
             let recver_out: Vec<u128>;
@@ -366,19 +374,6 @@ pub async fn mpc(
             sender_ot[p] = sender;
             receiver_ot[p] = recver_out;
         }
-    }
-
-    let random_shares: Vec<Share>;
-    let rand_shares: Vec<Share>;
-    let auth_bits: Vec<Share>;
-    let mut shares = vec![Share(false, Auth(smallvec![])); num_gates];
-    let mut labels = vec![Label(0); num_gates];
-    let mut xyz_shares = vec![];
-
-    if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
-        send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
-        random_shares = recv_from(channel, p_fpre, "random shares").await?;
-    } else {
         rand_shares = fashare(
             (channel, delta),
             &mut x,
