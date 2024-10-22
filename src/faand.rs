@@ -36,6 +36,8 @@ pub enum Error {
     AANDWrongEFMAC,
     /// No Mac or Key.
     MissingMacKey,
+    /// Empty vector.
+    EmptyVector,
     /// Conversion error.
     ConversionError,
     /// Empty bucket.
@@ -245,14 +247,12 @@ pub(crate) async fn fashare(
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
-        for k in 0..n {
-            if k != i {
-                if let Some((mac, key)) = xishare.1 .0[k] {
-                    d0[r] ^= key.0;
-                    dm.extend(&mac.0.to_be_bytes());
-                } else {
-                    return Err(Error::MissingMacKey);
-                }
+        for k in (0..n).filter(|k| *k != i) {
+            if let Some((mac, key)) = xishare.1 .0[k] {
+                d0[r] ^= key.0;
+                dm.extend(&mac.0.to_be_bytes());
+            } else {
+                return Err(Error::MissingMacKey);
             }
         }
         d1[r] = d0[r] ^ delta.0;
@@ -263,11 +263,11 @@ pub(crate) async fn fashare(
         c0_c1_cm.push((c0, c1, cm));
         dmvec.push(dm);
     }
-
-    // 3 b) After receiving all commitments, Pi broadcasts decommitment for macs.
     for k in (0..n).filter(|k| *k != i) {
         send_to(channel, k, "fashare comm", &c0_c1_cm).await?;
     }
+
+    // 3 b) Receiving all commitments.
     let mut c0_c1_cm_k = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
         c0_c1_cm_k[k] =
@@ -276,6 +276,7 @@ pub(crate) async fn fashare(
     }
     c0_c1_cm_k[i] = c0_c1_cm;
 
+    // 3 b) Pi broadcasts decommitment for macs.
     for k in (0..n).filter(|k| *k != i) {
         send_to(channel, k, "fashare ver", &dmvec).await?;
     }
@@ -285,18 +286,17 @@ pub(crate) async fn fashare(
     }
     dm_k[i] = dmvec;
 
-    // 3 c) Compute di_bi and send to all parties.
-    let mut bi = [0; RHO];
+    // 3 c) Compute bi to determine di_bi and send to all parties.
+    let mut bi = [false; RHO];
     let mut di_bi = vec![0; RHO];
     for r in 0..RHO {
         for k in (0..n).filter(|k| *k != i) {
-            bi[r] ^= dm_k[k][r][0];
+            if dm_k[k][r][0] > 1 {
+                return Err(Error::InvalidBiValue);
+            }
+            bi[r] ^= dm_k[k][r][0] != 0;
         }
-        di_bi[r] = match bi[r] {
-            0 => d0[r],
-            1 => d1[r],
-            _ => return Err(Error::InvalidBiValue),
-        };
+        di_bi[r] = if bi[r] { d1[r] } else { d0[r] };
     }
     for k in (0..n).filter(|k| *k != i) {
         send_to(channel, k, "fashare di_bi", &di_bi).await?;
@@ -306,39 +306,37 @@ pub(crate) async fn fashare(
         di_bi_k[k] = recv_vec_from::<u128>(channel, k, "fashare di_bi", RHO).await?;
     }
 
-    // 3 d) Consistency check of macs.
+    // 3 d) Consistency check of macs: open commitment of xor of keys and check if it equals to the xor of all macs.
     let mut xor_xk_macs = vec![vec![0; RHO]; n];
-    let mut offset: usize;
     for r in 0..RHO {
         for (k, dmv) in dm_k.iter().enumerate().take(n) {
+            if dmv.is_empty() {
+                return Err(Error::EmptyVector);
+            }
+            let dm = &dmv[r];
             for kk in (0..n).filter(|pp| *pp != k) {
-                if kk > k {
-                    offset = 16;
+                let start = if kk > k {
+                    // here we compensate for not sending anything for own index
+                    1 + (kk - 1) * 16
                 } else {
-                    offset = 0;
-                }
-                if !dmv.is_empty() {
-                    let dm = &dmv[r];
-                    if let Ok(b) = dm[(1 + kk * 16 - offset)..(17 + kk * 16 - offset)]
-                        .try_into()
-                        .map(u128::from_be_bytes)
-                    {
-                        xor_xk_macs[kk][r] ^= b;
-                    } else {
-                        return Err(Error::ConversionError);
-                    }
+                    1 + kk * 16
+                };
+                let end = start + 16;
+                if let Ok(b) = dm[start..end].try_into().map(u128::from_be_bytes) {
+                    xor_xk_macs[kk][r] ^= b;
+                } else {
+                    return Err(Error::ConversionError);
                 }
             }
         }
         for k in (0..n).filter(|k| *k != i) {
             let bj = &di_bi_k[k][r].to_be_bytes();
-            if open_commitment(&c0_c1_cm_k[k][r].0, bj) || open_commitment(&c0_c1_cm_k[k][r].1, bj)
-            {
-                if xor_xk_macs[k][r] != di_bi_k[k][r] {
-                    return Err(Error::AShareMacsMismatch);
-                }
-            } else {
+            let commitments = &c0_c1_cm_k[k][r];
+            if !open_commitment(&commitments.0, bj) && !open_commitment(&commitments.1, bj) {
                 return Err(Error::CommitmentCouldNotBeOpened);
+            }
+            if xor_xk_macs[k][r] != di_bi_k[k][r] {
+                return Err(Error::AShareMacsMismatch);
             }
         }
     }
