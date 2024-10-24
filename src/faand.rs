@@ -658,16 +658,18 @@ pub(crate) async fn beaver_aand(
     let len = rand_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.
-    let mut e_f_emac_fmac = vec![(false, false, None, None); len];
+    let mut e_f_emac_fmac = vec![];
+    e_f_emac_fmac.reserve_exact(len);
 
     let mut ef_shares = vec![];
+    ef_shares.reserve_exact(len);
+    
     for j in 0..len {
-        let (e, f, _, _) = &mut e_f_emac_fmac[j];
         let (a, b, _c) = &rand_triples[j];
         let (x, y) = &and_shares[j];
+
         ef_shares.push((a ^ x, b ^ y));
-        *e = a.0 ^ x.0;
-        *f = b.0 ^ y.0;
+        e_f_emac_fmac.push((a.0 ^ x.0, b.0 ^ y.0, None, None));
     }
     for k in (0..n).filter(|k| *k != i) {
         for j in 0..len {
@@ -712,29 +714,28 @@ pub(crate) async fn beaver_aand(
             }
         }
     }
-    e_f_emac_fmac
-        .iter_mut()
-        .enumerate()
-        .for_each(|(j, (e, f, _, _))| {
-            for k in (0..n).filter(|&k| k != i) {
-                let (fa_e, fa_f, _, _) = e_f_emac_fmac_k[k][j];
-                *e ^= fa_e;
-                *f ^= fa_f;
-            }
-        });
-    let mut and_share = vec![Share(false, Auth(smallvec![])); len];
+    for (j, (e, f, _, _)) in e_f_emac_fmac.iter_mut().enumerate() {
+        for k in (0..n).filter(|&k| k != i) {
+            let (e_k, f_k, _, _) = e_f_emac_fmac_k[k][j];
+            *e ^= e_k;
+            *f ^= f_k;
+        }
+    }
+    let mut and_share = vec![];
+    and_share.reserve_exact(len);
 
     for j in 0..len {
         let (a, _b, c) = &rand_triples[j];
         let (_x, y) = &and_shares[j];
         let (e, f, _, _) = e_f_emac_fmac[j];
-        and_share[j] = c.clone();
+        let mut current_share = c.clone();
         if e {
-            and_share[j] = &and_share[j] ^ y;
+            current_share = &current_share ^ y;
         }
         if f {
-            and_share[j] = &and_share[j] ^ a;
+            current_share = &current_share ^ a;
         }
+        and_share.push(current_share);
     }
     Ok(and_share)
 }
