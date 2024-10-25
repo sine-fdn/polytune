@@ -35,7 +35,7 @@ impl GarblingKey {
 
 pub(crate) fn encrypt(
     garbling_key: &GarblingKey,
-    triple: (bool, Vec<Option<Mac>>, Label),
+    triple: (bool, Vec<Mac>, Label),
 ) -> Result<Vec<u8>, Error> {
     let (key, nonce) = key_and_nonce(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
@@ -49,7 +49,7 @@ pub(crate) fn encrypt(
 pub(crate) fn decrypt(
     garbling_key: &GarblingKey,
     bytes: &[u8],
-) -> Result<(bool, Vec<Option<Mac>>, Label), Error> {
+) -> Result<(bool, Vec<Mac>, Label), Error> {
     let (key, nonce) = key_and_nonce(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
     let plaintext = cipher
@@ -87,7 +87,7 @@ fn encrypt_decrypt() {
     };
     let triple = (
         random(),
-        vec![Some(Mac(random())), None, Some(Mac(random()))],
+        vec![Mac(random()), Mac(0), Mac(random())],
         Label(random()),
     );
     let encrypted = encrypt(&key, triple.clone()).unwrap();

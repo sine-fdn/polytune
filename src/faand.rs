@@ -34,10 +34,6 @@ pub enum Error {
     AANDWrongDMAC,
     /// Wrong MAC of e.
     AANDWrongEFMAC,
-    /// No Mac or Key.
-    MissingMacKey,
-    /// Empty vector.
-    EmptyVector,
     /// Conversion error.
     ConversionError,
     /// Empty bucket.
@@ -210,9 +206,9 @@ async fn fabitn(
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
-        let mut authvec = smallvec![None; n];
+        let mut authvec = smallvec![(Mac(0), Key(0)); n];
         for k in (0..n).filter(|k| *k != i) {
-            authvec[k] = Some((Mac(macs[k][l]), Key(keys[k][l])));
+            authvec[k] = (Mac(mm[k][l]), Key(kk[k][l]));
         }
         res.push(Share(*xi, Auth(authvec)));
     }
@@ -247,8 +243,9 @@ pub(crate) async fn fashare(
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
-        for k in (0..n).filter(|k| *k != i) {
-            if let Some((mac, key)) = xishare.1 .0[k] {
+        for k in 0..n {
+            if k != i {
+                let (mac, key) = xishare.1 .0[k];
                 d0[r] ^= key.0;
                 dm.extend(&mac.0.to_be_bytes());
             } else {
@@ -367,9 +364,7 @@ async fn fhaand(
     for j in (0..n).filter(|j| *j != i) {
         for ll in 0..l {
             let sj: bool = random();
-            let Some((_, kixj)) = xshares[ll].1 .0[j] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (_, kixj) = xshares[ll].1 .0[j];
             let hash_kixj: [u8; 32] = blake3::hash(&kixj.0.to_le_bytes()).into();
             let lsb0 = (hash_kixj[31] & 0b0000_0001) != 0;
             h0h1[ll].0 = lsb0 ^ sj;
@@ -385,9 +380,7 @@ async fn fhaand(
     for j in (0..n).filter(|j| *j != i) {
         let h0h1_j = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
         for ll in 0..l {
-            let Some((mixj, _)) = xshares[ll].1 .0[j] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (mixj, _) = xshares[ll].1 .0[j];
             let hash_mixj: [u8; 32] = blake3::hash(&mixj.0.to_le_bytes()).into();
             let mut t = (hash_mixj[31] & 0b0000_0001) != 0;
             if xshares[ll].0 {
@@ -444,12 +437,10 @@ async fn flaand(
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
     }
-    let mut zshares = vec![Share(false, Auth(smallvec![None; n])); l];
+    let mut zshares = vec![Share(false, Auth(smallvec![(Mac(0), Key(0)); n])); l];
     for ll in 0..l {
         zshares[ll].0 = z[ll];
-    }
-    for k in (0..n).filter(|k| *k != i) {
-        for ll in 0..l {
+        for k in (0..n).filter(|k| *k != i) {
             zshares[ll].1 .0[k] = rshares[ll].1 .0[k];
         }
     }
@@ -461,9 +452,7 @@ async fn flaand(
     let mut phi = vec![0; l];
     for (ll, phi_l) in phi.iter_mut().enumerate().take(l) {
         for k in (0..n).filter(|k| *k != i) {
-            let Some((mk_yi, ki_yk)) = yshares[ll].1 .0[k] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
             *phi_l ^= ki_yk.0 ^ mk_yi.0;
         }
         *phi_l ^= yshares[ll].0 as u128 * delta.0;
@@ -475,9 +464,7 @@ async fn flaand(
     for j in (0..n).filter(|j| *j != i) {
         let mut ei_uij = Vec::with_capacity(l);
         for (ll, phi_l) in phi.iter().enumerate().take(l) {
-            let Some((_, ki_xj)) = xshares[ll].1 .0[j] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (_, ki_xj) = xshares[ll].1 .0[j];
             ki_xj_phi[j][ll] = hash128(ki_xj.0);
             let uij = hash128(ki_xj.0 ^ delta.0) ^ ki_xj_phi[j][ll] ^ *phi_l;
             ei_uij.push((e[ll], uij));
@@ -487,21 +474,17 @@ async fn flaand(
     for j in (0..n).filter(|j| *j != i) {
         let ei_hi_dhi_k = recv_vec_from::<(bool, u128)>(channel, j, "flaand", l).await?;
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
-            let Some((mi_xj, _)) = xshares[ll].1 .0[j] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (mi_xj, _) = xshares[ll].1 .0[j];
             ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_hi_dhi_k[ll].1);
             // mi_xj_phi added here
         }
         for ll in 0..ei_hi_dhi_k.len() {
-            let Some((mac, key)) = rshares[ll].1 .0[j] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (mac, key) = rshares[ll].1 .0[j];
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             if ei_hi_dhi_k[ll].0 {
-                zshares[ll].1 .0[j] = Some((mac, Key(key.0 ^ delta.0)));
+                zshares[ll].1 .0[j] = (mac, Key(key.0 ^ delta.0));
             } else {
-                zshares[ll].1 .0[j] = Some((mac, key));
+                zshares[ll].1 .0[j] = (mac, key);
             }
         }
     }
@@ -512,9 +495,7 @@ async fn flaand(
         let mut commhi = Vec::with_capacity(l);
         for ll in 0..l {
             for k in (0..n).filter(|k| *k != i) {
-                let Some((mk_zi, ki_zk)) = zshares[ll].1 .0[k] else {
-                    return Err(Error::MissingMacKey);
-                };
+                let (mk_zi, ki_zk) = zshares[ll].1 .0[k];
                 hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
             }
             hi[ll] ^= xshares[ll].0 as u128 * phi[ll];
@@ -649,7 +630,7 @@ pub(crate) async fn beaver_aand(
     let len = rand_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.
-    let mut e_f_emac_fmac = vec![(false, false, None, None); len];
+    let mut e_f_emac_fmac = vec![(false, false, Mac(0), Mac(0)); len];
 
     let mut ef_shares = vec![];
     for j in 0..len {
@@ -664,37 +645,20 @@ pub(crate) async fn beaver_aand(
         for j in 0..len {
             let (eshare, fshare) = &ef_shares[j];
             let (_, _, eemac, ffmac) = &mut e_f_emac_fmac[j];
-            let Some((emac, _)) = eshare.1 .0[k] else {
-                return Err(Error::MissingMacKey);
-            };
-            let Some((fmac, _)) = fshare.1 .0[k] else {
-                return Err(Error::MissingMacKey);
-            };
-            *eemac = Some(emac);
-            *ffmac = Some(fmac);
+            *eemac = eshare.1 .0[k].0;
+            *ffmac = fshare.1 .0[k].0;
         }
         send_to(channel, k, "faand", &e_f_emac_fmac).await?;
     }
-    let mut e_f_emac_fmac_k = vec![vec![(false, false, None, None); len]; n];
+    let mut e_f_emac_fmac_k = vec![vec![(false, false, Mac(0), Mac(0)); len]; n];
     for k in (0..n).filter(|k| *k != i) {
         e_f_emac_fmac_k[k] =
-            recv_vec_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, k, "faand", len)
-                .await?;
+            recv_vec_from::<(bool, bool, Mac, Mac)>(channel, k, "faand", len).await?;
     }
     for k in (0..n).filter(|k| *k != i) {
         for (j, &(e, f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
-            let Some(emacp) = emac else {
-                return Err(Error::MissingMacKey);
-            };
-            let Some((_, ekey)) = ef_shares[j].0 .1 .0[k] else {
-                return Err(Error::MissingMacKey);
-            };
-            let Some(fmacp) = fmac else {
-                return Err(Error::MissingMacKey);
-            };
-            let Some((_, fkey)) = ef_shares[j].1 .1 .0[k] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (_, ekey) = ef_shares[j].0 .1 .0[k];
+            let (_, fkey) = ef_shares[j].1 .1 .0[k];
             if (e && emacp.0 != ekey.0 ^ delta.0)
                 || (!e && emacp.0 != ekey.0)
                 || (f && fmacp.0 != fkey.0 ^ delta.0)
@@ -709,9 +673,8 @@ pub(crate) async fn beaver_aand(
         .enumerate()
         .for_each(|(j, (e, f, _, _))| {
             for k in (0..n).filter(|&k| k != i) {
-                let (fa_e, fa_f, _, _) = e_f_emac_fmac_k[k][j];
-                *e ^= fa_e;
-                *f ^= fa_f;
+                *e ^= e_f_emac_fmac_k[k][j].0;
+                *f ^= e_f_emac_fmac_k[k][j].1;
             }
         });
     let mut and_share = vec![Share(false, Auth(smallvec![])); len];
@@ -749,19 +712,15 @@ async fn check_dvalue(
         for (_, y_next, _) in buckets[j].iter().skip(1) {
             d_values[j].push(first ^ y_next.0);
             for k in (0..n).filter(|k| *k != i) {
-                let Some((y0mac, _)) = y.1 .0[k] else {
-                    return Err(Error::MissingMacKey);
-                };
-                let Some((ymac, _)) = y_next.1 .0[k] else {
-                    return Err(Error::MissingMacKey);
-                };
-                d_macs[k][j].push(Some(y0mac ^ ymac));
+                let (y0mac, _) = y.1 .0[k];
+                let (ymac, _) = y_next.1 .0[k];
+                d_macs[k][j].push(y0mac ^ ymac);
             }
         }
     }
 
     for k in (0..n).filter(|k| *k != i) {
-        let dvalues_macs: Vec<(Vec<bool>, Vec<Option<Mac>>)> = (0..len)
+        let dvalues_macs: Vec<(Vec<bool>, Vec<Mac>)> = (0..len)
             .map(|i| (d_values[i].clone(), d_macs[k][i].clone()))
             .collect();
         send_to(channel, k, "dvalue", &dvalues_macs).await?;
@@ -769,19 +728,13 @@ async fn check_dvalue(
 
     for k in (0..n).filter(|k| *k != i) {
         let dvalues_macs_k =
-            recv_vec_from::<(Vec<bool>, Vec<Option<Mac>>)>(channel, k, "dvalue", len).await?;
+            recv_vec_from::<(Vec<bool>, Vec<Mac>)>(channel, k, "dvalue", len).await?;
         for (j, dval) in d_values.iter_mut().enumerate().take(len) {
             let (d_value_p, d_macs_p) = &dvalues_macs_k[j];
-            let Some((_, y0key)) = buckets[j][0].1 .1 .0[k] else {
-                return Err(Error::MissingMacKey);
-            };
+            let (_, y0key) = buckets[j][0].1 .1 .0[k];
             for (m, d) in dval.iter_mut().enumerate().take(d_macs_p.len()) {
-                let Some(dmac) = d_macs_p[m] else {
-                    return Err(Error::MissingMacKey);
-                };
-                let Some((_, ykey)) = buckets[j][m + 1].1 .1 .0[k] else {
-                    return Err(Error::MissingMacKey);
-                };
+                let dmac = d_macs_p[m];
+                let (_, ykey) = buckets[j][m + 1].1 .1 .0[k];
                 if (d_value_p[m] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
                     || (!d_value_p[m] && dmac.0 != y0key.0 ^ ykey.0)
                 {
@@ -827,34 +780,24 @@ fn combine_two_leaky_ands(
 ) -> Result<(Share, Share, Share), Error> {
     //Step (b) compute x, y, z.
     let xbit = x1.0 ^ x2.0;
-    let mut xauth = Auth(smallvec![None; n]);
+    let mut xauth = Auth(smallvec![(Mac(0), Key(0)); n]);
     for k in (0..n).filter(|k| *k != i) {
-        let Some((mk_x1, ki_x1)) = x1.1 .0[k] else {
-            return Err(Error::MissingMacKey);
-        };
-        let Some((mk_x2, ki_x2)) = x2.1 .0[k] else {
-            return Err(Error::MissingMacKey);
-        };
-        xauth.0[k] = Some((mk_x1 ^ mk_x2, ki_x1 ^ ki_x2));
+        let (mk_x1, ki_x1) = x1.1 .0[k];
+        let (mk_x2, ki_x2) = x2.1 .0[k];
+        xauth.0[k] = (mk_x1 ^ mk_x2, ki_x1 ^ ki_x2);
     }
     let xshare = Share(xbit, xauth);
 
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
-    let mut zauth = Auth(smallvec![None; n]);
+    let mut zauth = Auth(smallvec![(Mac(0), Key(0)); n]);
     for k in (0..n).filter(|k| *k != i) {
-        let Some((mk_z1, ki_z1)) = z1.1 .0[k] else {
-            return Err(Error::MissingMacKey);
-        };
-        let Some((mk_z2, ki_z2)) = z2.1 .0[k] else {
-            return Err(Error::MissingMacKey);
-        };
-        let Some((mk_x2, ki_x2)) = x2.1 .0[k] else {
-            return Err(Error::MissingMacKey);
-        };
-        zauth.0[k] = Some((
+        let (mk_z1, ki_z1) = z1.1 .0[k];
+        let (mk_z2, ki_z2) = z2.1 .0[k];
+        let (mk_x2, ki_x2) = x2.1 .0[k];
+        zauth.0[k] = (
             mk_z1 ^ mk_z2 ^ Mac(d as u128 * mk_x2.0),
             ki_z1 ^ ki_z2 ^ Key(d as u128 * ki_x2.0),
-        ));
+        );
     }
     let zshare = Share(zbit, zauth);
 
