@@ -34,6 +34,8 @@ pub enum Error {
     AANDWrongDMAC,
     /// Wrong MAC of e.
     AANDWrongEFMAC,
+    /// Empty vector.
+    EmptyVector,
     /// Conversion error.
     ConversionError,
     /// Empty bucket.
@@ -208,7 +210,7 @@ async fn fabitn(
     for (l, xi) in x.iter().enumerate().take(l) {
         let mut authvec = smallvec![(Mac(0), Key(0)); n];
         for k in (0..n).filter(|k| *k != i) {
-            authvec[k] = (Mac(mm[k][l]), Key(kk[k][l]));
+            authvec[k] = (Mac(macs[k][l]), Key(keys[k][l]));
         }
         res.push(Share(*xi, Auth(authvec)));
     }
@@ -243,14 +245,10 @@ pub(crate) async fn fashare(
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
-        for k in 0..n {
-            if k != i {
-                let (mac, key) = xishare.1 .0[k];
-                d0[r] ^= key.0;
-                dm.extend(&mac.0.to_be_bytes());
-            } else {
-                return Err(Error::MissingMacKey);
-            }
+        for k in (0..n).filter(|k| *k != i) {
+            let (mac, key) = xishare.1 .0[k];
+            d0[r] ^= key.0;
+            dm.extend(&mac.0.to_be_bytes());
         }
         d1[r] = d0[r] ^ delta.0;
         let c0 = commit(&d0[r].to_be_bytes());
@@ -659,10 +657,10 @@ pub(crate) async fn beaver_aand(
         for (j, &(e, f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
             let (_, ekey) = ef_shares[j].0 .1 .0[k];
             let (_, fkey) = ef_shares[j].1 .1 .0[k];
-            if (e && emacp.0 != ekey.0 ^ delta.0)
-                || (!e && emacp.0 != ekey.0)
-                || (f && fmacp.0 != fkey.0 ^ delta.0)
-                || (!f && fmacp.0 != fkey.0)
+            if (e && emac.0 != ekey.0 ^ delta.0)
+                || (!e && emac.0 != ekey.0)
+                || (f && fmac.0 != fkey.0 ^ delta.0)
+                || (!f && fmac.0 != fkey.0)
             {
                 return Err(Error::AANDWrongEFMAC);
             }
