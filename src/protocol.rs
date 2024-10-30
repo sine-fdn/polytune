@@ -2,17 +2,17 @@
 use std::ops::BitXor;
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use rand::random;
+use rand::{random, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
-    faand::{self, beaver_aand, bucket_size, fashare, shared_rng, RHO},
+    faand::{self, beaver_aand, bucket_size, fashare, shared_rng},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
-    ot::{kos_ot_receiver, kos_ot_sender, u128_to_block},
 };
 
 /// Preprocessed AND gates that need to be sent to the circuit evaluator.
@@ -328,64 +328,34 @@ pub async fn mpc(
     let num_and_gates = circuit.and_gates();
     let num_gates = num_input_gates + circuit.gates.len();
     let secret_bits = num_input_gates + num_and_gates;
-    let secret_bits_ot = secret_bits + 3 * RHO;
 
     let b = bucket_size(num_and_gates);
     let lprime = num_and_gates * b;
 
-    let mut sender_ot = vec![vec![0; secret_bits_ot + 3 * lprime]; p_max];
-    let mut receiver_ot = vec![vec![0; secret_bits_ot + 3 * lprime]; p_max];
-
     let delta: Delta;
-    let mut shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
-    let mut x: Vec<bool> = (0..secret_bits_ot + 3 * lprime)
-        .map(|_| random())
-        .collect();
+    let mut shared_rand: rand_chacha::ChaCha20Rng = ChaCha20Rng::from_entropy();
+    let random_shares: Vec<Share>;
+    let mut xyz_shares = vec![];
+
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to::<()>(channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(channel, p_fpre, "delta")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-    } else {
-        delta = Delta(random());
-        let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * lprime];
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            let sender_out: Vec<(u128, u128)>;
-            let recver_out: Vec<u128>;
-            if p_own < p {
-                sender_out = kos_ot_sender(channel, deltas.clone(), p_own, p).await?;
-                recver_out = kos_ot_receiver(channel, x.clone(), p_own, p).await?;
-            } else {
-                recver_out = kos_ot_receiver(channel, x.clone(), p_own, p).await?;
-                sender_out = kos_ot_sender(channel, deltas.clone(), p_own, p).await?;
-            }
 
-            let sender = sender_out.iter().map(|(first, _)| *first).collect();
-            sender_ot[p] = sender;
-            receiver_ot[p] = recver_out;
-        }
-    }
-
-    let random_shares: Vec<Share>;
-    let rand_shares: Vec<Share>;
-    let auth_bits: Vec<Share>;
-    let mut shares = vec![Share(false, Auth(smallvec![])); num_gates];
-    let mut labels = vec![Label(0); num_gates];
-    let mut xyz_shares = vec![];
-
-    if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
         random_shares = recv_from(channel, p_fpre, "random shares").await?;
     } else {
-        rand_shares = fashare(
+        delta = Delta(random());
+        shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
+
+        let rand_shares = fashare(
             (channel, delta),
-            &mut x,
             p_own,
             p_max,
             secret_bits + 3 * lprime,
             &mut shared_rand,
-            (sender_ot, receiver_ot),
         )
         .await?;
 
@@ -395,6 +365,8 @@ pub async fn mpc(
     }
 
     let mut random_shares = random_shares.into_iter();
+    let mut shares = vec![Share(false, Auth(smallvec![])); num_gates];
+    let mut labels = vec![Label(0); num_gates];
 
     for (w, gate) in circuit.wires().iter().enumerate() {
         if let Wire::Input(_) | Wire::And(_, _) = gate {
@@ -428,6 +400,7 @@ pub async fn mpc(
         }
     }
 
+    let auth_bits: Vec<Share>;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to(channel, p_fpre, "AND shares", &and_shares).await?;
         auth_bits = recv_from(channel, p_fpre, "AND shares").await?;
@@ -560,7 +533,8 @@ pub async fn mpc(
                 let mut masked_input = *input ^ own_share;
                 for p in 0..p_max {
                     if let Some((_, key)) = own_macs_and_keys.get(p).copied() {
-                        if key != Key(0) { //only needed for the trusted dealer version
+                        if key != Key(0) {
+                            //only needed for the trusted dealer version
                             let Some(other_shares) = wire_shares_from_others.get(p) else {
                                 return Err(MpcError::InvalidInputMacOnWire(w).into());
                             };
@@ -667,7 +641,8 @@ pub async fn mpc(
                     let Auth(mac_s_key_r) = mac_s_key_r;
                     for (p, mac_s_key_r) in mac_s_key_r.iter().enumerate() {
                         let (_, key_r) = mac_s_key_r;
-                        if *key_r == Key(0){ //only needed for the trusted dealer version
+                        if *key_r == Key(0) {
+                            //only needed for the trusted dealer version
                             continue;
                         }
                         let Some(GarbledGate(garbled_gate)) = &garbled_gates[p][w] else {

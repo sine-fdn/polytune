@@ -10,10 +10,11 @@ use smallvec::{smallvec, SmallVec};
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel},
     fpre::{Auth, Delta, Key, Mac, Share},
+    ot::{kos_ot_receiver, kos_ot_sender, u128_to_block},
 };
 
 /// The statistical security parameter `RHO` used for cryptographic operations.
-pub(crate) const RHO: usize = 40;
+const RHO: usize = 40;
 
 /// Errors occurring during preprocessing.
 #[derive(Debug)]
@@ -133,27 +134,32 @@ pub(crate) async fn shared_rng(
 /// parties.
 async fn fabitn(
     (channel, delta): (&mut impl Channel, Delta),
-    x: &mut Vec<bool>,
     i: usize,
     n: usize,
     l: usize,
     shared_rng: &mut ChaCha20Rng,
-    (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1) Pick random bit-string x of length lprime [input parameter x].
+    // Step 1) Pick random bit-string x of length lprime.
     let two_rho = 2 * RHO;
     let lprime = l + two_rho;
-    if x.len() != lprime {
-        return Err(Error::InvalidLength);
-    }
+
+    let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
-    let mut keys = vec![vec![]; n];
-    let mut macs = vec![vec![]; n];
-    for k in (0..n).filter(|k| *k != i) {
-        macs[k] = receiver_ot[k].clone();
-        keys[k] = sender_ot[k].clone();
+    let mut keys = vec![vec![0; lprime]; n];
+    let mut macs = vec![vec![0; lprime]; n];
+
+    let deltas = vec![u128_to_block(delta.0); lprime];
+    for p in (0..n).filter(|p| *p != i) {
+        if i < p {
+            keys[p] = kos_ot_sender(channel, &deltas, i, p).await?;
+            macs[p] = kos_ot_receiver(channel, &x, i, p).await?;
+        } else {
+            macs[p] = kos_ot_receiver(channel, &x, i, p).await?;
+            keys[p] = kos_ot_sender(channel, &deltas, i, p).await?;
+        }
     }
+    drop(deltas);
 
     // Step 2) Run 2-party OTs to compute keys and MACs [input parameters mm and kk].
 
@@ -207,6 +213,7 @@ async fn fabitn(
             }
         }
     }
+    drop(r);
 
     // Step 4) Return first l objects.
     x.truncate(l);
@@ -230,17 +237,15 @@ async fn fabitn(
 /// Random bit strings are picked and random authenticated shares are distributed to the parties.
 pub(crate) async fn fashare(
     (channel, delta): (&mut impl Channel, Delta),
-    x: &mut Vec<bool>,
     i: usize,
     n: usize,
     l: usize,
     shared_rng: &mut ChaCha20Rng,
-    (keys, macs): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x (input).
 
     // Step 2) Run Pi_aBit^n to compute shares.
-    let mut xishares = fabitn((channel, delta), x, i, n, l + RHO, shared_rng, (keys, macs)).await?;
+    let mut xishares = fabitn((channel, delta), i, n, l + RHO, shared_rng).await?;
 
     // Step 3) Compute commitments and verify consistency.
     // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
@@ -318,7 +323,7 @@ pub(crate) async fn fashare(
                 if dmv.is_empty() {
                     return Err(Error::EmptyVector);
                 }
-                let dm = &dmv[r];    
+                let dm = &dmv[r];
                 let start = if kk > k {
                     // here we compensate for not sending anything for own index
                     1 + (kk - 1) * 16
