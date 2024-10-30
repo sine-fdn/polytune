@@ -332,14 +332,13 @@ pub async fn mpc(
 
     let b = bucket_size(num_and_gates);
     let lprime = num_and_gates * b;
-    let faand_len = lprime + 3 * RHO;
 
-    let mut sender_ot = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
-    let mut receiver_ot = vec![vec![0; secret_bits_ot + 3 * faand_len]; p_max];
+    let mut sender_ot = vec![vec![0; secret_bits_ot + 3 * lprime]; p_max];
+    let mut receiver_ot = vec![vec![0; secret_bits_ot + 3 * lprime]; p_max];
 
     let delta: Delta;
     let mut shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
-    let mut x: Vec<bool> = (0..secret_bits_ot + 3 * faand_len)
+    let mut x: Vec<bool> = (0..secret_bits_ot + 3 * lprime)
         .map(|_| random())
         .collect();
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
@@ -350,7 +349,7 @@ pub async fn mpc(
             .ok_or(Error::EmptyMsg)?;
     } else {
         delta = Delta(random());
-        let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * faand_len];
+        let deltas = vec![u128_to_block(delta.0); secret_bits_ot + 3 * lprime];
         for p in (0..p_max).filter(|p| *p != p_own) {
             let sender_out: Vec<(u128, u128)>;
             let recver_out: Vec<u128>;

@@ -136,16 +136,19 @@ async fn fabitn(
     shared_rng: &mut ChaCha20Rng,
     (sender_ot, receiver_ot): (Vec<Vec<u128>>, Vec<Vec<u128>>),
 ) -> Result<Vec<Share>, Error> {
-    // Step 1) Pick random bit-string x (input) of length lprime.
+    // Step 1) Pick random bit-string x of length lprime [input parameter x].
     let two_rho = 2 * RHO;
     let lprime = l + two_rho;
+    if x.len() != lprime {
+        return Err(Error::InvalidLength);
+    }
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
-    let mut kk = vec![vec![]; n];
-    let mut mm = vec![vec![]; n];
+    let mut keys = vec![vec![]; n];
+    let mut macs = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
-        mm[k] = receiver_ot[k].clone();
-        kk[k] = sender_ot[k].clone();
+        macs[k] = receiver_ot[k].clone();
+        keys[k] = sender_ot[k].clone();
     }
 
     // Step 3) Verification of macs and keys.
@@ -175,7 +178,7 @@ async fn fabitn(
             let mut xjmac = 0;
             for (j, &rbit) in r.iter().enumerate() {
                 if rbit {
-                    xjmac ^= mm[k][j];
+                    xjmac ^= macs[k][j];
                 }
             }
             xj_xjmac.push((*xj, xjmac));
@@ -195,7 +198,7 @@ async fn fabitn(
             let mut xjkey = 0;
             for (i, rbit) in rbits.iter().enumerate() {
                 if *rbit {
-                    xjkey ^= kk[k][i];
+                    xjkey ^= keys[k][i];
                 }
             }
             // Step 3 d) Validity check of macs.
@@ -208,14 +211,14 @@ async fn fabitn(
     // Step 4) Return first l objects.
     x.truncate(l);
     for k in (0..n).filter(|k| *k != i) {
-        kk[k].truncate(l);
-        mm[k].truncate(l);
+        keys[k].truncate(l);
+        macs[k].truncate(l);
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
         let mut authvec = smallvec![(Mac(0), Key(0)); n];
         for k in (0..n).filter(|k| *k != i) {
-            authvec[k] = (Mac(mm[k][l]), Key(kk[k][l]));
+            authvec[k] = (Mac(macs[k][l]), Key(keys[k][l]));
         }
         res.push(Share(*xi, Auth(authvec)));
     }
@@ -326,11 +329,11 @@ pub(crate) async fn fashare(
             for kk in (0..n).filter(|pp| *pp != k) {
                 if !dm.is_empty() {
                     let dm = &dm[r];
-                    if let Ok(b) = dm[(1 + kk * 16)..(17 + kk * 16)]
+                    if let Ok(mac) = dm[(1 + kk * 16)..(17 + kk * 16)]
                         .try_into()
                         .map(u128::from_be_bytes)
                     {
-                        xor_xk_macs[kk][r] ^= b;
+                        xor_xk_macs[kk][r] ^= mac;
                     } else {
                         return Err(Error::ConversionError);
                     }
@@ -338,8 +341,8 @@ pub(crate) async fn fashare(
             }
         }
         for k in (0..n).filter(|k| *k != i) {
-            let bj = &di_bi_k[k][r].to_be_bytes();
-            if open_commitment(&c0_c1_cm_k[k][r].0, bj) || open_commitment(&c0_c1_cm_k[k][r].1, bj)
+            let d_bj = &di_bi_k[k][r].to_be_bytes();
+            if open_commitment(&c0_c1_cm_k[k][r].0, d_bj) || open_commitment(&c0_c1_cm_k[k][r].1, d_bj)
             {
                 if xor_xk_macs[k][r] != di_bi_k[k][r] {
                     return Err(Error::AShareMacsMismatch);
@@ -484,16 +487,16 @@ async fn flaand(
         send_to(channel, j, "flaand", &ei_uij).await?;
     }
     for j in (0..n).filter(|j| *j != i) {
-        let ei_hi_dhi_k = recv_vec_from::<(bool, u128)>(channel, j, "flaand", l).await?;
+        let ei_uij_k = recv_vec_from::<(bool, u128)>(channel, j, "flaand", l).await?;
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1 .0[j];
-            ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_hi_dhi_k[ll].1);
+            ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_uij_k[ll].1);
             // mi_xj_phi added here
         }
-        for ll in 0..ei_hi_dhi_k.len() {
+        for ll in 0..ei_uij_k.len() {
             let (mac, key) = rshares[ll].1 .0[j];
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
-            if ei_hi_dhi_k[ll].0 {
+            if ei_uij_k[ll].0 {
                 zshares[ll].1 .0[j] = (mac, Key(key.0 ^ delta.0));
             } else {
                 zshares[ll].1 .0[j] = (mac, key);
@@ -592,14 +595,14 @@ async fn faand(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
     n: usize,
-    l: usize,
+    l: usize, //num_and_gates
     shared_rng: &mut ChaCha20Rng,
-    xyz_shares: Vec<Share>,
+    xyr_shares: Vec<Share>,
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     let b = bucket_size(l);
     let lprime = l * b;
 
-    let (xshares, rest) = xyz_shares.split_at(lprime);
+    let (xshares, rest) = xyr_shares.split_at(lprime);
     let (yshares, rshares) = rest.split_at(lprime);
 
     // Step 1) Generate all leaky AND triples.
@@ -631,80 +634,83 @@ async fn faand(
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
 pub(crate) async fn beaver_aand(
     (channel, delta): (&mut impl Channel, Delta),
-    and_shares: Vec<(Share, Share)>,
+    alpha_beta_shares: Vec<(Share, Share)>,
     i: usize,
     n: usize,
-    l: usize, //circuit_size
+    l: usize, //num_and_gates
     shared_rng: &mut ChaCha20Rng,
-    xyz_shares: Vec<Share>,
+    abc_shares: Vec<Share>,
 ) -> Result<Vec<Share>, Error> {
-    let rand_triples = faand((channel, delta), i, n, l, shared_rng, xyz_shares).await?;
-    let len = rand_triples.len();
+    let abc_triples = faand((channel, delta), i, n, l, shared_rng, abc_shares).await?;
+    let len = abc_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.
-    let mut e_f_emac_fmac = vec![];
-    e_f_emac_fmac.reserve_exact(len);
+    // Steps 1 and 2) of https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4: compute blinded shares d and e and 
+    // send to all parties with corresponding macs.
+    let mut d_e_dmac_emac = vec![];
+    d_e_dmac_emac.reserve_exact(len);
 
-    let mut ef_shares = vec![];
-    ef_shares.reserve_exact(len);
+    let mut de_shares = vec![];
+    de_shares.reserve_exact(len);
     
     for j in 0..len {
-        let (a, b, _c) = &rand_triples[j];
-        let (x, y) = &and_shares[j];
+        let (a, b, _) = &abc_triples[j];
+        let (alpha, beta) = &alpha_beta_shares[j];
 
-        ef_shares.push((a ^ x, b ^ y));
-        e_f_emac_fmac.push((a.0 ^ x.0, b.0 ^ y.0, Mac(0), Mac(0)));
+        de_shares.push((a ^ alpha, b ^ beta));
+        d_e_dmac_emac.push((a.0 ^ alpha.0, b.0 ^ beta.0, Mac(0), Mac(0)));
     }
     for k in (0..n).filter(|k| *k != i) {
         for j in 0..len {
-            let (eshare, fshare) = &ef_shares[j];
-            let (_, _, eemac, ffmac) = &mut e_f_emac_fmac[j];
-            *eemac = eshare.1 .0[k].0;
-            *ffmac = fshare.1 .0[k].0;
+            let (dshare, eshare) = &de_shares[j];
+            let (_, _, dmac, emac) = &mut d_e_dmac_emac[j];
+            *dmac = dshare.1 .0[k].0;
+            *emac = eshare.1 .0[k].0;
         }
-        send_to(channel, k, "faand", &e_f_emac_fmac).await?;
+        send_to(channel, k, "faand", &d_e_dmac_emac).await?;
     }
-    let mut e_f_emac_fmac_k = vec![vec![(false, false, Mac(0), Mac(0)); len]; n];
+    let mut d_e_dmac_emac_k = vec![vec![(false, false, Mac(0), Mac(0)); len]; n];
     for k in (0..n).filter(|k| *k != i) {
-        e_f_emac_fmac_k[k] =
+        d_e_dmac_emac_k[k] =
             recv_vec_from::<(bool, bool, Mac, Mac)>(channel, k, "faand", len).await?;
     }
     for k in (0..n).filter(|k| *k != i) {
-        for (j, &(e, f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
-            let (_, ekey) = ef_shares[j].0 .1 .0[k];
-            let (_, fkey) = ef_shares[j].1 .1 .0[k];
+        for (j, &(d, e, ref dmac, ref emac)) in d_e_dmac_emac_k[k].iter().enumerate() {
+            let (_, dkey) = de_shares[j].0 .1 .0[k];
+            let (_, ekey) = de_shares[j].1 .1 .0[k];
+            if (d && dmac.0 != dkey.0 ^ delta.0) || (!d && dmac.0 != dkey.0) {
+                return Err(Error::AANDWrongEFMAC);
+            }
             if (e && emac.0 != ekey.0 ^ delta.0) || (!e && emac.0 != ekey.0) {
                 return Err(Error::AANDWrongEFMAC);
             }
-            if (f && fmac.0 != fkey.0 ^ delta.0) || (!f && fmac.0 != fkey.0) {
-                return Err(Error::AANDWrongEFMAC);
-            }
         }
     }
-    for (j, (e, f, _, _)) in e_f_emac_fmac.iter_mut().enumerate() {
+    for (j, (d, e, _, _)) in d_e_dmac_emac.iter_mut().enumerate() {
         for k in (0..n).filter(|&k| k != i) {
-            let (e_k, f_k, _, _) = e_f_emac_fmac_k[k][j];
+            let (d_k, e_k, _, _) = d_e_dmac_emac_k[k][j];
+            *d ^= d_k;
             *e ^= e_k;
-            *f ^= f_k;
         }
     }
-    let mut and_share = vec![];
-    and_share.reserve_exact(len);
+    let mut alpha_and_beta = vec![];
+    alpha_and_beta.reserve_exact(len);
 
+    // Step 3) of https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4: compute and return the final shares.
     for j in 0..len {
-        let (a, _b, c) = &rand_triples[j];
-        let (_x, y) = &and_shares[j];
-        let (e, f, _, _) = e_f_emac_fmac[j];
-        let mut current_share = c.clone();
+        let (a, _, c) = &abc_triples[j];
+        let (_, beta) = &alpha_beta_shares[j];
+        let (d, e, _, _) = d_e_dmac_emac[j];
+        let mut and_share = c.clone();
+        if d {
+            and_share = &and_share ^ beta;
+        }
         if e {
-            current_share = &current_share ^ y;
+            and_share = &and_share ^ a;
         }
-        if f {
-            current_share = &current_share ^ a;
-        }
-        and_share.push(current_share);
+        alpha_and_beta.push(and_share);
     }
-    Ok(and_share)
+    Ok(alpha_and_beta)
 }
 
 /// Check and return d-values for a vector of shares.
