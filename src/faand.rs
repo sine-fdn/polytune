@@ -377,13 +377,10 @@ async fn fhaand(
         for ll in 0..l {
             let sj: bool = random();
             let (_, kixj) = xshares[ll].1 .0[j];
-            let hash_kixj: [u8; 32] = blake3::hash(&kixj.0.to_le_bytes()).into();
-            let lsb0 = (hash_kixj[31] & 0b0000_0001) != 0;
-            h0h1[ll].0 = lsb0 ^ sj;
-
-            let hash_kixj_delta: [u8; 32] = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes()).into();
-            let lsb1 = (hash_kixj_delta[31] & 0b0000_0001) != 0;
-            h0h1[ll].1 = lsb1 ^ sj ^ yi[ll];
+            let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
+            let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
+            h0h1[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
+            h0h1[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
             vi[ll] ^= sj;
         }
         send_to(channel, j, "haand", &h0h1).await?;
@@ -393,13 +390,13 @@ async fn fhaand(
         let h0h1_j = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
         for ll in 0..l {
             let (mixj, _) = xshares[ll].1 .0[j];
-            let hash_mixj: [u8; 32] = blake3::hash(&mixj.0.to_le_bytes()).into();
-            let mut t = (hash_mixj[31] & 0b0000_0001) != 0;
-            if xshares[ll].0 {
-                t ^= h0h1_j[ll].1;
+            let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
+            let mut t = hash_mixj.as_bytes()[31] & 1 != 0;
+            t ^= if xshares[ll].0 {
+                h0h1_j[ll].1
             } else {
-                t ^= h0h1_j[ll].0;
-            }
+                h0h1_j[ll].0
+            };
             vi[ll] ^= t;
         }
     }
@@ -415,12 +412,8 @@ async fn fhaand(
 /// with u128s instead while still cancelling the hashes out if correct.
 fn hash128(input: u128) -> u128 {
     let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
-    let mut value1: u128 = 0;
-    let mut value2: u128 = 0;
-    for i in 0..16 {
-        value1 |= (res[i] as u128) << (8 * i);
-        value2 |= (res[i + 16] as u128) << (8 * i);
-    }
+    let value1 = u128::from_le_bytes(res[0..16].try_into().unwrap());
+    let value2 = u128::from_le_bytes(res[16..32].try_into().unwrap());
     value1 ^ value2
 }
 
@@ -436,7 +429,7 @@ async fn flaand(
     l: usize,
 ) -> Result<Vec<Share>, Error> {
     // Triple computation.
-    // Step 1) Triple computation (inputs).
+    // Step 1) Triple computation [random authenticated shares as input parameters xshares, yshares, rshares].
 
     // Step 2) Run Pi_HaAND to get back some v.
     let y = yshares.iter().take(l).map(|share| share.0).collect();
@@ -445,16 +438,12 @@ async fn flaand(
     // Step 3) Compute z and e AND shares.
     let mut z = vec![false; l];
     let mut e = vec![false; l];
+    let mut zshares = vec![Share(false, Auth(smallvec![(Mac(0), Key(0)); n])); l];
+
     for ll in 0..l {
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
-    }
-    let mut zshares = vec![Share(false, Auth(smallvec![(Mac(0), Key(0)); n])); l];
-    for ll in 0..l {
         zshares[ll].0 = z[ll];
-        for k in (0..n).filter(|k| *k != i) {
-            zshares[ll].1 .0[k] = rshares[ll].1 .0[k];
-        }
     }
     drop(v);
     drop(z);
@@ -489,10 +478,8 @@ async fn flaand(
             let (mi_xj, _) = xshares[ll].1 .0[j];
             ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_uij_k[ll].1);
             // mi_xj_phi added here
-        }
-        for ll in 0..ei_uij_k.len() {
-            let (mac, key) = rshares[ll].1 .0[j];
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
+            let (mac, key) = rshares[ll].1 .0[j];
             if ei_uij_k[ll].0 {
                 zshares[ll].1 .0[j] = (mac, Key(key.0 ^ delta.0));
             } else {
@@ -503,46 +490,35 @@ async fn flaand(
 
     // Step 6) Compute hash and comm and send to all parties.
     let mut hi = vec![0; l];
-    {
-        let mut commhi = Vec::with_capacity(l);
-        for ll in 0..l {
-            for k in (0..n).filter(|k| *k != i) {
-                let (mk_zi, ki_zk) = zshares[ll].1 .0[k];
-                hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
-            }
-            hi[ll] ^= xshares[ll].0 as u128 * phi[ll];
-            hi[ll] ^= zshares[ll].0 as u128 * delta.0;
-            commhi.push(commit(&hi[ll].to_be_bytes()));
-        }
+    let mut commhi = Vec::with_capacity(l);
+    for ll in 0..l {
         for k in (0..n).filter(|k| *k != i) {
-            send_to(channel, k, "flaand comm", &commhi).await?;
+            let (mk_zi, ki_zk) = zshares[ll].1 .0[k];
+            hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
+        hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
+        commhi.push(commit(&hi[ll].to_be_bytes()));
     }
     drop(phi);
     drop(ki_xj_phi);
 
-    let mut commhi_k = Vec::with_capacity(n);
-    for k in 0..n {
-        if k == i {
-            commhi_k.push(vec![]);
-        } else {
-            commhi_k.push(recv_vec_from::<Commitment>(channel, k, "flaand comm", l).await?);
-        }
+    // All parties first broadcast the commitment of Hi.
+    for k in (0..n).filter(|k| *k != i) {
+        send_to(channel, k, "flaand comm", &commhi).await?;
+    }
+    let mut commhi_k: Vec<Vec<Commitment>> = vec![vec![]; n];
+    for k in (0..n).filter(|k| *k != i) {
+        commhi_k[k] = recv_vec_from::<Commitment>(channel, k, "flaand comm", l).await?;
     }
 
+    // Then all parties broadcast Hi.
     for k in (0..n).filter(|k| *k != i) {
         send_to(channel, k, "flaand hash", &hi).await?;
     }
-
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
     for k in (0..n).filter(|k| *k != i) {
         let hi_k = recv_vec_from::<u128>(channel, k, "flaand hash", l).await?;
-        for (ll, (xh, hi_k)) in xor_all_hi
-            .iter_mut()
-            .zip(hi_k.into_iter())
-            .enumerate()
-            .take(l)
-        {
+        for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k).enumerate() {
             if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes()) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
@@ -551,12 +527,9 @@ async fn flaand(
     }
 
     // Step 7) Check that the xor of all his is zero.
-    for xh in xor_all_hi.iter().take(l) {
-        if *xh != 0 {
-            return Err(Error::LaANDXorNotZero);
-        }
+    if xor_all_hi.iter().take(l).any(|&xh| xh != 0) {
+        return Err(Error::LaANDXorNotZero);
     }
-
     Ok(zshares)
 }
 
@@ -567,20 +540,6 @@ pub(crate) fn bucket_size(circuit_size: usize) -> usize {
         n if n >= 3_100 => 4,
         _ => 5,
     }
-}
-
-/// Transforms all triples into a single vector of triples.
-fn transform<'a>(
-    x: &'a [Share],
-    y: &'a [Share],
-    z: &'a [Share],
-    length: usize,
-) -> Vec<(&'a Share, &'a Share, &'a Share)> {
-    let mut triples = Vec::with_capacity(length);
-    for l in 0..length {
-        triples.push((&x[l], &y[l], &z[l]));
-    }
-    triples
 }
 
 type Bucket<'a> = SmallVec<[(&'a Share, &'a Share, &'a Share); 3]>;
@@ -604,7 +563,9 @@ async fn faand(
 
     // Step 1) Generate all leaky AND triples.
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
-    let triples = transform(xshares, yshares, &zshares, lprime);
+    let triples: Vec<(&Share, &Share, &Share)> = (0..lprime)
+        .map(|l| (&xshares[l], &yshares[l], &zshares[l]))
+        .collect();
 
     // Step 2) Randomly partition all objects into l buckets, each with b objects.
     let mut buckets: Vec<Bucket> = vec![smallvec![]; l];
