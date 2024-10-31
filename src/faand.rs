@@ -128,10 +128,16 @@ pub(crate) async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
-/// Protocol PI_aBit^n that performs F_aBit^n.
+/// Protocol PI_aBit^n that performs F_aBit^n from the paper
+/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// A random bit-string is generated as well as the corresponding keys and MACs are sent to all
-/// parties.
+/// This function implements a secure multi-party computation protocol to generate a random
+/// bit-string and the corresponding keys and MACs (the latter are sent to the other parties),
+/// i.e., shares of random authenticated bits.
+/// The two main steps of the protocol are running two-party oblivious transfers (OTs) for
+/// each pair of parties and then checking the validity of the MACs and keys by checking the XOR
+/// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
+/// where RHO is the statistical security parameter.
 async fn fabitn(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
@@ -164,7 +170,7 @@ async fn fabitn(
     // Step 2) Run 2-party OTs to compute keys and MACs [input parameters mm and kk].
 
     // Step 3) Verification of MACs and keys.
-    // Step 3 a) Sample 2*RHO random l'-bit strings r.
+    // Step 3 a) Sample 2 * RHO random l'-bit strings r.
     let r: Vec<Vec<bool>> = vec![vec![shared_rng.gen(); lprime]; two_rho];
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
@@ -178,6 +184,7 @@ async fn fabitn(
         xj.push(xm);
     }
 
+    // Step 3 b continued) Send xj and its corresponding MACs to all parties except self.
     for k in (0..n).filter(|k| *k != i) {
         let mut xj_xjmac = Vec::with_capacity(two_rho);
         for (rbits, xj) in r.iter().zip(xj.iter()) {
@@ -215,7 +222,7 @@ async fn fabitn(
     }
     drop(r);
 
-    // Step 4) Return first l objects.
+    // Step 4) Return the first l objects.
     x.truncate(l);
     for k in (0..n).filter(|k| *k != i) {
         keys[k].truncate(l);
@@ -232,9 +239,19 @@ async fn fabitn(
     Ok(res)
 }
 
-/// Protocol PI_aShare that performs F_aShare.
+/// Protocol PI_aShare that performs F_aShare from the paper
+/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// Random bit strings are picked and random authenticated shares are distributed to the parties.
+/// This protocol allows parties to generate and distribute authenticated random shares securely.
+/// It consists of the following steps:
+/// 
+/// 1. **Random Bit String Generation**: Each party picks a random bit string of a specified length.
+/// 2. **Autenticated Bit Generation**: The parties generate random authenticated bit shares.
+/// 3. **Commitment and Verification**: 
+///    - The parties compute commitments based on a subset of their shares and broadcast these to ensure consistency.
+///    - They then verify these commitments by performing decommitments and checking the validity of the 
+///      MACs against the commitments.
+/// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 pub(crate) async fn fashare(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
@@ -355,8 +372,10 @@ pub(crate) async fn fashare(
     Ok(xishares)
 }
 
-/// Protocol Pi_HaAND that performs F_HaAND.
+/// Protocol Pi_HaAND that performs F_HaAND from the paper
+/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
+/// This protocol computes the half-authenticated AND of two bit strings.
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
 async fn fhaand(
@@ -405,7 +424,7 @@ async fn fhaand(
     Ok(vi)
 }
 
-/// Hash 128 bits input 128 bits using BLAKE3.
+/// This function takes a 128-bit unsigned integer (`u128`) as input and produces a 128-bit hash value.
 ///
 /// We hash into 256 bits and then xor the first 128 bits and the second 128 bits. In our case this
 /// works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing
@@ -417,10 +436,12 @@ fn hash128(input: u128) -> u128 {
     value1 ^ value2
 }
 
-/// Protocol Pi_LaAND that performs F_LaAND.
+/// Protocol Pi_LaAND that performs F_LaAND from the paper
+/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// Generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that the AND of the XORs of the
-/// x and y values equals to the XOR of the z values.
+/// This asynchronous function implements the "leaky authenticated AND" protocol. It computes 
+/// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals 
+/// the XOR of the output values z.
 async fn flaand(
     (channel, delta): (&mut impl Channel, Delta),
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
@@ -544,7 +565,8 @@ pub(crate) fn bucket_size(circuit_size: usize) -> usize {
 
 type Bucket<'a> = SmallVec<[(&'a Share, &'a Share, &'a Share); 3]>;
 
-/// Protocol Pi_aAND that performs F_aAND.
+/// Protocol Pi_aAND that performs F_aAND from the paper
+/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 async fn faand(
