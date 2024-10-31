@@ -34,7 +34,7 @@ pub enum Error {
     /// Wrong MAC of d when combining two leaky ANDs.
     AANDWrongDMAC,
     /// Wrong MAC of e.
-    AANDWrongEFMAC,
+    AANDWrongDEMAC,
     /// Empty vector.
     EmptyVector,
     /// Conversion error.
@@ -561,7 +561,7 @@ async fn faand(
     let (xshares, rest) = xyr_shares.split_at(lprime);
     let (yshares, rshares) = rest.split_at(lprime);
 
-    // Step 1) Generate all leaky AND triples.
+    // Step 1) Generate all leaky AND triples by calling flaand l' times.
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
     let triples: Vec<(&Share, &Share, &Share)> = (0..lprime)
         .map(|l| (&xshares[l], &yshares[l], &zshares[l]))
@@ -571,9 +571,9 @@ async fn faand(
     let mut buckets: Vec<Bucket> = vec![smallvec![]; l];
 
     for obj in triples {
-        let mut j = shared_rng.gen_range(0..buckets.len());
+        let mut j = shared_rng.gen_range(0..l);
         while buckets[j].len() >= b {
-            j = (j + 1) % buckets.len();
+            j = (j + 1) % l;
         }
         buckets[j].push(obj);
     }
@@ -616,8 +616,7 @@ pub(crate) async fn beaver_aand(
         d_e_dmac_emac.push((a.0 ^ alpha.0, b.0 ^ beta.0, Mac(0), Mac(0)));
     }
     for k in (0..n).filter(|k| *k != i) {
-        for j in 0..len {
-            let (dshare, eshare) = &de_shares[j];
+        for (j, (dshare, eshare)) in de_shares.iter().enumerate() {
             let (_, _, dmac, emac) = &mut d_e_dmac_emac[j];
             *dmac = dshare.1 .0[k].0;
             *emac = eshare.1 .0[k].0;
@@ -633,12 +632,11 @@ pub(crate) async fn beaver_aand(
         for (j, &(d, e, ref dmac, ref emac)) in d_e_dmac_emac_k[k].iter().enumerate() {
             let (_, dkey) = de_shares[j].0 .1 .0[k];
             let (_, ekey) = de_shares[j].1 .1 .0[k];
-            if (d && dmac.0 != dkey.0 ^ delta.0)
-                || (!d && dmac.0 != dkey.0)
-                || (e && emac.0 != ekey.0 ^ delta.0)
-                || (!e && emac.0 != ekey.0)
-            {
-                return Err(Error::AANDWrongEFMAC);
+
+            let expected_dmac = dkey.0 ^ if d { delta.0 } else { 0 };
+            let expected_emac = ekey.0 ^ if e { delta.0 } else { 0 };
+            if dmac.0 != expected_dmac || emac.0 != expected_emac {
+                return Err(Error::AANDWrongDEMAC);
             }
         }
     }
@@ -677,27 +675,28 @@ async fn check_dvalue(
 ) -> Result<Vec<Vec<bool>>, Error> {
     // Step (a) compute and check macs of d-values.
     let len = buckets.len();
-    let mut d_values = vec![vec![]; len];
-    let mut d_macs = vec![vec![vec![]; len]; n];
+    let mut d_values: Vec<Vec<bool>> = vec![vec![]; len];
 
-    for j in 0..len {
-        let (_, y, _) = &buckets[j][0];
-        let first = y.0;
-        for (_, y_next, _) in buckets[j].iter().skip(1) {
-            d_values[j].push(first ^ y_next.0);
-            for k in (0..n).filter(|k| *k != i) {
-                let (y0mac, _) = y.1 .0[k];
-                let (ymac, _) = y_next.1 .0[k];
-                d_macs[k][j].push(y0mac ^ ymac);
-            }
+    for (j, bucket) in buckets.iter().enumerate() {
+        let (_, y, _) = &bucket[0];
+        for (_, y_next, _) in bucket.iter().skip(1) {
+            d_values[j].push(y.0 ^ y_next.0);
         }
     }
 
-    for k in (0..n).filter(|k| *k != i) {
-        let dvalues_macs: Vec<(Vec<bool>, Vec<Mac>)> = (0..len)
-            .map(|i| (d_values[i].clone(), d_macs[k][i].clone()))
-            .collect();
+    for k in (0..n).filter(|&k| k != i) {
+        let mut dvalues_macs = vec![(vec![], vec![]); len];
+        for (j, bucket) in buckets.iter().enumerate() {
+            let (_, y, _) = &bucket[0];
+            for (_, y_next, _) in bucket.iter().skip(1) {
+                let (y0mac, _) = y.1 .0[k];
+                let (ymac, _) = y_next.1 .0[k];
+                dvalues_macs[j].1.push(y0mac ^ ymac);
+            }
+            dvalues_macs[j].0 = d_values[j].to_vec();
+        }
         send_to(channel, k, "dvalue", &dvalues_macs).await?;
+        drop(dvalues_macs);
     }
 
     for k in (0..n).filter(|k| *k != i) {
@@ -706,12 +705,11 @@ async fn check_dvalue(
         for (j, dval) in d_values.iter_mut().enumerate().take(len) {
             let (d_value_p, d_macs_p) = &dvalues_macs_k[j];
             let (_, y0key) = buckets[j][0].1 .1 .0[k];
-            for (m, d) in dval.iter_mut().enumerate().take(d_macs_p.len()) {
-                let dmac = d_macs_p[m];
+            for (m, (d, dmac)) in dval.iter_mut().zip(d_macs_p).enumerate() {
+                let dmac = dmac;
                 let (_, ykey) = buckets[j][m + 1].1 .1 .0[k];
-                if (d_value_p[m] && dmac.0 != y0key.0 ^ ykey.0 ^ delta.0)
-                    || (!d_value_p[m] && dmac.0 != y0key.0 ^ ykey.0)
-                {
+                let expected_mac = y0key.0 ^ ykey.0 ^ if d_value_p[m] { delta.0 } else { 0 };
+                if dmac.0 != expected_mac {
                     return Err(Error::AANDWrongDMAC);
                 }
                 *d ^= d_value_p[m];
