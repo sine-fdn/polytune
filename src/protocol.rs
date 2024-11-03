@@ -10,7 +10,7 @@ use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
-    faand::{self, beaver_aand, bucket_size, fashare, shared_rng},
+    faand::{self, beaver_aand, broadcast_and_verify, bucket_size, fashare, shared_rng},
     fpre::{fpre, Auth, Delta, Key, Mac, Share},
     garble::{self, decrypt, encrypt, GarblingKey},
 };
@@ -558,10 +558,22 @@ pub async fn mpc(
     for p in (0..p_max).filter(|p| *p != p_own) {
         send_to(channel, p, "masked inputs", &masked_inputs).await?;
     }
+    let mut masked_inputs_from_other_party = vec![vec![None; num_gates]; p_max];
     for p in (0..p_max).filter(|p| *p != p_own) {
-        let masked_inputs_from_other_party =
+        masked_inputs_from_other_party[p] =
             recv_vec_from::<Option<bool>>(channel, p, "masked inputs", num_gates).await?;
-        for (w, mask) in masked_inputs_from_other_party.iter().enumerate() {
+    }
+    broadcast_and_verify(
+        channel,
+        p_own,
+        p_max,
+        "broadcast masked inputs",
+        &masked_inputs_from_other_party,
+    )
+    .await?;
+
+    for p in (0..p_max).filter(|p| *p != p_own) {
+        for (w, mask) in masked_inputs_from_other_party[p].iter().enumerate() {
             if let Some(mask) = mask {
                 if masked_inputs[w].is_some() {
                     return Err(MpcError::ConflictingInputMask(w).into());

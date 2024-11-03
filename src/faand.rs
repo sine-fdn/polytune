@@ -4,7 +4,7 @@ use std::vec;
 use blake3;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
@@ -49,6 +49,8 @@ pub enum Error {
     InvalidOTData,
     /// KOS consistency check failed.
     ConsistencyCheckFailed,
+    /// Broadcast not consistent.
+    BroadcastError,
 }
 
 /// Converts a `channel::Error` into a custom `Error` type.
@@ -59,7 +61,7 @@ impl From<channel::Error> for Error {
 }
 
 /// Represents a cryptographic commitment as a fixed-size 32-byte array (a BLAKE3 hash).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 struct Commitment(pub(crate) [u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
@@ -71,6 +73,45 @@ fn commit(value: &[u8]) -> Commitment {
 /// Verifies if a given value matches a previously generated commitment.
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
+}
+
+/// Implements broadcast with abort based on Goldwasser and Lindell's protocol.
+pub(crate) async fn broadcast_and_verify<
+    T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
+>(
+    channel: &mut impl Channel,
+    i: usize,
+    n: usize,
+    phase: &str,
+    vec: &[Vec<T>],
+) -> Result<(), Error> {
+    if n == 2 {
+        return Ok(());
+    }
+    // Step 1: Send the vector to all parties that does not included its already sent value
+    // (for index i) and the value it received from the party it is sending to (index k).
+    for k in (0..n).filter(|k| *k != i) {
+        let mut modified_vec: Vec<Option<Vec<T>>> = vec![None; n];
+        for j in (0..n).filter(|j| *j != i && *j != k) {
+            modified_vec[j] = Some(vec[j].clone());
+        }
+        send_to(channel, k, phase, &modified_vec).await?;
+    }
+
+    // Step 2: Receive and verify the vectors from all parties, that for index j the value is
+    // the same for all parties.
+    for k in (0..n).filter(|k| *k != i) {
+        let vec_k: Vec<Option<Vec<T>>> = recv_vec_from(channel, k, phase, n).await?;
+        for j in (0..n).filter(|j| *j != i && *j != k) {
+            if vec_k[j].is_none() {
+                return Err(Error::EmptyVector);
+            } else if vec_k[j] != Some(vec[j].clone()) {
+                return Err(Error::BroadcastError);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Multi-party coin tossing to generate shared randomness in a secure, distributed manner.
@@ -171,7 +212,9 @@ async fn fabitn(
 
     // Step 3) Verification of MACs and keys.
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
-    let r: Vec<Vec<bool>> = vec![vec![shared_rng.gen(); lprime]; two_rho];
+    let r: Vec<Vec<bool>> = (0..two_rho)
+        .map(|_| (0..lprime).map(|_| shared_rng.gen()).collect())
+        .collect();
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
     // We batch messages and send xjmac with xj as well, as from Step 3 d).
@@ -203,6 +246,13 @@ async fn fabitn(
     for k in (0..n).filter(|k| *k != i) {
         xj_xjmac_k[k] = recv_vec_from(channel, k, "fabitn", two_rho).await?;
     }
+    let xj_k: Vec<Vec<bool>> = xj_xjmac_k
+        .iter()
+        .map(|inner_vec| inner_vec.iter().map(|(b, _)| *b).collect())
+        .collect();
+
+    // Part for broadcast
+    broadcast_and_verify(channel, i, n, "broadcast xj", &xj_k).await?;
 
     // Step 3 c) Compute keys.
     for (j, rbits) in r.iter().enumerate() {
@@ -244,12 +294,12 @@ async fn fabitn(
 ///
 /// This protocol allows parties to generate and distribute authenticated random shares securely.
 /// It consists of the following steps:
-/// 
+///
 /// 1. **Random Bit String Generation**: Each party picks a random bit string of a specified length.
 /// 2. **Autenticated Bit Generation**: The parties generate random authenticated bit shares.
-/// 3. **Commitment and Verification**: 
+/// 3. **Commitment and Verification**:
 ///    - The parties compute commitments based on a subset of their shares and broadcast these to ensure consistency.
-///    - They then verify these commitments by performing decommitments and checking the validity of the 
+///    - They then verify these commitments by performing decommitments and checking the validity of the
 ///      MACs against the commitments.
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 pub(crate) async fn fashare(
@@ -300,6 +350,8 @@ pub(crate) async fn fashare(
             recv_vec_from::<(Commitment, Commitment, Commitment)>(channel, k, "fashare comm", RHO)
                 .await?;
     }
+    broadcast_and_verify(channel, i, n, "broadcast c0 c1 cm", &c0_c1_cm_k).await?;
+
     c0_c1_cm_k[i] = c0_c1_cm;
 
     // 3 b) Pi broadcasts decommitment for macs.
@@ -310,6 +362,8 @@ pub(crate) async fn fashare(
     for k in (0..n).filter(|k| *k != i) {
         dm_k[k] = recv_vec_from::<Vec<u8>>(channel, k, "fashare ver", RHO).await?;
     }
+    broadcast_and_verify(channel, i, n, "broadcast dm", &dm_k).await?;
+
     dm_k[i] = dmvec;
 
     // 3 c) Compute bi to determine di_bi and send to all parties.
@@ -331,6 +385,7 @@ pub(crate) async fn fashare(
     for k in (0..n).filter(|k| *k != i) {
         di_bi_k[k] = recv_vec_from::<u128>(channel, k, "fashare di_bi", RHO).await?;
     }
+    broadcast_and_verify(channel, i, n, "broadcast di_bi", &di_bi_k).await?;
 
     // 3 d) Consistency check of macs: open commitment of xor of keys and check if it equals to the xor of all macs.
     let mut xor_xk_macs = vec![vec![0; RHO]; n];
@@ -439,8 +494,8 @@ fn hash128(input: u128) -> u128 {
 /// Protocol Pi_LaAND that performs F_LaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// This asynchronous function implements the "leaky authenticated AND" protocol. It computes 
-/// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals 
+/// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
+/// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
 /// the XOR of the output values z.
 async fn flaand(
     (channel, delta): (&mut impl Channel, Delta),
@@ -493,15 +548,24 @@ async fn flaand(
         }
         send_to(channel, j, "flaand", &ei_uij).await?;
     }
+    let mut ei_uij_k: Vec<Vec<(bool, u128)>> = vec![vec![]; n];
     for j in (0..n).filter(|j| *j != i) {
-        let ei_uij_k = recv_vec_from::<(bool, u128)>(channel, j, "flaand", l).await?;
+        ei_uij_k[j] = recv_vec_from::<(bool, u128)>(channel, j, "flaand", l).await?;
+    }
+    let ej_k: Vec<Vec<bool>> = ei_uij_k
+        .iter()
+        .map(|inner_vec| inner_vec.iter().map(|(b, _)| *b).collect())
+        .collect();
+    broadcast_and_verify(channel, i, n, "broadcast ej", &ej_k).await?;
+
+    for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1 .0[j];
-            ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_uij_k[ll].1);
+            ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
             // mi_xj_phi added here
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             let (mac, key) = rshares[ll].1 .0[j];
-            if ei_uij_k[ll].0 {
+            if ei_uij_k[j][ll].0 {
                 zshares[ll].1 .0[j] = (mac, Key(key.0 ^ delta.0));
             } else {
                 zshares[ll].1 .0[j] = (mac, key);
@@ -531,15 +595,21 @@ async fn flaand(
     for k in (0..n).filter(|k| *k != i) {
         commhi_k[k] = recv_vec_from::<Commitment>(channel, k, "flaand comm", l).await?;
     }
+    broadcast_and_verify(channel, i, n, "broadcast commhi", &commhi_k).await?;
 
     // Then all parties broadcast Hi.
     for k in (0..n).filter(|k| *k != i) {
         send_to(channel, k, "flaand hash", &hi).await?;
     }
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
+    let mut hi_k: Vec<Vec<u128>> = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
-        let hi_k = recv_vec_from::<u128>(channel, k, "flaand hash", l).await?;
-        for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k).enumerate() {
+        hi_k[k] = recv_vec_from::<u128>(channel, k, "flaand hash", l).await?;
+    }
+    broadcast_and_verify(channel, i, n, "broadcast hash", &hi_k).await?;
+
+    for k in (0..n).filter(|k| *k != i) {
+        for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k[k].clone()).enumerate() {
             if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes()) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
@@ -728,7 +798,6 @@ async fn check_dvalue(
             let (d_value_p, d_macs_p) = &dvalues_macs_k[j];
             let (_, y0key) = buckets[j][0].1 .1 .0[k];
             for (m, (d, dmac)) in dval.iter_mut().zip(d_macs_p).enumerate() {
-                let dmac = dmac;
                 let (_, ykey) = buckets[j][m + 1].1 .1 .0[k];
                 let expected_mac = y0key.0 ^ ykey.0 ^ if d_value_p[m] { delta.0 } else { 0 };
                 if dmac.0 != expected_mac {
