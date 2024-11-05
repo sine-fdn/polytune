@@ -75,6 +75,23 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
 }
 
+/// Hashes a Vec<T> using blake3 and returns the resulting hash as `[u128; 2]`.
+pub fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<[u128; 2], Error> {
+    let serialized_data = bincode::serialize(data).map_err(|_| Error::ConversionError)?;
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&serialized_data);
+
+    let binding = hasher.finalize();
+    let hash_bytes = binding.as_bytes();
+
+    let (left, right) = hash_bytes.split_at(16);
+    let hash1 = u128::from_le_bytes(left.try_into().map_err(|_| Error::InvalidLength)?);
+    let hash2 = u128::from_le_bytes(right.try_into().map_err(|_| Error::InvalidLength)?);
+
+    Ok([hash1, hash2])
+}
+
 /// Implements broadcast with abort based on Goldwasser and Lindell's protocol.
 pub(crate) async fn broadcast_and_verify<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
@@ -91,9 +108,9 @@ pub(crate) async fn broadcast_and_verify<
     // Step 1: Send the vector to all parties that does not included its already sent value
     // (for index i) and the value it received from the party it is sending to (index k).
     for k in (0..n).filter(|k| *k != i) {
-        let mut modified_vec: Vec<Option<Vec<T>>> = vec![None; n];
+        let mut modified_vec: Vec<Option<[u128; 2]>> = vec![None; n];
         for j in (0..n).filter(|j| *j != i && *j != k) {
-            modified_vec[j] = Some(vec[j].clone());
+            modified_vec[j] = Some(hash_vec(&vec[j])?);
         }
         send_to(channel, k, phase, &modified_vec).await?;
     }
@@ -101,11 +118,11 @@ pub(crate) async fn broadcast_and_verify<
     // Step 2: Receive and verify the vectors from all parties, that for index j the value is
     // the same for all parties.
     for k in (0..n).filter(|k| *k != i) {
-        let vec_k: Vec<Option<Vec<T>>> = recv_vec_from(channel, k, phase, n).await?;
+        let vec_k: Vec<Option<[u128; 2]>> = recv_vec_from(channel, k, phase, n).await?;
         for j in (0..n).filter(|j| *j != i && *j != k) {
             if vec_k[j].is_none() {
                 return Err(Error::EmptyVector);
-            } else if vec_k[j] != Some(vec[j].clone()) {
+            } else if vec_k[j] != Some(hash_vec(&vec[j])?) {
                 return Err(Error::BroadcastError);
             }
         }
