@@ -107,6 +107,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
         let m = inputs.len();
         let qs = self.send_setup(channel, m, p_own, p_to).await?;
         // Output result
+        let mut y0y1_vec: Vec<(Block, Block)> = vec![];
         for (j, input) in inputs.iter().enumerate() {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
@@ -114,8 +115,10 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
             let y0 = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ input.0;
             let q = q ^ self.ot.s_;
             let y1 = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ input.1;
-            send_to(channel, p_to, "KOS_OT_send", &[(y0, y1)]).await?;
+            y0y1_vec.push((y0, y1));
         }
+        send_to(channel, p_to, "KOS_OT_send", &y0y1_vec).await?;
+
         Ok(())
     }
 }
@@ -208,13 +211,11 @@ impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
         let ts = self.recv_setup(channel, inputs, rng, p_own, p_to).await?;
         // Output result
         let mut out = Vec::with_capacity(inputs.len());
+        let y0y1_vec=recv_vec_from::<(Block, Block)>(channel, p_to, "KOS_OT_send", inputs.len()).await?;
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
-            let (y0, y1) = recv_from::<(Block, Block)>(channel, p_to, "KOS_OT_send")
-                .await?
-                .pop()
-                .ok_or(Error::EmptyMsg)?;
+            let (y0, y1) = y0y1_vec[j];
             let y = if *b { y1 } else { y0 };
             let y = y ^ self
                 .ot

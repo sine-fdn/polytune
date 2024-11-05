@@ -63,7 +63,7 @@ impl OtSender for Sender {
         let ys = self.y * self.s;
         let mut ks = Vec::with_capacity(inputs.len());
 
-        let r_bytes_vec = recv_vec_from::<Vec<u8>>(channel, p_to, "CO_OT_r", 128).await?;
+        let r_bytes_vec = recv_vec_from::<Vec<u8>>(channel, p_to, "CO_OT_r", inputs.len()).await?;
         for (i, r_bytes) in r_bytes_vec.into_iter().enumerate() {
             let r = convert_vec_to_point(r_bytes)?;
             let yr = self.y * r;

@@ -345,7 +345,7 @@ pub async fn mpc(
             .ok_or(Error::EmptyMsg)?;
 
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
-        random_shares = recv_from(channel, p_fpre, "random shares").await?;
+        random_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
     } else {
         delta = Delta(random());
         shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
@@ -403,7 +403,7 @@ pub async fn mpc(
     let auth_bits: Vec<Share>;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to(channel, p_fpre, "AND shares", &and_shares).await?;
-        auth_bits = recv_from(channel, p_fpre, "AND shares").await?;
+        auth_bits = recv_vec_from(channel, p_fpre, "AND shares", num_and_gates).await?;
     } else {
         auth_bits = beaver_aand(
             (channel, delta),
