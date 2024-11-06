@@ -141,49 +141,77 @@ pub(crate) async fn broadcast_and_verify<
 pub(crate) async fn shared_rng(
     channel: &mut impl Channel,
     i: usize,
-    indices: Vec<usize>,
-) -> Result<ChaCha20Rng, Error> {
+    n: usize,
+) -> Result<(ChaCha20Rng, Vec<Vec<Option<ChaCha20Rng>>>), Error> {
+    // Step 1 a) Generate a random 256-bit seed for multi-party cointossing and commit to it.
     let r = [random::<u128>(), random::<u128>()];
     let mut buf = [0u8; 32];
     buf[..16].copy_from_slice(&r[0].to_be_bytes());
     buf[16..].copy_from_slice(&r[1].to_be_bytes());
     let commitment = commit(&buf);
 
-    let valid_indices: Vec<usize> = indices.iter().filter(|&&k| k != i).copied().collect();
+    // Step 1 b) Generate a random 256-bit seed for every other party for the pairwise
+    // cointossing and commit to it.
+    let mut bufvec = vec![[0u8; 32]; n];
+    let mut commitment_vec = vec![Commitment([0; 32]); n];
+    for k in (0..n).filter(|k| *k != i) {
+        let r = [random::<u128>(), random::<u128>()];
+        bufvec[k][..16].copy_from_slice(&r[0].to_be_bytes());
+        bufvec[k][16..].copy_from_slice(&r[1].to_be_bytes());
+        commitment_vec[k] = commit(&bufvec[k]);
+    }
 
-    for &k in &valid_indices {
-        send_to(channel, k, "RNG comm", &[commitment]).await?;
+    // Step 2) Send the commitments to all parties, first being the one for multi-party cointossing, next
+    // the one for pairwise cointossing.
+    for k in (0..n).filter(|k| *k != i) {
+        send_to(channel, k, "RNG comm", &[(commitment, commitment_vec[k])]).await?;
     }
-    let mut commitments = Vec::with_capacity(valid_indices.len());
-    for &k in &valid_indices {
-        let commitment = recv_from::<Commitment>(channel, k, "RNG comm")
+    let mut commitments = vec![(Commitment([0; 32]), Commitment([0; 32])); n];
+    for k in (0..n).filter(|k| *k != i) {
+        commitments[k] = recv_from::<(Commitment, Commitment)>(channel, k, "RNG comm")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        commitments.push(commitment);
     }
-    for &k in &valid_indices {
-        send_to(channel, k, "RNG ver", &[buf]).await?;
+
+    // Step 3) Send the decommitments to all parties, first being the one for multi-party cointossing, next
+    // the one for pairwise cointossing.
+    for k in (0..n).filter(|k| *k != i) {
+        send_to(channel, k, "RNG ver", &[(buf, bufvec[k])]).await?;
     }
-    let mut bufs = Vec::with_capacity(valid_indices.len());
-    for &k in &valid_indices {
-        let buffer = recv_from::<[u8; 32]>(channel, k, "RNG ver")
+    let mut bufs = vec![([0; 32], [0; 32]); n];
+    for k in (0..n).filter(|k| *k != i) {
+        bufs[k] = recv_from::<([u8; 32], [u8; 32])>(channel, k, "RNG ver")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        bufs.push(buffer);
     }
+
+    // Step 4) Verify the decommitments and calculate multi-party seed.
     let mut buf_xor = buf;
-    for (j, &_) in valid_indices.iter().enumerate() {
-        if !open_commitment(&commitments[j], &bufs[j]) {
+    for k in (0..n).filter(|k| *k != i) {
+        if !open_commitment(&commitments[k].0, &bufs[k].0)
+            || !open_commitment(&commitments[k].1, &bufs[k].1)
+        {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
         buf_xor
             .iter_mut()
-            .zip(&bufs[j])
+            .zip(&bufs[k].0)
             .for_each(|(buf_xor_byte, buf_byte)| *buf_xor_byte ^= *buf_byte);
     }
-    Ok(ChaCha20Rng::from_seed(buf_xor))
+
+    // Step 5) Set up shared RNGs for pairwise cointossing
+    let mut shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>> = vec![vec![None; n]; n];
+    // Step 1: Set up shared RNGs for pairs
+    for k in (0..n).filter(|&k| k != i) {
+        let (a, b) = if i < k { (i, k) } else { (k, i) };
+        shared_two_by_two[a][b] = Some(ChaCha20Rng::from_seed(std::array::from_fn(|i| {
+            bufvec[k][i] ^ bufs[k].1[i]
+        })));
+    }
+
+    Ok((ChaCha20Rng::from_seed(buf_xor), shared_two_by_two))
 }
 
 /// Protocol PI_aBit^n that performs F_aBit^n from the paper
@@ -201,7 +229,8 @@ async fn fabitn(
     i: usize,
     n: usize,
     l: usize,
-    shared_rng: &mut ChaCha20Rng,
+    shared_rand: &mut ChaCha20Rng,
+    mut shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
 ) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x of length lprime.
     let two_rho = 2 * RHO;
@@ -214,13 +243,21 @@ async fn fabitn(
     let mut macs = vec![vec![0; lprime]; n];
 
     let deltas = vec![u128_to_block(delta.0); lprime];
-    for p in (0..n).filter(|p| *p != i) {
-        if i < p {
-            keys[p] = kos_ot_sender(channel, &deltas, i, p).await?;
-            macs[p] = kos_ot_receiver(channel, &x, i, p).await?;
+
+    // Step 2: Use the shared RNGs for key and MAC generation
+    for k in (0..n).filter(|&k| k != i) {
+        let (a, b) = if i < k { (i, k) } else { (k, i) };
+
+        if let Some(shared) = shared_two_by_two[a][b].as_mut() {
+            if i < k {
+                keys[k] = kos_ot_sender(channel, &deltas, k, shared).await?;
+                macs[k] = kos_ot_receiver(channel, &x, k, shared).await?;
+            } else {
+                macs[k] = kos_ot_receiver(channel, &x, k, shared).await?;
+                keys[k] = kos_ot_sender(channel, &deltas, k, shared).await?;
+            }
         } else {
-            macs[p] = kos_ot_receiver(channel, &x, i, p).await?;
-            keys[p] = kos_ot_sender(channel, &deltas, i, p).await?;
+            return Err(Error::EmptyVector);
         }
     }
     drop(deltas);
@@ -230,7 +267,7 @@ async fn fabitn(
     // Step 3) Verification of MACs and keys.
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
     let r: Vec<Vec<bool>> = (0..two_rho)
-        .map(|_| (0..lprime).map(|_| shared_rng.gen()).collect())
+        .map(|_| (0..lprime).map(|_| shared_rand.gen()).collect())
         .collect();
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
@@ -324,12 +361,21 @@ pub(crate) async fn fashare(
     i: usize,
     n: usize,
     l: usize,
-    shared_rng: &mut ChaCha20Rng,
+    shared_rand: &mut ChaCha20Rng,
+    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
 ) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x (input).
 
     // Step 2) Run Pi_aBit^n to compute shares.
-    let mut xishares = fabitn((channel, delta), i, n, l + RHO, shared_rng).await?;
+    let mut xishares = fabitn(
+        (channel, delta),
+        i,
+        n,
+        l + RHO,
+        shared_rand,
+        shared_two_by_two,
+    )
+    .await?;
 
     // Step 3) Compute commitments and verify consistency.
     // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
@@ -661,7 +707,7 @@ async fn faand(
     i: usize,
     n: usize,
     l: usize, //num_and_gates
-    shared_rng: &mut ChaCha20Rng,
+    shared_rand: &mut ChaCha20Rng,
     xyr_shares: Vec<Share>,
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     let b = bucket_size(l);
@@ -680,7 +726,7 @@ async fn faand(
     let mut buckets: Vec<Bucket> = vec![smallvec![]; l];
 
     for obj in triples {
-        let mut j = shared_rng.gen_range(0..l);
+        let mut j = shared_rand.gen_range(0..l);
         while buckets[j].len() >= b {
             j = (j + 1) % l;
         }
@@ -705,10 +751,10 @@ pub(crate) async fn beaver_aand(
     i: usize,
     n: usize,
     l: usize, //num_and_gates
-    shared_rng: &mut ChaCha20Rng,
+    shared_rand: &mut ChaCha20Rng,
     abc_shares: Vec<Share>,
 ) -> Result<Vec<Share>, Error> {
-    let abc_triples = faand((channel, delta), i, n, l, shared_rng, abc_shares).await?;
+    let abc_triples = faand((channel, delta), i, n, l, shared_rand, abc_shares).await?;
     let len = abc_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.

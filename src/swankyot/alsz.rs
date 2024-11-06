@@ -18,6 +18,7 @@ use crate::{
 };
 
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{utils as scutils, AesHash, AesRng, Block, SemiHonest, AES_HASH};
 use std::marker::PhantomData;
 
@@ -41,12 +42,12 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
-        let mut ot = OT::init(channel, rng, p_own, p_to).await?;
+        let mut ot = OT::init(channel, rng, p_to, shared_rand).await?;
         let s = u8vec_to_boolvec(&s_);
-        let ks = ot.recv(channel, &s, rng, p_own, p_to).await?;
+        let ks = ot.recv(channel, &s, rng, p_to, shared_rand).await?;
         let rngs = ks
             .into_iter()
             .map(AesRng::from_seed)
@@ -72,7 +73,8 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
         let ncols = if m % 8 != 0 { m + (8 - m % 8) } else { m };
         let mut qs = vec![0u8; nrows * ncols / 8];
         let zero = vec![0u8; ncols / 8];
-        let uvec: Vec<Vec<u8>> = recv_vec_from(channel, p_to, "ALSZ_OT_setup", self.rngs.len()).await?;
+        let uvec: Vec<Vec<u8>> =
+            recv_vec_from(channel, p_to, "ALSZ_OT_setup", self.rngs.len()).await?;
         for (j, (b, rng)) in self.s.iter().zip(self.rngs.iter_mut()).enumerate() {
             let range = j * ncols / 8..(j + 1) * ncols / 8;
             let q = &mut qs[range];
@@ -89,12 +91,12 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
         let mut s_ = [0u8; 16];
         rng.fill_bytes(&mut s_);
-        Sender::<OT>::init_fixed_key(channel, s_, rng, p_own, p_to).await
+        Sender::<OT>::init_fixed_key(channel, s_, rng, p_to, shared_rand).await
     }
 
     async fn send<C: Channel, RNG: CryptoRng + Rng>(
@@ -102,8 +104,8 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<(), Error> {
         let m = inputs.len();
         let qs = self.send_setup(channel, m, p_to).await?;
@@ -129,8 +131,8 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
         channel: &mut C,
         deltas: &[Self::Msg],
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Vec<(Self::Msg, Self::Msg)>, Error> {
         let m = deltas.len();
         let qs = self.send_setup(channel, m, p_to).await?;
@@ -186,10 +188,10 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
-        let mut ot = OT::init(channel, rng, p_own, p_to).await?;
+        let mut ot = OT::init(channel, rng, p_to, shared_rand).await?;
         let mut ks = Vec::with_capacity(128);
         let mut k0 = Block::default();
         let mut k1 = Block::default();
@@ -198,7 +200,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
             rng.fill_bytes(k1.as_mut());
             ks.push((k0, k1));
         }
-        ot.send(channel, &ks, rng, p_own, p_to).await?;
+        ot.send(channel, &ks, rng, p_to, shared_rand).await?;
         let rngs = ks
             .into_iter()
             .map(|(k0, k1)| (AesRng::from_seed(k0), AesRng::from_seed(k1)))
@@ -215,13 +217,14 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         channel: &mut C,
         inputs: &[bool],
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Vec<Self::Msg>, Error> {
         let r = boolvec_to_u8vec(inputs);
         let ts = self.recv_setup(channel, &r, inputs.len(), p_to).await?;
         let mut out = Vec::with_capacity(inputs.len());
-        let y0y1_vec = recv_vec_from::<(Block, Block)>(channel, p_to, "ALSZ_OT_y0y1", inputs.len()).await?;
+        let y0y1_vec =
+            recv_vec_from::<(Block, Block)>(channel, p_to, "ALSZ_OT_y0y1", inputs.len()).await?;
         for (j, b) in inputs.iter().enumerate() {
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
@@ -240,8 +243,8 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT>
         channel: &mut C,
         inputs: &[bool],
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Vec<Self::Msg>, Error> {
         let r = boolvec_to_u8vec(inputs);
         let ts = self.recv_setup(channel, &r, inputs.len(), p_to).await?;

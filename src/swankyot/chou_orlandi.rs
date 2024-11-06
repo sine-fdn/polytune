@@ -28,6 +28,7 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 use rand::{CryptoRng, Rng};
+use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{Block, Malicious, SemiHonest};
 
 /// Oblivious transfer sender.
@@ -43,8 +44,8 @@ impl OtSender for Sender {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         mut rng: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
         let y = Scalar::random(&mut rng);
         let s = &y * RISTRETTO_BASEPOINT_TABLE;
@@ -57,8 +58,8 @@ impl OtSender for Sender {
         channel: &mut C,
         inputs: &[(Block, Block)],
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<(), Error> {
         let ys = self.y * self.s;
         let mut ks = Vec::with_capacity(inputs.len());
@@ -95,8 +96,8 @@ impl OtReceiver for Receiver {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
         let s_bytes = recv_vec_from::<u8>(channel, p_to, "CO_OT_s", 32).await?;
         let s = convert_vec_to_point(s_bytes)?;
@@ -109,8 +110,8 @@ impl OtReceiver for Receiver {
         channel: &mut C,
         inputs: &[bool],
         mut rng: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Vec<Block>, Error> {
         let zero = &Scalar::ZERO * &self.s;
         let one = &Scalar::ONE * &self.s;

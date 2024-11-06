@@ -348,7 +348,8 @@ pub async fn mpc(
         random_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
     } else {
         delta = Delta(random());
-        shared_rand = shared_rng(channel, p_own, (0..p_max).collect()).await?;
+        let (multi_shared_rand, shared_two_by_two) = shared_rng(channel, p_own, p_max).await?;
+        shared_rand = multi_shared_rand;
 
         let rand_shares = fashare(
             (channel, delta),
@@ -356,6 +357,7 @@ pub async fn mpc(
             p_max,
             secret_bits + 3 * lprime,
             &mut shared_rand,
+            shared_two_by_two,
         )
         .await?;
 
