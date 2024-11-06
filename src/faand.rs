@@ -72,11 +72,17 @@ fn commit(value: &[u8]) -> Commitment {
 
 /// Verifies if a given value matches a previously generated commitment.
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
+    if value.is_empty() {
+        return false;
+    }
     blake3::hash(value).as_bytes() == &commitment.0
 }
 
 /// Hashes a Vec<T> using blake3 and returns the resulting hash as `[u128; 2]`.
 pub fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<[u128; 2], Error> {
+    if data.is_empty() {
+        return Err(Error::EmptyVector);
+    }
     let serialized_data = bincode::serialize(data).map_err(|_| Error::ConversionError)?;
 
     let mut hasher = blake3::Hasher::new();
@@ -105,11 +111,17 @@ pub(crate) async fn broadcast_and_verify<
     if n == 2 {
         return Ok(());
     }
+    if vec.is_empty() {
+        return Err(Error::EmptyVector);
+    }
     // Step 1: Send the vector to all parties that does not included its already sent value
     // (for index i) and the value it received from the party it is sending to (index k).
     for k in (0..n).filter(|k| *k != i) {
         let mut modified_vec: Vec<Option<[u128; 2]>> = vec![None; n];
         for j in (0..n).filter(|j| *j != i && *j != k) {
+            if vec[j].is_empty() {
+                return Err(Error::EmptyVector);
+            }
             modified_vec[j] = Some(hash_vec(&vec[j])?);
         }
         send_to(channel, k, phase, &modified_vec).await?;
@@ -245,6 +257,10 @@ async fn fabitn(
     let deltas = vec![u128_to_block(delta.0); lprime];
 
     // Step 2: Use the shared RNGs for key and MAC generation
+    if !(shared_two_by_two.len() == n && shared_two_by_two.iter().all(|row| row.len() == n)) {
+        return Err(Error::InvalidLength);
+    }
+
     for k in (0..n).filter(|&k| k != i) {
         let (a, b) = if i < k { (i, k) } else { (k, i) };
 
@@ -505,6 +521,9 @@ async fn fhaand(
     yi: Vec<bool>,
 ) -> Result<Vec<bool>, Error> {
     // Step 1) Obtain x shares (input).
+    if xshares.len() != l {
+        return Err(Error::InvalidLength);
+    }
 
     // Step 2) Calculate v.
     let mut vi = vec![false; l];
@@ -569,6 +588,9 @@ async fn flaand(
 ) -> Result<Vec<Share>, Error> {
     // Triple computation.
     // Step 1) Triple computation [random authenticated shares as input parameters xshares, yshares, rshares].
+    if xshares.len() != l || yshares.len() != l || rshares.len() != l {
+        return Err(Error::InvalidLength);
+    }
 
     // Step 2) Run Pi_HaAND to get back some v.
     let y = yshares.iter().take(l).map(|share| share.0).collect();
@@ -712,6 +734,9 @@ async fn faand(
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     let b = bucket_size(l);
     let lprime = l * b;
+    if xyr_shares.len() != 3 * lprime {
+        return Err(Error::InvalidLength);
+    }
 
     let (xshares, rest) = xyr_shares.split_at(lprime);
     let (yshares, rshares) = rest.split_at(lprime);
@@ -735,6 +760,10 @@ async fn faand(
 
     // Step 3) For each bucket, combine b leaky ANDs into a single non-leaky AND.
     let d_values = check_dvalue((channel, delta), i, n, &buckets).await?;
+    if d_values.len() != buckets.len() {
+        //=l
+        return Err(Error::InvalidLength);
+    }
 
     let mut aand_triples = Vec::with_capacity(buckets.len());
     for (bucket, d) in buckets.into_iter().zip(d_values.into_iter()) {
@@ -754,6 +783,11 @@ pub(crate) async fn beaver_aand(
     shared_rand: &mut ChaCha20Rng,
     abc_shares: Vec<Share>,
 ) -> Result<Vec<Share>, Error> {
+    if alpha_beta_shares.len() != l {
+        //abc_shares length is checked in function faand
+        return Err(Error::InvalidLength);
+    }
+
     let abc_triples = faand((channel, delta), i, n, l, shared_rand, abc_shares).await?;
     let len = abc_triples.len();
 
@@ -831,6 +865,9 @@ async fn check_dvalue(
     // Step (a) compute and check macs of d-values.
     let len = buckets.len();
     let mut d_values: Vec<Vec<bool>> = vec![vec![]; len];
+    if len == 0 {
+        return Err(Error::EmptyVector);
+    }
 
     for (j, bucket) in buckets.iter().enumerate() {
         let (_, y, _) = &bucket[0];

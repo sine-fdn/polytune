@@ -402,11 +402,11 @@ pub async fn mpc(
         }
     }
 
-    let auth_bits: Vec<Share>;
+    let mut auth_bits: Vec<Share> = vec![];
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to(channel, p_fpre, "AND shares", &and_shares).await?;
         auth_bits = recv_vec_from(channel, p_fpre, "AND shares", num_and_gates).await?;
-    } else {
+    } else if !xyz_shares.is_empty() {
         auth_bits = beaver_aand(
             (channel, delta),
             and_shares.clone(),
