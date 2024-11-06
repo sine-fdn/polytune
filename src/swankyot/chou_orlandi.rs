@@ -150,9 +150,9 @@ impl SemiHonest for Receiver {}
 impl Malicious for Receiver {}
 
 pub(crate) fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
-    let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidOTData)?;
+    let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidLength)?;
     let compressed_pt =
-        CompressedRistretto::from_slice(&dataarr).map_err(|_| Error::InvalidOTData)?;
-    let pt = compressed_pt.decompress().ok_or(Error::InvalidOTData)?;
+        CompressedRistretto::from_slice(&dataarr).map_err(|_| Error::InvalidLength)?;
+    let pt = compressed_pt.decompress().ok_or(Error::InvalidLength)?;
     Ok(pt)
 }

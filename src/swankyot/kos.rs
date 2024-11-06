@@ -64,7 +64,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
         let [lo, hi] = x.carryless_mul_wide(self.ot.s_);
         let check = xor_two_blocks(&check, &(lo, hi));
         if check != (t0, t1) {
-            return Err(Error::ConsistencyCheckFailed);
+            return Err(Error::KOSConsistencyCheckFailed);
         }
         Ok(qs)
     }

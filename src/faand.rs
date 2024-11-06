@@ -21,20 +21,10 @@ const RHO: usize = 40;
 pub enum Error {
     /// A message could not be sent or received.
     ChannelError(channel::Error),
-    /// The MAC is not the correct one in aBit.
-    ABitMacMisMatch,
     /// The value of bi is not 0 or 1.
-    InvalidBiValue,
-    /// The xor of MACs is not equal to the XOR of corresponding keys or that XOR delta.
-    AShareMacsMismatch,
+    InvalidBitValue,
     /// A commitment could not be opened.
     CommitmentCouldNotBeOpened,
-    /// XOR of all values in FLaAND do not cancel out.
-    LaANDXorNotZero,
-    /// Wrong MAC of d when combining two leaky ANDs.
-    AANDWrongDMAC,
-    /// Wrong MAC of e.
-    AANDWrongDEMAC,
     /// Empty vector.
     EmptyVector,
     /// Conversion error.
@@ -45,12 +35,20 @@ pub enum Error {
     EmptyMsg,
     /// Invalid array length.
     InvalidLength,
-    /// Invalid data in OT.
-    InvalidOTData,
-    /// KOS consistency check failed.
-    ConsistencyCheckFailed,
     /// Broadcast not consistent.
     BroadcastError,
+    /// KOS consistency check failed.
+    KOSConsistencyCheckFailed,
+    /// The MAC is not the correct one in aBit.
+    ABitWrongMAC,
+    /// The xor of MACs is not equal to the XOR of corresponding keys or that XOR delta.
+    AShareWrongMAC,
+    /// XOR of all values in FLaAND do not cancel out.
+    LaANDXorNotZero,
+    /// Wrong MAC of d when combining two leaky ANDs.
+    AANDWrongMAC,
+    /// Wrong MAC of e.
+    BeaverWrongMAC,
 }
 
 /// Converts a `channel::Error` into a custom `Error` type.
@@ -336,7 +334,7 @@ async fn fabitn(
             }
             // Step 3 d) Validity check of macs.
             if (*xj && *xjmac != xjkey ^ delta.0) || (!*xj && *xjmac != xjkey) {
-                return Err(Error::ABitMacMisMatch);
+                return Err(Error::ABitWrongMAC);
             }
         }
     }
@@ -451,7 +449,7 @@ pub(crate) async fn fashare(
     for r in 0..RHO {
         for k in (0..n).filter(|k| *k != i) {
             if dm_k[k][r][0] > 1 {
-                return Err(Error::InvalidBiValue);
+                return Err(Error::InvalidBitValue);
             }
             bi[r] ^= dm_k[k][r][0] != 0;
         }
@@ -496,7 +494,7 @@ pub(crate) async fn fashare(
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             if xor_xk_macs[k][r] != di_bi_k[k][r] {
-                return Err(Error::AShareMacsMismatch);
+                return Err(Error::AShareWrongMAC);
             }
         }
     }
@@ -566,11 +564,11 @@ async fn fhaand(
 /// We hash into 256 bits and then xor the first 128 bits and the second 128 bits. In our case this
 /// works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing
 /// with u128s instead while still cancelling the hashes out if correct.
-fn hash128(input: u128) -> u128 {
+fn hash128(input: u128) -> Result<u128, Error> {
     let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
-    let value1 = u128::from_le_bytes(res[0..16].try_into().unwrap());
-    let value2 = u128::from_le_bytes(res[16..32].try_into().unwrap());
-    value1 ^ value2
+    let value1 = u128::from_le_bytes(res[0..16].try_into().map_err(|_| Error::InvalidLength)?);
+    let value2 = u128::from_le_bytes(res[16..32].try_into().map_err(|_| Error::InvalidLength)?);
+    Ok(value1 ^ value2)
 }
 
 /// Protocol Pi_LaAND that performs F_LaAND from the paper
@@ -627,8 +625,8 @@ async fn flaand(
         let mut ei_uij = Vec::with_capacity(l);
         for (ll, phi_l) in phi.iter().enumerate().take(l) {
             let (_, ki_xj) = xshares[ll].1 .0[j];
-            ki_xj_phi[j][ll] = hash128(ki_xj.0);
-            let uij = hash128(ki_xj.0 ^ delta.0) ^ ki_xj_phi[j][ll] ^ *phi_l;
+            ki_xj_phi[j][ll] = hash128(ki_xj.0)?;
+            let uij = hash128(ki_xj.0 ^ delta.0)? ^ ki_xj_phi[j][ll] ^ *phi_l;
             ei_uij.push((e[ll], uij));
         }
         send_to(channel, j, "flaand", &ei_uij).await?;
@@ -646,7 +644,7 @@ async fn flaand(
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1 .0[j];
-            ki_xj_phi[j][ll] ^= hash128(mi_xj.0) ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
+            ki_xj_phi[j][ll] ^= hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
             // mi_xj_phi added here
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             let (mac, key) = rshares[ll].1 .0[j];
@@ -825,7 +823,7 @@ pub(crate) async fn beaver_aand(
             let expected_dmac = dkey.0 ^ if d { delta.0 } else { 0 };
             let expected_emac = ekey.0 ^ if e { delta.0 } else { 0 };
             if dmac.0 != expected_dmac || emac.0 != expected_emac {
-                return Err(Error::AANDWrongDEMAC);
+                return Err(Error::BeaverWrongMAC);
             }
         }
     }
@@ -901,7 +899,7 @@ async fn check_dvalue(
                 let (_, ykey) = buckets[j][m + 1].1 .1 .0[k];
                 let expected_mac = y0key.0 ^ ykey.0 ^ if d_value_p[m] { delta.0 } else { 0 };
                 if dmac.0 != expected_mac {
-                    return Err(Error::AANDWrongDMAC);
+                    return Err(Error::AANDWrongMAC);
                 }
                 *d ^= d_value_p[m];
             }
@@ -918,12 +916,11 @@ fn combine_bucket(
     bucket: SmallVec<[(&Share, &Share, &Share); 3]>,
     d_vec: Vec<bool>,
 ) -> Result<(Share, Share, Share), Error> {
-    if bucket.is_empty() {
-        return Err(Error::EmptyBucketError);
-    }
-
     let mut bucket = bucket.into_iter();
-    let (x, y, z) = bucket.next().unwrap();
+    let (x, y, z) = match bucket.next() {
+        Some(item) => item,
+        None => return Err(Error::EmptyBucketError),
+    };
     let mut result = (x.clone(), y.clone(), z.clone());
 
     // Combine elements one by one, starting from the second element.
