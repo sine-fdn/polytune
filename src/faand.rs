@@ -658,34 +658,31 @@ pub(crate) async fn beaver_aand(
     let len = rand_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.
-    let mut e_f_emac_fmac = vec![(false, false, None, None); len];
+    let mut e_f_emac_fmac = vec![];
+    e_f_emac_fmac.reserve_exact(len);
 
     let mut ef_shares = vec![];
+    ef_shares.reserve_exact(len);
+    
     for j in 0..len {
-        let (e, f, _, _) = &mut e_f_emac_fmac[j];
         let (a, b, _c) = &rand_triples[j];
         let (x, y) = &and_shares[j];
+
         ef_shares.push((a ^ x, b ^ y));
-        *e = a.0 ^ x.0;
-        *f = b.0 ^ y.0;
+        e_f_emac_fmac.push((a.0 ^ x.0, b.0 ^ y.0, None, None));
     }
-    let mut emacs = vec![];
-    let mut fmacs = vec![];
     for k in (0..n).filter(|k| *k != i) {
-        for (eshare, fshare) in &ef_shares {
+        for j in 0..len {
+            let (eshare, fshare) = &ef_shares[j];
+            let (_, _, eemac, ffmac) = &mut e_f_emac_fmac[j];
             let Some((emac, _)) = eshare.1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
             let Some((fmac, _)) = fshare.1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            emacs.push(Some(emac));
-            fmacs.push(Some(fmac));
-        }
-        for j in 0..len {
-            let (_, _, emac, fmac) = &mut e_f_emac_fmac[j];
-            *emac = emacs[j];
-            *fmac = fmacs[j];
+            *eemac = Some(emac);
+            *ffmac = Some(fmac);
         }
         send_to(channel, k, "faand", &e_f_emac_fmac).await?;
     }
@@ -694,52 +691,51 @@ pub(crate) async fn beaver_aand(
         e_f_emac_fmac_k[k] =
             recv_vec_from::<(bool, bool, Option<Mac>, Option<Mac>)>(channel, k, "faand", len)
                 .await?;
-        for (j, &(_e, _f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
-            let Some(_emacp) = emac else {
+    }
+    for k in (0..n).filter(|k| *k != i) {
+        for (j, &(e, f, ref emac, ref fmac)) in e_f_emac_fmac_k[k].iter().enumerate() {
+            let Some(emacp) = emac else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, _ekey)) = ef_shares[j].0 .1 .0[k] else {
+            let Some((_, ekey)) = ef_shares[j].0 .1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            let Some(_fmacp) = fmac else {
+            let Some(fmacp) = fmac else {
                 return Err(Error::MissingMacKey);
             };
-            let Some((_, _fkey)) = ef_shares[j].1 .1 .0[k] else {
+            let Some((_, fkey)) = ef_shares[j].1 .1 .0[k] else {
                 return Err(Error::MissingMacKey);
             };
-            /*if e && (emacp.0 != ekey.0 ^ delta.0) || !e && (emacp.0 != ekey.0) {
-                println!("{:?} {:?} {:?}", emacp.0, ekey.0 ^ delta.0, ekey.0);
+            if (e && emacp.0 != ekey.0 ^ delta.0) || (!e && emacp.0 != ekey.0) {
                 return Err(Error::AANDWrongEFMAC);
             }
-            if f && (fmacp.0 != fkey.0 ^ delta.0) || !f && (fmacp.0 != fkey.0) {
-                println!("{:?} {:?} {:?}", fmacp.0, fkey.0 ^ delta.0, fkey.0);
+            if (f && fmacp.0 != fkey.0 ^ delta.0) || (!f && fmacp.0 != fkey.0) {
                 return Err(Error::AANDWrongEFMAC);
-            }*/ // TODO for some reason this still fails for 3 or more parties
+            }
         }
     }
-    e_f_emac_fmac
-        .iter_mut()
-        .enumerate()
-        .for_each(|(j, (e, f, _, _))| {
-            for k in (0..n).filter(|&k| k != i) {
-                let (fa_e, fa_f, _, _) = e_f_emac_fmac_k[k][j];
-                *e ^= fa_e;
-                *f ^= fa_f;
-            }
-        });
-    let mut and_share = vec![Share(false, Auth(smallvec![])); len];
+    for (j, (e, f, _, _)) in e_f_emac_fmac.iter_mut().enumerate() {
+        for k in (0..n).filter(|&k| k != i) {
+            let (e_k, f_k, _, _) = e_f_emac_fmac_k[k][j];
+            *e ^= e_k;
+            *f ^= f_k;
+        }
+    }
+    let mut and_share = vec![];
+    and_share.reserve_exact(len);
 
     for j in 0..len {
         let (a, _b, c) = &rand_triples[j];
         let (_x, y) = &and_shares[j];
         let (e, f, _, _) = e_f_emac_fmac[j];
-        and_share[j] = c.clone();
+        let mut current_share = c.clone();
         if e {
-            and_share[j] = &and_share[j] ^ y;
+            current_share = &current_share ^ y;
         }
         if f {
-            and_share[j] = &and_share[j] ^ a;
+            current_share = &current_share ^ a;
         }
+        and_share.push(current_share);
     }
     Ok(and_share)
 }
