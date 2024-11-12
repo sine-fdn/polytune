@@ -534,7 +534,6 @@ pub async fn mpc(
                 return Err(MpcError::MissingSharesForInput(*i).into());
             };
             if *mac != Mac(0) {
-                // only needed for the trusted dealer version
                 wire_shares_for_others[*i][w] = Some((bit, *mac));
             }
         }
@@ -561,13 +560,12 @@ pub async fn mpc(
                 let mut masked_input = *input ^ own_share;
                 for p in 0..p_max {
                     if let Some((_, key)) = own_macs_and_keys.get(p).copied() {
-                        if key != Key(0) { //only needed for the trusted dealer version
+                        if key != Key(0) {
                             let Some(other_shares) = wire_shares_from_others.get(p) else {
                                 return Err(MpcError::InvalidInputMacOnWire(w).into());
                             };
                             let Some((other_share, mac)) = other_shares.get(w).copied().flatten()
                             else {
-                                println!("Problem 2");
                                 return Err(MpcError::InvalidInputMacOnWire(w).into());
                             };
                             if mac != key ^ (other_share & delta) {
@@ -668,7 +666,7 @@ pub async fn mpc(
                     let Auth(mac_s_key_r) = mac_s_key_r;
                     for (p, mac_s_key_r) in mac_s_key_r.iter().enumerate() {
                         let (_, key_r) = mac_s_key_r;
-                        if *key_r == Key(0){ //only needed for the trusted dealer version
+                        if *key_r == Key(0) {
                             continue;
                         }
                         let Some(GarbledGate(garbled_gate)) = &garbled_gates[p][w] else {
