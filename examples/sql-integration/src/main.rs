@@ -2,7 +2,8 @@ use anyhow::{anyhow, bail, Context, Error};
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
-    routing::post,
+    http::{Request, Response},
+    routing::{get, post},
     Json, Router,
 };
 use clap::Parser;
@@ -25,10 +26,12 @@ use sqlx::{
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
-    net::SocketAddr,
+    env,
+    net::{IpAddr, SocketAddr},
     path::PathBuf,
     process::exit,
     result::Result,
+    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -40,17 +43,21 @@ use tokio::{
     },
     time::{sleep, timeout},
 };
+use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Span};
 use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
 #[command(name = "parlay")]
 struct Cli {
+    /// The IP address to listen on for connection attempts from other parties.
+    #[arg(long, short)]
+    addr: Option<String>,
     /// The port to listen on for connection attempts from other parties.
-    #[arg(required = true, long, short)]
-    port: u16,
+    #[arg(long, short)]
+    port: Option<u16>,
     /// The location of the file with the policy configuration.
     #[arg(long, short)]
     config: PathBuf,
@@ -101,7 +108,7 @@ type MpcState = Arc<Mutex<MpcComms>>;
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
     install_default_drivers();
-    let Cli { port, config } = Cli::parse();
+    let Cli { addr, port, config } = Cli::parse();
     let Ok(policy) = fs::read_to_string(&config).await else {
         error!("Could not find '{}', exiting...", config.display());
         exit(-1);
@@ -118,7 +125,19 @@ async fn main() -> Result<(), Error> {
         senders: vec![],
     }));
 
+    let log_layer = TraceLayer::new_for_http()
+        .on_request(|r: &Request<_>, _: &Span| tracing::info!("{} {}", r.method(), r.uri().path()))
+        .on_response(
+            |r: &Response<_>, latency: Duration, _: &Span| match r.status().as_u16() {
+                400..=499 => tracing::warn!("{} (in {:?})", r.status(), latency),
+                500..=599 => tracing::error!("{} (in {:?})", r.status(), latency),
+                _ => tracing::info!("{} (in {:?})", r.status(), latency),
+            },
+        );
+
     let app = Router::new()
+        // to check whether a server is running:
+        .route("/ping", get(ping))
         // to kick off an MPC session:
         .route("/run", post(run))
         // to receive constants from other parties:
@@ -127,9 +146,22 @@ async fn main() -> Result<(), Error> {
         .route("/msg/:from", post(msg))
         .with_state((policy.clone(), Arc::clone(&state)))
         .layer(DefaultBodyLimit::disable())
-        .layer(TraceLayer::new_for_http());
+        .layer(ServiceBuilder::new().layer(log_layer));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = if let Ok(socket_addr) = env::var("SOCKET_ADDRESS") {
+        SocketAddr::from_str(&socket_addr)
+            .unwrap_or_else(|_| panic!("Invalid socket address: {socket_addr}"))
+    } else {
+        let addr = addr.unwrap_or_else(|| "127.0.0.1".into());
+        let port = port.unwrap_or(8000);
+        match addr.parse::<IpAddr>() {
+            Ok(addr) => SocketAddr::new(addr, port),
+            Err(_) => {
+                error!("Invalid IP address: {addr}, using 127.0.0.1 instead");
+                SocketAddr::from(([127, 0, 0, 1], port))
+            }
+        }
+    };
     info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -158,19 +190,21 @@ async fn main() -> Result<(), Error> {
         if party != &policy.participants[policy.party] {
             info!("Waiting for confirmation from party {party}");
             let url = format!("{party}run");
-            let Ok(res) = client.post(&url).json(&policy_request).send().await else {
-                error!("Could not reach {url}");
-                participant_missing = true;
-                continue;
-            };
-            match res.status() {
-                StatusCode::OK => {}
-                code => {
-                    error!(
-                        "Unexpected response while trying to trigger execution for {url}: {code}"
-                    );
+            match client.post(&url).json(&policy_request).send().await {
+                Err(err) => {
+                    error!("Could not reach {url}: {err}");
                     participant_missing = true;
+                    continue;
                 }
+                Ok(res) => match res.status() {
+                    StatusCode::OK => {}
+                    code => {
+                        error!(
+                            "Unexpected response while trying to start execution for {url}: {code}"
+                        );
+                        participant_missing = true;
+                    }
+                },
             }
         }
     }
@@ -581,6 +615,10 @@ fn decode_literal(l: Literal) -> Result<Vec<Vec<String>>, String> {
         records.push(record);
     }
     Ok(records)
+}
+
+async fn ping() -> &'static str {
+    "pong"
 }
 
 async fn run(State((policy, state)): State<(Policy, MpcState)>, Json(body): Json<PolicyRequest>) {
