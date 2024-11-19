@@ -20,7 +20,9 @@ cargo test --release -- --nocapture
 
 ## How to Deploy the Engine
 
-Two Dockerfiles are provided as examples of how to run the MPC engine inside a docker container, `party0.Dockerfile` and `party1.Dockerfile`. These Dockerfiles do not contain any DB configuration, it is up to you to either bundle a database into the docker container (similar to how databases are set up using Docker Compose for the tests, see `docker-compose.yml`) or to change the database URLs in the configuration files (`policy0.json` and `policy1.json`) so that DBs that are hosted somewhere else can be accessed.
+The following example shows how to deploy the MPC engine for two parties, based on the SQL integration example (but without showing how and where to deploy the databases). If you want to deploy the engine with more parties or a different Garble program, the same principles apply.
+
+Two Dockerfiles are provided as examples of how to run the MPC engine inside a docker container, `party0.Dockerfile` and `party1.Dockerfile`. They are identical except for the ports that they use, you could of course just use a single Dockerfile in case all of your parties listen on the same port. These Dockerfiles do not contain any DB configuration, it is up to you to either bundle a database into the docker container (similar to how databases are set up using Docker Compose for the tests, see `docker-compose.yml`) or to change the database URLs in the configuration files (`policy0.json` and `policy1.json`) so that DBs that are hosted somewhere else can be accessed.
 
 Assuming that the databases are hosted somewhere else, most of `party0.Dockerfile` (or `party1.Dockerfile`) can stay as it is. Let's take a look at the last three lines to see what you might want to change:
 
@@ -49,7 +51,7 @@ You will notice that running this docker container will fail, because party 0 is
 Error: Some participants are missing, aborting...
 ```
 
-To solve this, make sure to deploy and run the contributors first, for example:
+To solve this, make sure to deploy and run the contributors first (in this example only party 1, but you could deploy more than two parties, in which case all contributing parties need to be started before the leader starts running), for example:
 
 ```
 docker build -f examples/sql-integration/party1.Dockerfile --tag 'parlay1' . && docker run -t -p 8001:8001 parlay1
