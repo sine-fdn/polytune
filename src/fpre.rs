@@ -85,12 +85,12 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = smallvec![None; parties];
+            let mut mac_and_key = smallvec![(Mac(0), Key(0)); parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
                     let key = keys[i][j];
-                    mac_and_key[j] = Some((mac, key));
+                    mac_and_key[j] = (mac, key);
                 }
             }
             random_shares[i].push(Share(bits[i], Auth(mac_and_key)));
@@ -126,14 +126,13 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
     for share in shares.iter() {
         for (i, (a, b)) in share.iter().enumerate() {
             for (Share(bit, Auth(macs_i)), round) in [(a, 0), (b, 1)] {
-                for (j, macs_i) in macs_i.iter().enumerate() {
-                    if let Some((mac_i, _)) = macs_i {
+                for (j, (mac_i, _)) in macs_i.iter().enumerate() {
+                    if *mac_i != Mac(0) { // Added when removed Option
                         let (a, b) = &share[j];
                         let Share(_, Auth(keys_j)) = if round == 0 { a } else { b };
-                        if let Some((_, key_j)) = keys_j[i] {
-                            if *mac_i != key_j ^ (*bit & deltas[j]) {
-                                has_cheated = true;
-                            }
+                        let (_, key_j) = keys_j[i];
+                        if *mac_i != key_j ^ (*bit & deltas[j]) {
+                            has_cheated = true;
                         }
                     }
                 }
@@ -175,12 +174,12 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = smallvec![None; parties];
+            let mut mac_and_key = smallvec![(Mac(0), Key(0)); parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
                     let key = keys[i][j];
-                    mac_and_key[j] = Some((mac, key));
+                    mac_and_key[j] = (mac, key);
                 }
             }
             and_shares[i].push(Share(bits[i], Auth(mac_and_key)));
@@ -271,7 +270,7 @@ impl Share {
         self.0
     }
 
-    pub(crate) fn macs(&self) -> Vec<Option<Mac>> {
+    pub(crate) fn macs(&self) -> Vec<Mac> {
         self.1.macs()
     }
 
@@ -281,7 +280,7 @@ impl Share {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Auth(pub(crate) SmallVec<[Option<(Mac, Key)>; 2]>);
+pub(crate) struct Auth(pub(crate) SmallVec<[(Mac, Key); 2]>);
 
 impl BitXor for &Auth {
     type Output = Auth;
@@ -290,35 +289,30 @@ impl BitXor for &Auth {
         let Auth(auth0) = self;
         let Auth(auth1) = rhs;
         let mut xor = SmallVec::with_capacity(auth0.len());
-        for (a, b) in auth0.iter().zip(auth1.iter()) {
-            xor.push(match (a, b) {
-                (Some((mac1, key1)), Some((mac2, key2))) => Some((*mac1 ^ *mac2, *key1 ^ *key2)),
-                _ => None,
-            });
+        for ((mac1, key1), (mac2, key2)) in auth0.iter().zip(auth1.iter()) {
+            xor.push((*mac1 ^ *mac2, *key1 ^ *key2));
         }
         Auth(xor)
     }
 }
 
 impl Auth {
-    pub(crate) fn macs(&self) -> Vec<Option<Mac>> {
-        self.0.iter().map(|s| s.map(|(mac, _)| mac)).collect()
+    pub(crate) fn macs(&self) -> Vec<Mac> {
+        self.0.iter().map(|(mac, _)| *mac).collect()
     }
 
     pub(crate) fn xor_keys(&self) -> Key {
         let mut k = 0;
-        for (_, key) in self.0.iter().flatten() {
+        for (_, key) in &self.0 {
             k ^= key.0;
         }
         Key(k)
     }
 
     pub(crate) fn xor_key(mut self, i: usize, delta: Delta) -> Auth {
-        for (j, share) in self.0.iter_mut().enumerate() {
+        for (j, (_, key)) in self.0.iter_mut().enumerate() {
             if i == j {
-                if let Some((_, key)) = share.as_mut() {
-                    key.0 ^= delta.0
-                }
+                key.0 ^= delta.0;
             }
         }
         self
@@ -329,7 +323,7 @@ impl Auth {
 mod tests {
     use crate::{
         channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
-        fpre::{fpre, Auth, Delta, Error, Share},
+        fpre::{fpre, Auth, Delta, Error, Share, Mac, Key},
     };
     use smallvec::smallvec;
 
@@ -370,10 +364,10 @@ mod tests {
         let (auth_s1, auth_s2) = (s.next().unwrap(), s.next().unwrap());
         let (Share(r1, Auth(mac_r1_key_s1)), Share(r2, Auth(mac_r2_key_s2))) = (auth_r1, auth_r2);
         let (Share(s1, Auth(mac_s1_key_r1)), Share(s2, Auth(mac_s2_key_r2))) = (auth_s1, auth_s2);
-        let (mac_r1, key_s1) = mac_r1_key_s1[1].unwrap();
-        let (mac_r2, key_s2) = mac_r2_key_s2[1].unwrap();
-        let (mac_s1, key_r1) = mac_s1_key_r1[0].unwrap();
-        let (mac_s2, key_r2) = mac_s2_key_r2[0].unwrap();
+        let (mac_r1, key_s1) = mac_r1_key_s1[1];
+        let (mac_r2, key_s2) = mac_r2_key_s2[1];
+        let (mac_s1, key_r1) = mac_s1_key_r1[0];
+        let (mac_s2, key_r2) = mac_s2_key_r2[0];
 
         let (r3, mac_r3, key_s3) = {
             let r3 = r1 ^ r2;
@@ -431,8 +425,8 @@ mod tests {
             let (auth_s1, auth_s2) = (s.next().unwrap(), s.next().unwrap());
             let (Share(r1, Auth(mac_r1_key_s1)), Share(r2, _)) = (auth_r1.clone(), auth_r2.clone());
             let (Share(s1, Auth(mac_s1_key_r1)), Share(s2, _)) = (auth_s1.clone(), auth_s2.clone());
-            let (mac_r1, key_s1) = mac_r1_key_s1[1].unwrap();
-            let (_, key_r1) = mac_s1_key_r1[0].unwrap();
+            let (mac_r1, key_s1) = mac_r1_key_s1[1];
+            let (_, key_r1) = mac_s1_key_r1[0];
 
             if i == 0 {
                 // uncorrupted authenticated (r1 XOR s1) AND (r2 XOR s2):
@@ -448,14 +442,14 @@ mod tests {
                         .await?
                         .pop()
                         .unwrap();
-                let (mac_r3, key_s3) = mac_r3_key_s3[1].unwrap();
-                let (mac_s3, key_r3) = mac_s3_key_r3[0].unwrap();
+                let (mac_r3, key_s3) = mac_r3_key_s3[1];
+                let (mac_s3, key_r3) = mac_s3_key_r3[0];
                 assert_eq!(r3 ^ s3, (r1 ^ s1) & (r2 ^ s2));
                 assert_eq!(mac_r3, key_r3 ^ (r3 & delta_b));
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted = Share(!r1, Auth(smallvec![None, Some((mac_r1, key_s1))]));
+                let auth_r1_corrupted = Share(!r1, Auth(smallvec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
                 send_to(
                     &mut a,
                     fpre_party,
@@ -476,7 +470,7 @@ mod tests {
                 // A would need knowledge of B's key and delta to corrupt the shared secret:
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
                 let auth_r1_corrupted =
-                    Share(!r1, Auth(smallvec![None, Some((mac_r1_corrupted, key_s1))]));
+                    Share(!r1, Auth(smallvec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]));
                 send_to(
                     &mut a,
                     fpre_party,
