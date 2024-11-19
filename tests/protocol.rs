@@ -8,7 +8,7 @@ use parlay::protocol::{simulate_mpc, Error};
 ///
 /// This function simulates secure multi-party computation (MPC) where two parties jointly
 /// compute the XOR of their respective inputs without revealing them. Party 1 learns the result,
-/// as defined by the `output_parties` vector. The test verifies if the result matches the 
+/// as defined by the `output_parties` vector. The test verifies if the result matches the
 /// expected output for all possible boolean combinations of inputs `x`, `y`, and `z`.
 ///
 /// # Circuit
@@ -41,7 +41,7 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
 ///
 /// This function simulates secure multi-party computation (MPC) where three parties compute
 /// the XOR of their respective inputs without revealing them. Parties 1 and 2 learn the result,
-/// as defined by the `output_parties` vector. The test verifies if the output matches the 
+/// as defined by the `output_parties` vector. The test verifies if the output matches the
 /// expected result for all possible boolean combinations of inputs `x`, `y`, and `z`.
 ///
 /// # Circuit
@@ -70,13 +70,12 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
     Ok(())
 }
 
-
 /// Tests the evaluation of a NOT circuit in a two-party computation (2PC) setting.
 ///
 /// This function simulates secure multi-party computation (MPC) where two parties compute
 /// NOT operations on their respective inputs without revealing them. Party 1 learns the result,
-/// as defined by the `output_parties` vector. The test verifies if the output matches the 
-/// expected negated and original values for inputs `x` and `y` across all possible boolean 
+/// as defined by the `output_parties` vector. The test verifies if the output matches the
+/// expected negated and original values for inputs `x` and `y` across all possible boolean
 /// combinations.
 ///
 /// # Circuit
@@ -108,9 +107,9 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
 /// Tests the evaluation of a NOT circuit in a three-party computation (3PC) setting.
 ///
 /// This function simulates secure multi-party computation (MPC) where three parties compute
-/// NOT operations on their respective inputs without revealing them to each other. All parties 
-/// learn the result, as defined by the `output_parties` vector. The test verifies if the 
-/// output matches the expected negated and original values for inputs `x`, `y`, and `z` 
+/// NOT operations on their respective inputs without revealing them to each other. All parties
+/// learn the result, as defined by the `output_parties` vector. The test verifies if the
+/// output matches the expected negated and original values for inputs `x`, `y`, and `z`
 /// across all boolean combinations.
 ///
 /// # Circuit
@@ -215,7 +214,7 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
 /// Tests the evaluation of a garble program in a three-party computation (3PC) setting.
 ///
 /// This function simulates secure multi-party computation (MPC) where three parties evaluate
-/// a garble program on all possible combinations of inputs `x`, `y`, and `z`. The output is 
+/// a garble program on all possible combinations of inputs `x`, `y`, and `z`. The output is
 /// revealed to all three parties, as defined by the `output_parties` vector The test checks
 /// if the computed result matches the expected output for the given inputs.
 ///

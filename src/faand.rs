@@ -1,7 +1,7 @@
-//! Pi_aAND protocol from WRK17b instantiating F_aAND for being used in preprocessing.
+//! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use blake3::Hasher;
+use blake3;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use crate::{
     fpre::{Auth, Delta, Key, Mac, Share},
 };
 
+/// The statistical security parameter `RHO` used for cryptographic operations.
 pub(crate) const RHO: usize = 40;
 
 /// Errors occurring during preprocessing.
@@ -47,74 +48,78 @@ pub enum Error {
     ConsistencyCheckFailed,
 }
 
+/// Converts a `channel::Error` into a custom `Error` type.
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelError(e)
     }
 }
 
+/// Represents a cryptographic commitment as a fixed-size 32-byte array (a BLAKE3 hash).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct Commitment(pub(crate) [u8; 32]);
+struct Commitment(pub(crate) [u8; 32]);
 
-/// Commit to a u128 value using the BLAKE3 hash function.
+/// Commits to a value using the BLAKE3 cryptographic hash function.
 fn commit(value: &[u8]) -> Commitment {
-    let mut hasher = Hasher::new();
-    hasher.update(value);
-    let result = hasher.finalize();
-    let mut commitment = [0u8; 32];
-    commitment.copy_from_slice(result.as_bytes());
-    Commitment(commitment)
+    let result = blake3::hash(value).into();
+    Commitment(result)
 }
 
-/// Open the commitment and reveal the original value.
+/// Verifies if a given value matches a previously generated commitment.
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
-    let mut hasher = Hasher::new();
-    hasher.update(value);
-    let result = hasher.finalize();
-    &commitment.0 == result.as_bytes()
+    blake3::hash(value).as_bytes() == &commitment.0
 }
 
-/// Multi-party coin tossing to generate shared randomness.
+/// Multi-party coin tossing to generate shared randomness in a secure, distributed manner.
+///
+/// This function generates a shared random number generator (RNG) using multi-party
+/// coin tossing in a secure multi-party computation (MPC) setting. Each participant contributes
+/// to the randomness generation, and all contributions are combined securely to generate
+/// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
+/// cryptographically secure random number generator.
 pub(crate) async fn shared_rng(
     channel: &mut impl Channel,
     i: usize,
-    n: usize,
+    indices: Vec<usize>,
 ) -> Result<ChaCha20Rng, Error> {
     let r = [random::<u128>(), random::<u128>()];
     let mut buf = [0u8; 32];
     buf[..16].copy_from_slice(&r[0].to_be_bytes());
     buf[16..].copy_from_slice(&r[1].to_be_bytes());
-    let c = commit(&buf);
-    for k in (0..n).filter(|k| *k != i) {
-        send_to(channel, k, "RNG comm", &[c]).await?;
+    let commitment = commit(&buf);
+
+    let valid_indices: Vec<usize> = indices.iter().filter(|&&k| k != i).copied().collect();
+
+    for &k in &valid_indices {
+        send_to(channel, k, "RNG comm", &[commitment]).await?;
     }
-    let mut commitments = vec![Commitment([0; 32]); n];
-    for k in (0..n).filter(|k| *k != i) {
+    let mut commitments = Vec::with_capacity(valid_indices.len());
+    for &k in &valid_indices {
         let commitment = recv_from::<Commitment>(channel, k, "RNG comm")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        commitments[k] = commitment;
+        commitments.push(commitment);
     }
-    for k in (0..n).filter(|k| *k != i) {
+    for &k in &valid_indices {
         send_to(channel, k, "RNG ver", &[buf]).await?;
     }
-    let mut bufs = vec![[0; 32]; n];
-    for k in (0..n).filter(|k| *k != i) {
+    let mut bufs = Vec::with_capacity(valid_indices.len());
+    for &k in &valid_indices {
         let buffer = recv_from::<[u8; 32]>(channel, k, "RNG ver")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        bufs[k] = buffer;
+        bufs.push(buffer);
     }
     let mut buf_xor = buf;
-    for k in (0..n).filter(|k| *k != i) {
-        if !open_commitment(&commitments[k], &bufs[k]) {
+    for (j, &_) in valid_indices.iter().enumerate() {
+        if !open_commitment(&commitments[j], &bufs[j]) {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
         buf_xor
             .iter_mut()
-            .zip(bufs[k].iter())
+            .zip(&bufs[j])
             .for_each(|(buf_xor_byte, buf_byte)| *buf_xor_byte ^= *buf_byte);
     }
     Ok(ChaCha20Rng::from_seed(buf_xor))
@@ -124,7 +129,7 @@ pub(crate) async fn shared_rng(
 ///
 /// A random bit-string is generated as well as the corresponding keys and MACs are sent to all
 /// parties.
-pub(crate) async fn fabitn(
+async fn fabitn(
     (channel, delta): (&mut impl Channel, Delta),
     x: &mut Vec<bool>,
     i: usize,
@@ -359,7 +364,7 @@ pub(crate) async fn fashare(
 ///
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
-pub(crate) async fn fhaand(
+async fn fhaand(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
     n: usize,
@@ -417,7 +422,7 @@ pub(crate) async fn fhaand(
 /// We hash into 256 bits and then xor the first 128 bits and the second 128 bits. In our case this
 /// works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing
 /// with u128s instead while still cancelling the hashes out if correct.
-pub(crate) fn hash128(input: u128) -> u128 {
+fn hash128(input: u128) -> u128 {
     let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
     let mut value1: u128 = 0;
     let mut value2: u128 = 0;
@@ -432,7 +437,7 @@ pub(crate) fn hash128(input: u128) -> u128 {
 ///
 /// Generates a "leaky authenticated AND", i.e., <x>, <y>, <z> such that the AND of the XORs of the
 /// x and y values equals to the XOR of the z values.
-pub(crate) async fn flaand(
+async fn flaand(
     (channel, delta): (&mut impl Channel, Delta),
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
     i: usize,
@@ -604,7 +609,7 @@ type Bucket<'a> = SmallVec<[(&'a Share, &'a Share, &'a Share); 3]>;
 /// Protocol Pi_aAND that performs F_aAND.
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
-pub(crate) async fn faand(
+async fn faand(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
     n: usize,
@@ -741,7 +746,7 @@ pub(crate) async fn beaver_aand(
 }
 
 /// Check and return d-values for a vector of shares.
-pub(crate) async fn check_dvalue(
+async fn check_dvalue(
     (channel, delta): (&mut impl Channel, Delta),
     i: usize,
     n: usize,
@@ -805,7 +810,7 @@ pub(crate) async fn check_dvalue(
 }
 
 /// Combine the whole bucket by combining elements one by one.
-pub(crate) fn combine_bucket(
+fn combine_bucket(
     i: usize,
     n: usize,
     bucket: SmallVec<[(&Share, &Share, &Share); 3]>,
@@ -827,7 +832,7 @@ pub(crate) fn combine_bucket(
 }
 
 /// Combine two leaky ANDs into one non-leaky AND.
-pub(crate) fn combine_two_leaky_ands(
+fn combine_two_leaky_ands(
     i: usize,
     n: usize,
     (x1, y1, z1): (Share, Share, Share),
