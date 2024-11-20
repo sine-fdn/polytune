@@ -18,6 +18,7 @@ pub mod kos;
 
 use curve25519_dalek::RistrettoPoint;
 use rand::{CryptoRng, Rng};
+use rand_chacha::ChaCha20Rng;
 
 use scuttlebutt::Block;
 
@@ -54,8 +55,8 @@ where
     fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Sends messages.
     fn send<C: Channel, RNG: CryptoRng + Rng>(
@@ -63,8 +64,8 @@ where
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<(), Error>>;
 }
 
@@ -79,8 +80,8 @@ where
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
 }
 
@@ -98,8 +99,8 @@ where
     fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<Self, Error>>;
     /// Receives messages.
     fn recv<C: Channel, RNG: CryptoRng + Rng>(
@@ -107,8 +108,8 @@ where
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
 }
 
@@ -125,8 +126,8 @@ where
         channel: &mut C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
-        p_pwn: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<Vec<(Self::Msg, Self::Msg)>, Error>>;
 }
 
@@ -142,7 +143,7 @@ where
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
-        p_own: usize,
         p_to: usize,
+        shared_rand: &mut ChaCha20Rng,
     ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
 }

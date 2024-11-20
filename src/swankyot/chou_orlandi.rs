@@ -28,6 +28,7 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 use rand::{CryptoRng, Rng};
+use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{Block, Malicious, SemiHonest};
 
 /// Oblivious transfer sender.
@@ -43,8 +44,8 @@ impl OtSender for Sender {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         mut rng: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
         let y = Scalar::random(&mut rng);
         let s = &y * RISTRETTO_BASEPOINT_TABLE;
@@ -57,13 +58,13 @@ impl OtSender for Sender {
         channel: &mut C,
         inputs: &[(Block, Block)],
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<(), Error> {
         let ys = self.y * self.s;
         let mut ks = Vec::with_capacity(inputs.len());
 
-        let r_bytes_vec = recv_vec_from::<Vec<u8>>(channel, p_to, "CO_OT_r", 128).await?;
+        let r_bytes_vec = recv_vec_from::<Vec<u8>>(channel, p_to, "CO_OT_r", inputs.len()).await?;
         for (i, r_bytes) in r_bytes_vec.into_iter().enumerate() {
             let r = convert_vec_to_point(r_bytes)?;
             let yr = self.y * r;
@@ -95,8 +96,8 @@ impl OtReceiver for Receiver {
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
         _: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
         let s_bytes = recv_vec_from::<u8>(channel, p_to, "CO_OT_s", 32).await?;
         let s = convert_vec_to_point(s_bytes)?;
@@ -109,8 +110,8 @@ impl OtReceiver for Receiver {
         channel: &mut C,
         inputs: &[bool],
         mut rng: &mut RNG,
-        _: usize,
         p_to: usize,
+        _: &mut ChaCha20Rng,
     ) -> Result<Vec<Block>, Error> {
         let zero = &Scalar::ZERO * &self.s;
         let one = &Scalar::ONE * &self.s;
@@ -149,9 +150,9 @@ impl SemiHonest for Receiver {}
 impl Malicious for Receiver {}
 
 pub(crate) fn convert_vec_to_point(data: Vec<u8>) -> Result<RistrettoPoint, Error> {
-    let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidOTData)?;
+    let dataarr: [u8; 32] = data.try_into().map_err(|_| Error::InvalidLength)?;
     let compressed_pt =
-        CompressedRistretto::from_slice(&dataarr).map_err(|_| Error::InvalidOTData)?;
-    let pt = compressed_pt.decompress().ok_or(Error::InvalidOTData)?;
+        CompressedRistretto::from_slice(&dataarr).map_err(|_| Error::InvalidLength)?;
+    let pt = compressed_pt.decompress().ok_or(Error::InvalidLength)?;
     Ok(pt)
 }

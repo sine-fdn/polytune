@@ -127,7 +127,8 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
         for (i, (a, b)) in share.iter().enumerate() {
             for (Share(bit, Auth(macs_i)), round) in [(a, 0), (b, 1)] {
                 for (j, (mac_i, _)) in macs_i.iter().enumerate() {
-                    if *mac_i != Mac(0) { // Added when removed Option
+                    if *mac_i != Mac(0) {
+                        // Added when removed Option
                         let (a, b) = &share[j];
                         let Share(_, Auth(keys_j)) = if round == 0 { a } else { b };
                         let (_, key_j) = keys_j[i];
@@ -323,7 +324,7 @@ impl Auth {
 mod tests {
     use crate::{
         channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
-        fpre::{fpre, Auth, Delta, Error, Share, Mac, Key},
+        fpre::{fpre, Auth, Delta, Error, Key, Mac, Share},
     };
     use smallvec::smallvec;
 
@@ -449,7 +450,8 @@ mod tests {
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted = Share(!r1, Auth(smallvec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
+                let auth_r1_corrupted =
+                    Share(!r1, Auth(smallvec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
                 send_to(
                     &mut a,
                     fpre_party,
@@ -469,8 +471,10 @@ mod tests {
             } else if i == 2 {
                 // A would need knowledge of B's key and delta to corrupt the shared secret:
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
-                let auth_r1_corrupted =
-                    Share(!r1, Auth(smallvec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]));
+                let auth_r1_corrupted = Share(
+                    !r1,
+                    Auth(smallvec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]),
+                );
                 send_to(
                     &mut a,
                     fpre_party,
