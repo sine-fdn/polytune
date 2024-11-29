@@ -9,7 +9,7 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel},
-    fpre::{Auth, Delta, Key, Mac, Share},
+    data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender, u128_to_block},
 };
 

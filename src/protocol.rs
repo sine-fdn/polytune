@@ -1,59 +1,18 @@
 //! Secure multi-party computation protocol with communication via channels.
-use std::ops::BitXor;
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
+    data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
     faand::{self, beaver_aand, broadcast_and_verify, bucket_size, fashare, shared_rng},
-    fpre::{fpre, Auth, Delta, Key, Mac, Share},
+    fpre::fpre,
     garble::{self, decrypt, encrypt, GarblingKey},
 };
-
-/// Preprocessed AND gates that need to be sent to the circuit evaluator.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GarbledGate(pub(crate) [Vec<u8>; 4]);
-
-/// A label for a particular wire in the circuit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Label(pub(crate) u128);
-
-impl BitXor for Label {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Label(self.0 ^ rhs.0)
-    }
-}
-
-impl BitXor<Delta> for Label {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Delta) -> Self::Output {
-        Label(self.0 ^ rhs.0)
-    }
-}
-
-impl BitXor<Mac> for Label {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Mac) -> Self::Output {
-        Label(self.0 ^ rhs.0)
-    }
-}
-
-impl BitXor<Key> for Label {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Key) -> Self::Output {
-        Label(self.0 ^ rhs.0)
-    }
-}
 
 fn xor_labels(a: &[Label], b: &[Label]) -> Vec<Label> {
     let mut xor = vec![];
