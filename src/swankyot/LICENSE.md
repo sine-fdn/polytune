@@ -1,8 +1,7 @@
 MIT License
 
 Copyright © 2019-2024 Galois, Inc.
-Copyright (c) 2022 SINE e.V.
-Copyright (c) 2022 Martin Pompéry
+Copyright (c) 2024 SINE e.V.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in

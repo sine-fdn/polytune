@@ -1,7 +1,6 @@
 MIT License
 
-Copyright (c) 2022 SINE e.V.
-Copyright (c) 2022 Martin Pompéry
+Copyright (c) 2023,2024 SINE Foundation e.V.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
