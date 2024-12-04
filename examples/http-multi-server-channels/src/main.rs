@@ -6,7 +6,7 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use parlay::{
+use polytune::{
     channel::Channel,
     garble_lang::compile,
     protocol::{mpc, Preprocessor},
@@ -23,7 +23,7 @@ use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "polytune")]
 struct Cli {
     /// The endpoints of all the parties, including this one (as the last url).
     #[arg(required = true, value_delimiter = ';')]

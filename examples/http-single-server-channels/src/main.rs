@@ -2,7 +2,7 @@ use std::{path::PathBuf, process::exit, time::Duration};
 
 use clap::{Parser, Subcommand};
 use http_channel::PollingHttpChannel;
-use parlay::{
+use polytune::{
     fpre::fpre,
     garble_lang::compile,
     protocol::{mpc, Preprocessor},
@@ -15,7 +15,7 @@ mod server;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "polytune")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
