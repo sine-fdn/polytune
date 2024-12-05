@@ -112,6 +112,14 @@ pub(crate) async fn broadcast_and_verify<
     if vec.is_empty() {
         return Err(Error::EmptyVector);
     }
+    let mut hash_vecs: Vec<[u128; 2]> = vec![[0; 2]; n];
+    for k in (0..n).filter(|k| *k != i) {
+        if let Ok(hash) = hash_vec(&vec[k]) {
+            hash_vecs[k] = hash;
+        } else {
+            return Err(Error::EmptyVector);
+        }
+    }
     // Step 1: Send the vector to all parties that does not included its already sent value
     // (for index i) and the value it received from the party it is sending to (index k).
     for k in (0..n).filter(|k| *k != i) {
@@ -120,7 +128,7 @@ pub(crate) async fn broadcast_and_verify<
             if vec[j].is_empty() {
                 return Err(Error::EmptyVector);
             }
-            modified_vec[j] = Some(hash_vec(&vec[j])?);
+            modified_vec[j] = Some(hash_vecs[j]);
         }
         send_to(channel, k, phase, &modified_vec).await?;
     }
@@ -132,7 +140,7 @@ pub(crate) async fn broadcast_and_verify<
         for j in (0..n).filter(|j| *j != i && *j != k) {
             if vec_k[j].is_none() {
                 return Err(Error::EmptyVector);
-            } else if vec_k[j] != Some(hash_vec(&vec[j])?) {
+            } else if vec_k[j] != Some(hash_vecs[j]) {
                 return Err(Error::BroadcastError);
             }
         }
@@ -154,21 +162,22 @@ pub(crate) async fn shared_rng(
     n: usize,
 ) -> Result<(ChaCha20Rng, Vec<Vec<Option<ChaCha20Rng>>>), Error> {
     // Step 1 a) Generate a random 256-bit seed for multi-party cointossing and commit to it.
-    let r = [random::<u128>(), random::<u128>()];
-    let mut buf = [0u8; 32];
-    buf[..16].copy_from_slice(&r[0].to_be_bytes());
-    buf[16..].copy_from_slice(&r[1].to_be_bytes());
-    let commitment = commit(&buf);
+    let buf = random::<[u8; 32]>();
+    let mut buf_id = [0u8; 33];
+    buf_id[..32].copy_from_slice(&buf);
+    // Set the last byte to the party ID to ensure unique commitments.
+    buf_id[32] = i as u8;
+    let commitment = commit(&buf_id);
 
     // Step 1 b) Generate a random 256-bit seed for every other party for the pairwise
     // cointossing and commit to it.
-    let mut bufvec = vec![[0u8; 32]; n];
+    let bufvec: Vec<[u8; 32]> = (0..n).map(|_| random::<[u8; 32]>()).collect();
+    let mut bufvec_id: Vec<[u8; 33]> = vec![[0; 33]; n];
     let mut commitment_vec = vec![Commitment([0; 32]); n];
     for k in (0..n).filter(|k| *k != i) {
-        let r = [random::<u128>(), random::<u128>()];
-        bufvec[k][..16].copy_from_slice(&r[0].to_be_bytes());
-        bufvec[k][16..].copy_from_slice(&r[1].to_be_bytes());
-        commitment_vec[k] = commit(&bufvec[k]);
+        bufvec_id[k][..32].copy_from_slice(&bufvec[k]);
+        bufvec_id[k][32] = i as u8;
+        commitment_vec[k] = commit(&bufvec_id[k]);
     }
 
     // Step 2) Send the commitments to all parties, first being the one for multi-party cointossing, next
@@ -190,18 +199,23 @@ pub(crate) async fn shared_rng(
         send_to(channel, k, "RNG ver", &[(buf, bufvec[k])]).await?;
     }
     let mut bufs = vec![([0; 32], [0; 32]); n];
+    let mut bufs_id = vec![([0; 33], [0; 33]); n];
     for k in (0..n).filter(|k| *k != i) {
         bufs[k] = recv_from::<([u8; 32], [u8; 32])>(channel, k, "RNG ver")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
+        bufs_id[k].0[..32].copy_from_slice(&bufs[k].0);
+        bufs_id[k].0[32] = k as u8;
+        bufs_id[k].1[..32].copy_from_slice(&bufs[k].1);
+        bufs_id[k].1[32] = k as u8;
     }
 
     // Step 4) Verify the decommitments and calculate multi-party seed.
     let mut buf_xor = buf;
     for k in (0..n).filter(|k| *k != i) {
-        if !open_commitment(&commitments[k].0, &bufs[k].0)
-            || !open_commitment(&commitments[k].1, &bufs[k].1)
+        if !open_commitment(&commitments[k].0, &bufs_id[k].0)
+            || !open_commitment(&commitments[k].1, &bufs_id[k].1)
         {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
