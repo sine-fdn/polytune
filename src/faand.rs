@@ -193,6 +193,11 @@ pub(crate) async fn shared_rng(
             .ok_or(Error::EmptyMsg)?;
     }
 
+    // Broadcast multi-party commitments
+    let commitments_multi: Vec<Vec<Commitment>> =
+        commitments.iter().map(|(c0, _)| vec![*c0]).collect();
+    broadcast_and_verify(channel, i, n, "broadcast comm_multi", &commitments_multi).await?;
+
     // Step 3) Send the decommitments to all parties, first being the one for multi-party cointossing, next
     // the one for pairwise cointossing.
     for k in (0..n).filter(|k| *k != i) {
