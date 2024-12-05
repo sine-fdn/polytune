@@ -28,8 +28,8 @@ Assuming that the databases are hosted somewhere else, most of `party0.Dockerfil
 
 ```
 EXPOSE 8000
-WORKDIR /usr/src/parlay/examples/sql-integration
-CMD ["parlay-sql-integration", "--addr=0.0.0.0", "--port=8000", "--config=./policy0.json"]
+WORKDIR /usr/src/polytune/examples/sql-integration
+CMD ["polytune-sql-integration", "--addr=0.0.0.0", "--port=8000", "--config=./policy0.json"]
 ```
 
 The above Dockerfile exposes the MPC engine on port 8000 and reads its configuration from `policy0.json` (contained here in this repository).
@@ -37,29 +37,29 @@ The above Dockerfile exposes the MPC engine on port 8000 and reads its configura
 To build and run the container, use the following commands and **make sure to run them from the top level directory of the repository**:
 
 ```
-docker build -f examples/sql-integration/party0.Dockerfile --tag 'parlay0' .
-docker run -t -p 8000:8000 parlay0
+docker build -f examples/sql-integration/party0.Dockerfile --tag 'polytune0' .
+docker run -t -p 8000:8000 polytune0
 ```
 
 You will notice that running this docker container will fail, because party 0 is configured to be the leader (in `policy0.json`) and is thus expected all other parties to be listening already:
 
 ```
-2024-11-18T21:59:17.244221Z  INFO parlay_sql_integration: listening on 0.0.0.0:8000
-2024-11-18T21:59:17.244366Z  INFO parlay_sql_integration: Acting as leader (party 0)
-2024-11-18T21:59:17.270663Z  INFO parlay_sql_integration: Waiting for confirmation from party http://localhost:8001/
-2024-11-18T21:59:17.274310Z ERROR parlay_sql_integration: Could not reach http://localhost:8001/run: error sending request for url (http://localhost:8001/run): error trying to connect: tcp connect error: Cannot assign requested address (os error 99)
+2024-11-18T21:59:17.244221Z  INFO polytune_sql_integration: listening on 0.0.0.0:8000
+2024-11-18T21:59:17.244366Z  INFO polytune_sql_integration: Acting as leader (party 0)
+2024-11-18T21:59:17.270663Z  INFO polytune_sql_integration: Waiting for confirmation from party http://localhost:8001/
+2024-11-18T21:59:17.274310Z ERROR polytune_sql_integration: Could not reach http://localhost:8001/run: error sending request for url (http://localhost:8001/run): error trying to connect: tcp connect error: Cannot assign requested address (os error 99)
 Error: Some participants are missing, aborting...
 ```
 
 To solve this, make sure to deploy and run the contributors first (in this example only party 1, but you could deploy more than two parties, in which case all contributing parties need to be started before the leader starts running), for example:
 
 ```
-docker build -f examples/sql-integration/party1.Dockerfile --tag 'parlay1' . && docker run -t -p 8001:8001 parlay1
+docker build -f examples/sql-integration/party1.Dockerfile --tag 'polytune1' . && docker run -t -p 8001:8001 polytune1
 [+] Building 279.4s (20/20) FINISHED
-2024-11-18T22:52:32.213120Z  INFO parlay_sql_integration: listening on 0.0.0.0:8001
-2024-11-18T22:52:32.213365Z  INFO parlay_sql_integration: Listening for connection attempts from other parties
-2024-11-18T22:52:42.214689Z  INFO parlay_sql_integration: Listening for connection attempts from other parties
-2024-11-18T22:52:52.216829Z  INFO parlay_sql_integration: Listening for connection attempts from other parties
+2024-11-18T22:52:32.213120Z  INFO polytune_sql_integration: listening on 0.0.0.0:8001
+2024-11-18T22:52:32.213365Z  INFO polytune_sql_integration: Listening for connection attempts from other parties
+2024-11-18T22:52:42.214689Z  INFO polytune_sql_integration: Listening for connection attempts from other parties
+2024-11-18T22:52:52.216829Z  INFO polytune_sql_integration: Listening for connection attempts from other parties
 ```
 
 You can check that the party is running and listening by making a GET request to its `/ping` route (in this example thus `localhost:8001/ping`), which should respond with a `pong` message.

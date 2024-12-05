@@ -115,6 +115,7 @@ where
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the sender's
 /// point-of-view.
+#[allow(clippy::type_complexity)]
 pub trait CorrelatedSender: Sender
 where
     Self: Sized,

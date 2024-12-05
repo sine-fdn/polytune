@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use clap::Parser;
-use parlay::{
+use polytune::{
     channel::Channel,
     garble_lang::{
         ast::{Type, Variant},
@@ -50,7 +50,7 @@ use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "polytune")]
 struct Cli {
     /// The IP address to listen on for connection attempts from other parties.
     #[arg(long, short)]

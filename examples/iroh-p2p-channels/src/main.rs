@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use iroh_channel::IrohChannel;
 use iroh_net::{derp::DerpMode, key::SecretKey, MagicEndpoint, NodeAddr};
-use parlay::{
+use polytune::{
     fpre::fpre,
     garble_lang::compile,
     protocol::{mpc, Preprocessor},
@@ -18,7 +18,7 @@ mod iroh_channel;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
-#[command(name = "parlay")]
+#[command(name = "polytune")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -57,7 +57,7 @@ enum Commands {
     },
 }
 
-const ALPN: &[u8] = b"parlay/p2p/iroh";
+const ALPN: &[u8] = b"polytune/p2p/iroh";
 const MAX_MSG_BYTES: usize = 1_024_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

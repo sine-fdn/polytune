@@ -5,7 +5,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 
-use crate::{fpre::Mac, protocol::Label};
+use crate::data_types::{Label, Mac};
 
 #[derive(Debug, Clone)]
 pub enum Error {

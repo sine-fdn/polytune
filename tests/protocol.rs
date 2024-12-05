@@ -2,7 +2,7 @@ use garble_lang::{
     circuit::{Circuit, Gate},
     compile,
 };
-use parlay::protocol::{simulate_mpc, Error};
+use polytune::protocol::{simulate_mpc, Error};
 
 /// Tests the evaluation of a simple XOR circuit in a two-party computation (2PC) setting.
 ///

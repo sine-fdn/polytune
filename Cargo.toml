@@ -5,7 +5,7 @@ workspace = { members = [
     "examples/sql-integration",
 ] }
 [package]
-name = "parlay"
+name = "polytune"
 version = "0.1.0"
 edition = "2021"
 
