@@ -63,17 +63,21 @@ impl From<channel::Error> for Error {
 struct Commitment(pub(crate) [u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
-fn commit(value: &[u8]) -> Commitment {
-    let result = blake3::hash(value).into();
-    Commitment(result)
+fn commit(value: &[u8]) -> Result<Commitment, Error> {
+    let min_len = RHO / 8 + usize::from(RHO % 8 != 0);
+    if value.len() < min_len {
+        return Err(Error::InvalidLength);
+    }
+    Ok(Commitment(blake3::hash(value).into()))
 }
 
 /// Verifies if a given value matches a previously generated commitment.
-fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
-    if value.is_empty() {
-        return false;
+fn open_commitment(commitment: &Commitment, value: &[u8]) -> Result<bool, Error> {
+    let min_len = RHO / 8 + usize::from(RHO % 8 != 0);
+    if value.len() < min_len {
+        return Err(Error::InvalidLength);
     }
-    blake3::hash(value).as_bytes() == &commitment.0
+    Ok(blake3::hash(value).as_bytes() == &commitment.0)
 }
 
 /// Hashes a Vec<T> using blake3 and returns the resulting hash as `[u128; 2]`.
@@ -167,7 +171,7 @@ pub(crate) async fn shared_rng(
     buf_id[..32].copy_from_slice(&buf);
     // Set the last byte to the party ID to ensure unique commitments.
     buf_id[32] = i as u8;
-    let commitment = commit(&buf_id);
+    let commitment = commit(&buf_id)?;
 
     // Step 1 b) Generate a random 256-bit seed for every other party for the pairwise
     // cointossing and commit to it.
@@ -177,7 +181,7 @@ pub(crate) async fn shared_rng(
     for k in (0..n).filter(|k| *k != i) {
         bufvec_id[k][..32].copy_from_slice(&bufvec[k]);
         bufvec_id[k][32] = i as u8;
-        commitment_vec[k] = commit(&bufvec_id[k]);
+        commitment_vec[k] = commit(&bufvec_id[k])?;
     }
 
     // Step 2) Send the commitments to all parties, first being the one for multi-party cointossing, next
@@ -219,8 +223,8 @@ pub(crate) async fn shared_rng(
     // Step 4) Verify the decommitments and calculate multi-party seed.
     let mut buf_xor = buf;
     for k in (0..n).filter(|k| *k != i) {
-        if !open_commitment(&commitments[k].0, &bufs_id[k].0)
-            || !open_commitment(&commitments[k].1, &bufs_id[k].1)
+        if !open_commitment(&commitments[k].0, &bufs_id[k].0)?
+            || !open_commitment(&commitments[k].1, &bufs_id[k].1)?
         {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
@@ -427,9 +431,9 @@ pub(crate) async fn fashare(
             dm.extend(&mac.0.to_be_bytes());
         }
         d1[r] = d0[r] ^ delta.0;
-        let c0 = commit(&d0[r].to_be_bytes());
-        let c1 = commit(&d1[r].to_be_bytes());
-        let cm = commit(&dm);
+        let c0 = commit(&d0[r].to_be_bytes())?;
+        let c1 = commit(&d1[r].to_be_bytes())?;
+        let cm = commit(&dm)?;
 
         c0_c1_cm.push((c0, c1, cm));
         dmvec.push(dm);
@@ -509,7 +513,7 @@ pub(crate) async fn fashare(
         for k in (0..n).filter(|k| *k != i) {
             let d_bj = &di_bi_k[k][r].to_be_bytes();
             let commitments = &c0_c1_cm_k[k][r];
-            if !open_commitment(&commitments.0, d_bj) && !open_commitment(&commitments.1, d_bj) {
+            if !open_commitment(&commitments.0, d_bj)? && !open_commitment(&commitments.1, d_bj)? {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             if xor_xk_macs[k][r] != di_bi_k[k][r] {
@@ -684,7 +688,7 @@ async fn flaand(
             hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
         hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
-        commhi.push(commit(&hi[ll].to_be_bytes()));
+        commhi.push(commit(&hi[ll].to_be_bytes())?);
     }
     drop(phi);
     drop(ki_xj_phi);
@@ -712,7 +716,7 @@ async fn flaand(
 
     for k in (0..n).filter(|k| *k != i) {
         for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k[k].clone()).enumerate() {
-            if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes()) {
+            if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes())? {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             *xh ^= hi_k;
