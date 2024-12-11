@@ -9,7 +9,7 @@ use tokio::{runtime::Runtime, task::JoinSet};
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
     data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
-    faand::{self, beaver_aand, broadcast_and_verify, bucket_size, fashare, shared_rng},
+    faand::{self, beaver_aand, broadcast_and_verify, bucket_size, fashare, shared_rng_pairwise},
     fpre::fpre,
     garble::{self, decrypt, encrypt, GarblingKey},
 };
@@ -307,18 +307,17 @@ pub async fn mpc(
         random_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
     } else {
         delta = Delta(random());
-        let (multi_shared_rand, shared_two_by_two) = shared_rng(channel, p_own, p_max).await?;
-        shared_rand = multi_shared_rand;
+        let shared_two_by_two = shared_rng_pairwise(channel, p_own, p_max).await?;
 
-        let rand_shares = fashare(
+        let (rand_shares, multi_shared_rand) = fashare(
             (channel, delta),
             p_own,
             p_max,
             secret_bits + 3 * lprime,
-            &mut shared_rand,
             shared_two_by_two,
         )
         .await?;
+        shared_rand = multi_shared_rand;
 
         let (random_shares_vec, xyzbits_vec) = rand_shares.split_at(secret_bits);
         random_shares = random_shares_vec.to_vec();
