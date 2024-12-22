@@ -225,10 +225,11 @@ pub(crate) async fn shared_rng(
 ) -> Result<ChaCha20Rng, Error> {
     // Step 1 Generate a random 256-bit seed for multi-party cointossing and commit to it.
     let buf = random::<[u8; 32]>();
-    let mut buf_id = [0u8; 33];
+    let mut buf_id = [0u8; 34]; // with 16 bits for the id
     buf_id[..32].copy_from_slice(&buf);
-    // Set the last byte to the party ID to ensure unique commitments.
-    buf_id[32] = i as u8;
+    // Set the last two bytes to the party ID to ensure unique commitments.
+    let id_bytes = (i as u16).to_be_bytes();
+    buf_id[32..].copy_from_slice(&id_bytes);
     let commitment = commit(&buf_id)?;
 
     // Step 2) a) Send the commitments to all parties for multi-party cointossing.
@@ -241,14 +242,15 @@ pub(crate) async fn shared_rng(
         send_to(channel, k, "RNG ver", &[buf]).await?;
     }
     let mut bufs = vec![[0; 32]; n];
-    let mut bufs_id = vec![[0; 33]; n];
+    let mut bufs_id = vec![[0; 34]; n];
     for k in (0..n).filter(|k| *k != i) {
         bufs[k] = recv_from::<[u8; 32]>(channel, k, "RNG ver")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
         bufs_id[k][..32].copy_from_slice(&bufs[k]);
-        bufs_id[k][32] = k as u8;
+        let id_bytes = (k as u16).to_be_bytes();
+        bufs_id[k][32..].copy_from_slice(&id_bytes);
     }
 
     // Step 4) Verify the decommitments and calculate multi-party seed.
@@ -278,11 +280,12 @@ pub(crate) async fn shared_rng_pairwise(
     // Step 1 b) Generate a random 256-bit seed for every other party for the pairwise
     // cointossing and commit to it.
     let bufvec: Vec<[u8; 32]> = (0..n).map(|_| random::<[u8; 32]>()).collect();
-    let mut bufvec_id: Vec<[u8; 33]> = vec![[0; 33]; n];
+    let mut bufvec_id: Vec<[u8; 34]> = vec![[0; 34]; n];
     let mut commitment_vec = vec![Commitment([0; 32]); n];
     for k in (0..n).filter(|k| *k != i) {
         bufvec_id[k][..32].copy_from_slice(&bufvec[k]);
-        bufvec_id[k][32] = i as u8;
+        let id_bytes = (i as u16).to_be_bytes();
+        bufvec_id[k][32..].copy_from_slice(&id_bytes);
         commitment_vec[k] = commit(&bufvec_id[k])?;
     }
 
@@ -303,14 +306,15 @@ pub(crate) async fn shared_rng_pairwise(
         send_to(channel, k, "RNG ver", &[bufvec[k]]).await?;
     }
     let mut bufs = vec![[0; 32]; n];
-    let mut bufs_id = vec![[0; 33]; n];
+    let mut bufs_id = vec![[0; 34]; n];
     for k in (0..n).filter(|k| *k != i) {
         bufs[k] = recv_from::<[u8; 32]>(channel, k, "RNG ver")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
         bufs_id[k][..32].copy_from_slice(&bufs[k]);
-        bufs_id[k][32] = k as u8;
+        let id_bytes = (k as u16).to_be_bytes();
+        bufs_id[k][32..].copy_from_slice(&id_bytes);
     }
 
     // Step 4) Verify the decommitments.
