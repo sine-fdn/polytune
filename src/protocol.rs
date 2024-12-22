@@ -9,7 +9,7 @@ use tokio::{runtime::Runtime, task::JoinSet};
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
     data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
-    faand::{self, beaver_aand, broadcast_and_verify, bucket_size, fashare, shared_rng_pairwise},
+    faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
     fpre::fpre,
     garble::{self, decrypt, encrypt, GarblingKey},
 };
@@ -512,20 +512,13 @@ pub async fn mpc(
             }
         }
     }
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        send_to(channel, p, "masked inputs", &masked_inputs).await?;
-    }
-    let mut masked_inputs_from_other_party = vec![vec![None; num_gates]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        masked_inputs_from_other_party[p] =
-            recv_vec_from::<Option<bool>>(channel, p, "masked inputs", num_gates).await?;
-    }
-    broadcast_and_verify(
+    let masked_inputs_from_other_party = broadcast(
         channel,
         p_own,
         p_max,
-        "broadcast masked inputs",
-        &masked_inputs_from_other_party,
+        "masked inputs",
+        &masked_inputs,
+        num_gates,
     )
     .await?;
 
