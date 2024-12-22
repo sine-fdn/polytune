@@ -63,15 +63,13 @@ impl From<channel::Error> for Error {
 struct Commitment(pub(crate) [u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
+/// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
 fn commit(value: &[u8]) -> Result<Commitment, Error> {
-    let min_len = RHO / 8 + usize::from(RHO % 8 != 0);
-    if value.len() < min_len {
-        return Err(Error::InvalidLength);
-    }
     Ok(Commitment(blake3::hash(value).into()))
 }
 
 /// Verifies if a given value matches a previously generated commitment.
+/// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> Result<bool, Error> {
     let min_len = RHO / 8 + usize::from(RHO % 8 != 0);
     if value.len() < min_len {
@@ -153,9 +151,9 @@ pub(crate) async fn broadcast_verification<
     Ok(())
 }
 
-// Implements broadcast with abort based on Goldwasser and Lindell's protocol
-// for all parties at once, where each party sends its vector to all others.
-// The function returns the vector received and verified by broadcast.
+/// Implements broadcast with abort based on Goldwasser and Lindell's protocol
+/// for all parties at once, where each party sends its vector to all others.
+/// The function returns the vector received and verified by broadcast.
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -180,8 +178,8 @@ pub(crate) async fn broadcast<
     Ok(res_vec)
 }
 
-// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
-// the vector is broadcasted, the second element is simply sent to all parties.
+/// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
+/// the vector is broadcasted, the second element is simply sent to all parties.
 pub(crate) async fn broadcast_first_send_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
