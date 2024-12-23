@@ -64,18 +64,14 @@ struct Commitment(pub(crate) [u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
-fn commit(value: &[u8]) -> Result<Commitment, Error> {
-    Ok(Commitment(blake3::hash(value).into()))
+fn commit(value: &[u8]) -> Commitment {
+    Commitment(blake3::hash(value).into())
 }
 
 /// Verifies if a given value matches a previously generated commitment.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
-fn open_commitment(commitment: &Commitment, value: &[u8]) -> Result<bool, Error> {
-    let min_len = RHO / 8 + usize::from(RHO % 8 != 0);
-    if value.len() < min_len {
-        return Err(Error::InvalidLength);
-    }
-    Ok(blake3::hash(value).as_bytes() == &commitment.0)
+fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
+    blake3::hash(value).as_bytes() == &commitment.0
 }
 
 /// Hashes a Vec<T> using blake3 and returns the resulting hash as `[u128; 2]`.
@@ -228,7 +224,7 @@ pub(crate) async fn shared_rng(
     // Set the last two bytes to the party ID to ensure unique commitments.
     let id_bytes = (i as u16).to_be_bytes();
     buf_id[32..].copy_from_slice(&id_bytes);
-    let commitment = commit(&buf_id)?;
+    let commitment = commit(&buf_id);
 
     // Step 2) a) Send the commitments to all parties for multi-party cointossing.
     // Broadcast multi-party commitments.
@@ -254,7 +250,7 @@ pub(crate) async fn shared_rng(
     // Step 4) Verify the decommitments and calculate multi-party seed.
     let mut buf_xor = buf;
     for k in (0..n).filter(|k| *k != i) {
-        if !open_commitment(&commitments[k][0], &bufs_id[k])? {
+        if !open_commitment(&commitments[k][0], &bufs_id[k]) {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
         buf_xor
@@ -284,7 +280,7 @@ pub(crate) async fn shared_rng_pairwise(
         bufvec_id[k][..32].copy_from_slice(&bufvec[k]);
         let id_bytes = (i as u16).to_be_bytes();
         bufvec_id[k][32..].copy_from_slice(&id_bytes);
-        commitment_vec[k] = commit(&bufvec_id[k])?;
+        commitment_vec[k] = commit(&bufvec_id[k]);
     }
 
     // Step 2) Send the commitments to all parties for pairwise cointossing.
@@ -317,7 +313,7 @@ pub(crate) async fn shared_rng_pairwise(
 
     // Step 4) Verify the decommitments.
     for k in (0..n).filter(|k| *k != i) {
-        if !open_commitment(&commitments[k], &bufs_id[k])? {
+        if !open_commitment(&commitments[k], &bufs_id[k]) {
             return Err(Error::CommitmentCouldNotBeOpened);
         }
     }
@@ -500,9 +496,9 @@ pub(crate) async fn fashare(
             dm.extend(&mac.0.to_be_bytes());
         }
         d1[r] = d0[r] ^ delta.0;
-        let c0 = commit(&d0[r].to_be_bytes())?;
-        let c1 = commit(&d1[r].to_be_bytes())?;
-        let cm = commit(&dm)?;
+        let c0 = commit(&d0[r].to_be_bytes());
+        let c1 = commit(&d1[r].to_be_bytes());
+        let cm = commit(&dm);
 
         c0_c1_cm.push((c0, c1, cm));
         dmvec.push(dm);
@@ -557,7 +553,7 @@ pub(crate) async fn fashare(
         for k in (0..n).filter(|k| *k != i) {
             let d_bj = &di_bi_k[k][r].to_be_bytes();
             let commitments = &c0_c1_cm_k[k][r];
-            if !open_commitment(&commitments.0, d_bj)? && !open_commitment(&commitments.1, d_bj)? {
+            if !open_commitment(&commitments.0, d_bj) && !open_commitment(&commitments.1, d_bj) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             if xor_xk_macs[k][r] != di_bi_k[k][r] {
@@ -724,7 +720,7 @@ async fn flaand(
             hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
         hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
-        commhi.push(commit(&hi[ll].to_be_bytes())?);
+        commhi.push(commit(&hi[ll].to_be_bytes()));
     }
     drop(phi);
     drop(ki_xj_phi);
@@ -738,7 +734,7 @@ async fn flaand(
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
     for k in (0..n).filter(|k| *k != i) {
         for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k[k].clone()).enumerate() {
-            if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes())? {
+            if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes()) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             *xh ^= hi_k;
