@@ -42,3 +42,10 @@ To run all the benchmarks you can run:
 ```
 cargo bench
 ```
+
+## Funded by
+
+<p float="left">
+  <img src="/BMBF_Logo.png" height="200" />
+  <img src="/EU_Logo.png" height="200" /> 
+</p>
