@@ -50,6 +50,8 @@ pub enum Error {
     AANDWrongMAC,
     /// Wrong MAC of e.
     BeaverWrongMAC,
+    /// Too short hash for statistical security parameter.
+    InvalidHashLength,
 }
 
 /// Converts a `channel::Error` into a custom `Error` type.
@@ -75,8 +77,12 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
 }
 
-/// Hashes a Vec<T> using blake3 and returns the resulting hash as `[u128; 2]`.
-pub fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<[u128; 2], Error> {
+/// Hashes a Vec<T> using blake3 and returns the resulting hash as `u128`.
+/// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
+/// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
+/// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
+/// to be the case in all real-world usages of our protocol.
+pub fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
     if data.is_empty() {
         return Err(Error::EmptyVector);
     }
@@ -85,14 +91,15 @@ pub fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<[u128; 2], Error> {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&serialized_data);
 
-    let binding = hasher.finalize();
-    let hash_bytes = binding.as_bytes();
+    let mut binding = hasher.finalize_xof();
+    if RHO > 64 {
+        return Err(Error::InvalidHashLength);
+    }
+    let mut buf = [0u8; 16];
+    binding.fill(&mut buf);
+    let hash = u128::from_le_bytes(buf);
 
-    let (left, right) = hash_bytes.split_at(16);
-    let hash1 = u128::from_le_bytes(left.try_into().map_err(|_| Error::InvalidLength)?);
-    let hash2 = u128::from_le_bytes(right.try_into().map_err(|_| Error::InvalidLength)?);
-
-    Ok([hash1, hash2])
+    Ok(hash)
 }
 
 /// Implements the verification step of broadcast with abort based on Goldwasser and Lindell's protocol.
@@ -111,7 +118,7 @@ pub(crate) async fn broadcast_verification<
     if vec.is_empty() {
         return Err(Error::EmptyVector);
     }
-    let mut hash_vecs: Vec<[u128; 2]> = vec![[0; 2]; n];
+    let mut hash_vecs: Vec<u128> = vec![0; n];
     for k in (0..n).filter(|k| *k != i) {
         if let Ok(hash) = hash_vec(&vec[k]) {
             hash_vecs[k] = hash;
@@ -122,7 +129,7 @@ pub(crate) async fn broadcast_verification<
     // Step 1: Send the vector to all parties that does not included its already sent value
     // (for index i) and the value it received from the party it is sending to (index k).
     for k in (0..n).filter(|k| *k != i) {
-        let mut modified_vec: Vec<Option<[u128; 2]>> = vec![None; n];
+        let mut modified_vec: Vec<Option<u128>> = vec![None; n];
         for j in (0..n).filter(|j| *j != i && *j != k) {
             if vec[j].is_empty() {
                 return Err(Error::EmptyVector);
@@ -135,7 +142,7 @@ pub(crate) async fn broadcast_verification<
     // Step 2: Receive and verify the vectors from all parties, that for index j the value is
     // the same for all parties.
     for k in (0..n).filter(|k| *k != i) {
-        let vec_k: Vec<Option<[u128; 2]>> = recv_vec_from(channel, k, phase, n).await?;
+        let vec_k: Vec<Option<u128>> = recv_vec_from(channel, k, phase, n).await?;
         for j in (0..n).filter(|j| *j != i && *j != k) {
             if vec_k[j].is_none() {
                 return Err(Error::EmptyVector);
@@ -625,14 +632,22 @@ async fn fhaand(
 
 /// This function takes a 128-bit unsigned integer (`u128`) as input and produces a 128-bit hash value.
 ///
-/// We hash into 256 bits and then xor the first 128 bits and the second 128 bits. In our case this
-/// works as the 256-bit hashes need to cancel out when xored together, and this simplifies dealing
-/// with u128s instead while still cancelling the hashes out if correct.
+/// We use the BLAKE3 cryptographic hash function to hash the input value and return the resulting hash.
+/// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
+/// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
+/// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
+/// to be the case in all real-world usages of our protocol.
 fn hash128(input: u128) -> Result<u128, Error> {
-    let res: [u8; 32] = blake3::hash(&input.to_le_bytes()).into();
-    let value1 = u128::from_le_bytes(res[0..16].try_into().map_err(|_| Error::InvalidLength)?);
-    let value2 = u128::from_le_bytes(res[16..32].try_into().map_err(|_| Error::InvalidLength)?);
-    Ok(value1 ^ value2)
+    use blake3::Hasher;
+    let mut hasher = Hasher::new();
+    hasher.update(&input.to_le_bytes());
+    let mut xof = hasher.finalize_xof();
+    if RHO > 64 {
+        return Err(Error::InvalidHashLength);
+    }
+    let mut buf = [0u8; 16];
+    xof.fill(&mut buf);
+    Ok(u128::from_le_bytes(buf))
 }
 
 /// Protocol Pi_LaAND that performs F_LaAND from the paper
