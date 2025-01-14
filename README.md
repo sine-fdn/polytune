@@ -45,4 +45,4 @@ cargo bench
 
 ## Funded by
 
-<img src="BMBF_Logo.svg" width=300>
+<img src="BMBF_Logo.png" width=300>
