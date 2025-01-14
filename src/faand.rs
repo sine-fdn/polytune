@@ -78,6 +78,7 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
 }
 
 /// Hashes a Vec<T> using blake3 and returns the resulting hash as `u128`.
+/// 
 /// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
@@ -356,8 +357,8 @@ async fn fabitn(
     mut shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
 ) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
     // Step 1) Pick random bit-string x of length lprime.
-    let two_rho = 2 * RHO;
-    let lprime = l + two_rho;
+    let three_rho = 3 * RHO;
+    let lprime = l + three_rho;
 
     let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
 
@@ -394,13 +395,13 @@ async fn fabitn(
     // Step 3) Verification of MACs and keys.
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
     let mut multi_shared_rand = shared_rng(channel, i, n).await?;
-    let r: Vec<Vec<bool>> = (0..two_rho)
+    let r: Vec<Vec<bool>> = (0..three_rho)
         .map(|_| (0..lprime).map(|_| multi_shared_rand.gen()).collect())
         .collect();
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
     // We batch messages and send xjmac with xj as well, as from Step 3 d).
-    let mut xj = Vec::with_capacity(two_rho);
+    let mut xj = Vec::with_capacity(three_rho);
     for rbits in &r {
         let mut xm = false;
         for (xi, ri) in x.iter().zip(rbits) {
@@ -424,7 +425,7 @@ async fn fabitn(
     }
 
     let xj_xjmac_k =
-        broadcast_first_send_second(channel, i, n, "fabitn", &xj_xjmac, two_rho).await?;
+        broadcast_first_send_second(channel, i, n, "fabitn", &xj_xjmac, three_rho).await?;
 
     // Step 3 c) Compute keys.
     for (j, rbits) in r.iter().enumerate() {
