@@ -4,13 +4,14 @@ use std::vec;
 use blake3;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use scuttlebutt::Block;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel},
     data_types::{Auth, Delta, Key, Mac, Share},
-    ot::{kos_ot_receiver, kos_ot_sender, u128_to_block},
+    ot::{kos_ot_receiver, kos_ot_sender},
 };
 
 /// The statistical security parameter `RHO` used for cryptographic operations.
@@ -357,7 +358,7 @@ async fn fabitn(
     let mut keys = vec![vec![0; lprime]; n];
     let mut macs = vec![vec![0; lprime]; n];
 
-    let deltas = vec![u128_to_block(delta.0); lprime];
+    let deltas = vec![Block::from(delta.0.to_be_bytes()); lprime];
 
     // Step 2: Use the shared RNGs for key and MAC generation
     if !(shared_two_by_two.len() == n && shared_two_by_two.iter().all(|row| row.len() == n)) {
