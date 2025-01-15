@@ -200,8 +200,8 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
                 info!("{p}::{k}: {v:?}");
             }
         }
-        compile_with_constants(&program, locked.consts.clone())
-            .map_err(|e| anyhow!(e.prettify(&program)))?
+        compile_with_constants(program, locked.consts.clone())
+            .map_err(|e| anyhow!(e.prettify(program)))?
     };
 
     info!(
@@ -305,7 +305,10 @@ async fn launch(State(state): State<MpcState>, Json(policy): Json<Policy>) {
         Ok(Some(output)) => {
             info!("MPC Output: {output}");
             if let Some(endpoint) = policy.output {
-                todo!("Send output to {endpoint}");
+                info!("Sending {output} to {endpoint}");
+                if let Err(e) = client.post(&endpoint).json(&output).send().await {
+                    error!("Could not send output to {endpoint}: {e}");
+                }
             }
         }
         Ok(None) => {}

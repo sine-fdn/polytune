@@ -47,7 +47,7 @@ fn simulate() {
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line.contains("MPC Output: 1 rows") {
+            if line.contains("Sending [(1u16, 3u16)] to http://localhost:8002/output") {
                 return s.send(()).unwrap();
             }
         }
