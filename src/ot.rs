@@ -16,17 +16,6 @@ pub fn block_to_u128(inp: Block) -> u128 {
     value
 }
 
-/// Transform u128 to Block
-pub fn u128_to_block(inp: u128) -> Block {
-    let mut array = [0; 16];
-    let mut value = inp;
-    for byte in array.iter_mut().rev() {
-        *byte = (value & 0xff) as u8;
-        value >>= 8;
-    }
-    Block::from(array)
-}
-
 pub(crate) async fn kos_ot_sender(
     channel: &mut impl Channel,
     deltas: &[Block],
