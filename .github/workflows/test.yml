@@ -31,3 +31,5 @@ jobs:
         working-directory: ./examples/iroh-p2p-channels
       - run: docker compose -f docker-compose.yml up -d && cargo build --release && cargo test --release -- --nocapture
         working-directory: ./examples/sql-integration
+      - run: cargo build --release && cargo test --release -- --nocapture
+        working-directory: ./examples/api-integration

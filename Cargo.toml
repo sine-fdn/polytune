@@ -3,6 +3,7 @@ workspace = { members = [
     "examples/http-single-server-channels",
     "examples/iroh-p2p-channels",
     "examples/sql-integration",
+    "examples/api-integration",
 ] }
 [package]
 name = "polytune"
