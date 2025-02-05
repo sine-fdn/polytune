@@ -1,10 +1,44 @@
+use std::str::FromStr;
+
 use polytune::{
     channel::Channel,
-    garble_lang::compile,
+    garble_lang::{compile, literal::Literal, token::UnsignedNumType},
     protocol::{mpc, Preprocessor},
 };
 use reqwest::StatusCode;
 use url::Url;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub async fn compute(
+    url: String,
+    party: usize,
+    participants: usize,
+    input: u32,
+) -> Result<u32, String> {
+    let url = Url::from_str(&url).map_err(|e| format!("Invalid URL {url}: {e}"))?;
+    let code = include_str!("../.add.garble.rs");
+    let prg = compile(&code).map_err(|e| e.prettify(&code))?;
+    let input_literal = Literal::NumUnsigned(input as u64, UnsignedNumType::U32);
+    let input = prg
+        .literal_arg(party, input_literal)
+        .map_err(|e| format!("Invalid u32 input: {e}"))?
+        .as_bits();
+    let fpre = Preprocessor::Untrusted;
+    let p_out: Vec<_> = (0..participants).collect();
+    let mut channel = HttpChannel::new(url, party).await?;
+    let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, party, &p_out)
+        .await
+        .map_err(|e| format!("MPC computation failed: {e}"))?;
+    let output = prg
+        .parse_output(&output)
+        .map_err(|e| format!("Invalid output bits: {e}"))?;
+    if let Literal::NumUnsigned(n, UnsignedNumType::U32) = output {
+        Ok(n as u32)
+    } else {
+        Err(format!("Expected a u32 output, but found {output}"))
+    }
+}
 
 struct HttpChannel {
     url: Url,
