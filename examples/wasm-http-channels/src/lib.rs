@@ -1,4 +1,3 @@
-use anyhow::{anyhow, Error};
 use polytune::{
     channel::Channel,
     garble_lang::compile,
@@ -13,14 +12,14 @@ struct HttpChannel {
 }
 
 impl HttpChannel {
-    async fn new(url: Url, party: usize) -> Result<Self, Error> {
+    async fn new(url: Url, party: usize) -> Result<Self, String> {
         Ok(Self { url, party })
     }
 }
 
 impl Channel for HttpChannel {
-    type SendError = anyhow::Error;
-    type RecvError = anyhow::Error;
+    type SendError = String;
+    type RecvError = String;
 
     async fn send_bytes_to(
         &mut self,
@@ -42,10 +41,10 @@ impl Channel for HttpChannel {
                 StatusCode::NOT_FOUND => {
                     println!("Could not reach party {p} at {url}...");
                 }
-                status => anyhow::bail!("Unexpected status code: {status}"),
+                status => return Err(format!("Unexpected status code: {status}")),
             }
         }
-        anyhow::bail!("Could not reach {url}")
+        return Err(format!("Could not reach {url}"));
     }
 
     async fn recv_bytes_from(
@@ -62,15 +61,16 @@ impl Channel for HttpChannel {
                 continue;
             };
             match resp.status() {
-                StatusCode::OK => {
-                    return Ok(resp.bytes().await?.into());
-                }
+                StatusCode::OK => match resp.bytes().await {
+                    Ok(bytes) => return Ok(bytes.into()),
+                    Err(e) => return Err(format!("Expected body to be bytes, {e}")),
+                },
                 StatusCode::NOT_FOUND => {
                     println!("Could not reach party {p} at {url}...");
                 }
-                status => anyhow::bail!("Unexpected status code: {status}"),
+                status => return Err(format!("Unexpected status code: {status}")),
             }
         }
-        anyhow::bail!("Could not reach {url}")
+        return Err(format!("Could not reach {url}"));
     }
 }

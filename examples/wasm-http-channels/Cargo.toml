@@ -8,6 +8,10 @@ name = "broker"
 path = "src/main.rs"
 required-features = ["bin"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+bench = false
+
 [features]
 bin = ["axum", "tokio", "tower-http", "tracing", "tracing-subscriber"]
 
@@ -27,10 +31,10 @@ tracing-subscriber = { version = "0.3.18", optional = true }
 #
 # for the client:
 #
-anyhow = "1.0.95"
 polytune = { path = "../../", version = "0.1.0" }
 reqwest = "0.12.12"
 url = "2.5.4"
+getrandom = { version = "0.2", features = ["js"] }
 #
 # to make working on the server a bit less tedious:
 #

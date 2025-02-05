@@ -19,7 +19,7 @@ garble_lang = { version = "0.4.0", features = ["serde"] }
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 serde = { version = "1.0.195", features = ["derive"] }
-tokio = { version = "1.35.1", features = ["full"] }
+tokio = { version = "1.35.1", features = ["sync", "macros", "rt", "time"] }
 trait-variant = "0.1.1"
 async-trait = "0.1.77"
 smallvec = { version = "1.13.2", features = ["serde"] }
