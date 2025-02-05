@@ -6,47 +6,10 @@
       rel="stylesheet"
     />
     <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css"
-      integrity="sha512-uf06llspW44/LZpHzHT6qBOIVODjWtv4MxCricRxkzvopAlSWnTf6hpZTFxuuZcuNE9CBQhqE0Seu1CoRk84nQ=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    />
-    <link
       href="https://uploads-ssl.webflow.com/6262a2a7735ff102899431ef/6262a2a7735ff1a94d943269_SINE_Favicon.png"
       rel="shortcut icon"
       type="image/x-icon"
     />
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"
-      integrity="sha512-xwrAU5yhWwdTvvmMNheFn9IyuDbl/Kyghz2J3wQRDR8tyNmT8ZIYOd0V3iPYY/g4XdNPy0n/g0NvqGu9f0fPJQ=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/mode/simple.min.js"
-      integrity="sha512-9YoNYsegWvbA5aiSshQ2BNW2FAq3CQVLqpg2r6urw9Tfl1GklM9PNgrMRVz8fhEtjM+uZfO/1X3RURkMcil8wg=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/rust/rust.min.js"
-      integrity="sha512-g3Nhw36S0p4ZJQcky87D5M+vZbFvLrgsHWYltUy5IW0zKbvi8GlPRjJSo2CyUyQiU01Ier7u+rBABDs3BawKyQ=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/nord.min.css"
-      integrity="sha512-sPc4jmw78pt6HyMiyrEt3QgURcNRk091l3dZ9M309x4wM2QwnCI7bUtsLnnWXqwBMECE5YZTqV6qCDwmC2FMVA=="
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    />
-    <style>
-      .CodeMirror {
-        height: fit-content;
-      }
-    </style>
   </head>
 
   <body class="bg-gray-300">
@@ -74,33 +37,14 @@
               >
               using SINE's
               <a
-                href="https://github.com/sine-fdn/tandem"
+                href="https://github.com/sine-fdn/polytune"
                 style="
                   text-decoration: underline #fef08a;
                   text-decoration-thickness: 4px;
                 "
-                >Tandem engine</a
+                >Polytune Engine</a
               >.
             </h1>
-          </div>
-          <div class="md:flex mb-4">
-            <div
-              class="playground-source-code-container text-sm shadow appearance-none border rounded w-full text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            >
-              <textarea
-                class="playground-source-code"
-                name="source-code"
-                rows="8"
-                cols="100"
-              >
-      // All programs must be written in Garble.
-      // See https://github.com/sine-fdn/garble-lang
-      
-      pub fn main(a: i32, b: i32) -> i32 {
-          a + b
-      }</textarea
-              >
-            </div>
           </div>
           <div class="mb-4">
             <fieldset
@@ -114,7 +58,6 @@
                   name="serverUrlRadioOptions"
                   id="radioRemote"
                   value="https://echo-server.sine.dev"
-                  checked
                 />
                 <label
                   class="form-check-label inline-block text-gray-800"
@@ -128,35 +71,41 @@
                   type="radio"
                   name="serverUrlRadioOptions"
                   id="radioLocal"
-                  value="http://localhost:8000"
+                  value="http://127.0.0.1:8000"
+                  checked
                 />
                 <label
                   class="form-check-label inline-block text-gray-800"
                   for="inlineRadio10"
-                  >http://localhost:8000</label
+                  >http://127.0.0.1:8000</label
                 >
               </div>
             </fieldset>
           </div>
           <div class="mb-4">
             <input
-              class="playground-function-name shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              class="playground-input-p0 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
-              placeholder="Function to Execute"
+              placeholder="Private Input (Party 0)"
+              value="3"
             />
           </div>
+
           <div class="mb-4">
             <input
-              class="playground-plaintext-metadata shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              class="playground-input-p1 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
-              placeholder="Metadata (Plaintext)"
+              placeholder="Private Input (Party 1)"
+              value="5"
             />
           </div>
+
           <div class="mb-4">
             <input
-              class="playground-private-input shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              class="playground-input-p2 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
-              placeholder="Input (Kept Private)"
+              placeholder="Private Input (Party 2)"
+              value="7"
             />
           </div>
           <div class="md:flex md:items-center">
@@ -210,28 +159,11 @@
       </div>
       <!-- Note the usage of `type=module` here as this is an ES6 module -->
       <script type="module">
-        import init, {
-          MpcProgram,
-          MpcData,
-          compute,
-        } from "./pkg/tandem_http_client.js";
+        import init, { compute } from "./pkg/polytune_wasm_http_channels.js";
 
-        const code_mirror_config = {
-          lineNumbers: true,
-          mode: "rust",
-          theme: "nord",
-        };
-
-        const source_code_area = document.getElementsByClassName(
-          "playground-source-code"
-        )[0];
-        const editor = CodeMirror.fromTextArea(
-          source_code_area,
-          code_mirror_config
-        );
         const cell = document.getElementsByClassName("playground-cell")[0];
 
-        const addCellListeners = (cell, editor) => {
+        const addCellListeners = (cell) => {
           const spinner = cell.getElementsByClassName("playground-spinner")[0];
           const btn_compute = cell.getElementsByClassName(
             "playground-btn-compute"
@@ -250,16 +182,12 @@
                 url = radio.value;
               }
             }
-            const source_code = editor.getValue();
-            const function_name = cell.getElementsByClassName(
-              "playground-function-name"
-            )[0].value;
-            const my_input = cell.getElementsByClassName(
-              "playground-private-input"
-            )[0].value;
-            const plaintext_metadata = cell.getElementsByClassName(
-              "playground-plaintext-metadata"
-            )[0].value;
+            const input0 = cell.getElementsByClassName("playground-input-p0")[0]
+              .value;
+            const input1 = cell.getElementsByClassName("playground-input-p1")[0]
+              .value;
+            const input2 = cell.getElementsByClassName("playground-input-p2")[0]
+              .value;
             spinner.classList.remove("hidden");
             btn_compute.classList.add("cursor-not-allowed");
             btn_compute.classList.add("opacity-50");
@@ -270,23 +198,24 @@
             output.classList.add("hidden");
             try {
               const t0 = performance.now();
-
-              const mpc_program = new MpcProgram(source_code, function_name);
-              const info_about_gates = mpc_program.report_gates();
+              compute(url, 0, input0)
+                .then((result) => {
+                  console.log("Party 0, success:", result);
+                })
+                .catch((error) => {
+                  console.error("Party 0, error:", error);
+                });
+              compute(url, 1, input1)
+                .then((result) => {
+                  console.log("Party 1, success:", result);
+                })
+                .catch((error) => {
+                  console.error("Party 1, error:", error);
+                });
+              const result = await compute(url, 2, input2);
               const t1 = performance.now();
 
-              const mpc_input = MpcData.from_string(mpc_program, my_input);
-              const result = (
-                await compute(url, plaintext_metadata, mpc_program, mpc_input)
-              ).to_literal_string();
-              const t2 = performance.now();
-
-              console.log(
-                `Compilation: ${((t1 - t0) / 1000).toFixed(2)}s, MPC: ${(
-                  (t2 - t1) /
-                  1000
-                ).toFixed(2)}s, for ${info_about_gates}`
-              );
+              console.log(`MPC: ${((t1 - t0) / 1000).toFixed(2)}s`);
 
               output.innerHTML = result;
               output.classList.remove("border-red-500");
@@ -311,7 +240,7 @@
           console.log(
             "Ready for running Secure Multi-Party Computation from WASM..."
           );
-          addCellListeners(cell, editor);
+          addCellListeners(cell);
         });
       </script>
     </div>

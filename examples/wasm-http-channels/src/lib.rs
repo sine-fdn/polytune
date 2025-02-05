@@ -10,12 +10,7 @@ use url::Url;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub async fn compute(
-    url: String,
-    party: usize,
-    participants: usize,
-    input: u32,
-) -> Result<u32, String> {
+pub async fn compute(url: String, party: usize, input: u32) -> Result<u32, String> {
     let url = Url::from_str(&url).map_err(|e| format!("Invalid URL {url}: {e}"))?;
     let code = include_str!("../.add.garble.rs");
     let prg = compile(&code).map_err(|e| e.prettify(&code))?;
@@ -25,7 +20,7 @@ pub async fn compute(
         .map_err(|e| format!("Invalid u32 input: {e}"))?
         .as_bits();
     let fpre = Preprocessor::Untrusted;
-    let p_out: Vec<_> = (0..participants).collect();
+    let p_out = vec![0, 1, 2];
     let mut channel = HttpChannel::new(url, party).await?;
     let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, party, &p_out)
         .await
