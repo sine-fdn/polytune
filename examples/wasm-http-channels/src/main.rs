@@ -13,8 +13,9 @@ use std::{
     net::SocketAddr,
     result::Result,
     sync::Arc,
+    time::Duration,
 };
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::sleep};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 type Msgs = Arc<Mutex<HashMap<u32, HashMap<u32, VecDeque<Vec<u8>>>>>>;
@@ -76,15 +77,21 @@ async fn recv(
     State(msgs): State<Msgs>,
     Path((to, from)): Path<(u32, u32)>,
 ) -> Result<Vec<u8>, StatusCode> {
-    let mut msgs = msgs.lock().await;
-    let Some(msgs) = msgs.get_mut(&from).and_then(|msgs| msgs.get_mut(&to)) else {
-        tracing::error!("No queue from {from} to {to} (recv/{to}/{from})");
-        return Err(StatusCode::NOT_FOUND);
-    };
-    let Some(msg) = msgs.pop_front() else {
-        tracing::error!("No message in queue from {from} to {to} (recv/{to}/{from})");
-        return Err(StatusCode::NOT_FOUND);
-    };
-    tracing::debug!("Responding with message from {from} to {to} (recv/{to}/{from})");
-    Ok(msg)
+    for _ in 0..20 {
+        let mut msgs = msgs.lock().await;
+        let Some(msgs) = msgs.get_mut(&from).and_then(|msgs| msgs.get_mut(&to)) else {
+            tracing::warn!("No queue from {from} to {to} (recv/{to}/{from})");
+            sleep(Duration::from_millis(50)).await;
+            continue;
+        };
+        let Some(msg) = msgs.pop_front() else {
+            tracing::warn!("No message in queue from {from} to {to} (recv/{to}/{from})");
+            sleep(Duration::from_millis(50)).await;
+            continue;
+        };
+        tracing::debug!("Responding with message from {from} to {to} (recv/{to}/{from})");
+        return Ok(msg);
+    }
+    tracing::error!("No message in queue from {from} to {to} (recv/{to}/{from})");
+    return Err(StatusCode::NOT_FOUND);
 }
