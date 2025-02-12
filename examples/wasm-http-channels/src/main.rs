@@ -2,9 +2,11 @@ use anyhow::Error;
 use axum::{
     body::Bytes,
     extract::{Path, State},
+    http::{HeaderValue, Method},
     routing::post,
     Router,
 };
+use http::header;
 use reqwest::StatusCode;
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,18 +15,44 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tower_http::trace::TraceLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 type Msgs = Arc<Mutex<HashMap<u32, HashMap<u32, VecDeque<Vec<u8>>>>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
+
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "http://localhost:9000".parse::<HeaderValue>().unwrap(),
+            "http://127.0.0.1:9000".parse::<HeaderValue>().unwrap(),
+            "http://[::1]:9000".parse::<HeaderValue>().unwrap(),
+            "http://[::]:9000".parse::<HeaderValue>().unwrap(),
+        ])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::HEAD,
+            Method::PATCH,
+        ])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::CONTENT_TYPE,
+            header::CONTENT_LENGTH,
+        ])
+        .allow_credentials(true);
+
     let state: Msgs = Arc::new(Mutex::new(HashMap::new()));
     let app = Router::new()
         .route("/send/:from/:to", post(send))
         .route("/recv/:from/:to", post(recv))
         .with_state(state)
+        .layer(cors)
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
@@ -41,18 +69,22 @@ async fn send(State(msgs): State<Msgs>, Path((from, to)): Path<(u32, u32)>, body
         .entry(to)
         .or_default()
         .push_back(body.to_vec());
+    tracing::debug!("Stored message from {from} to {to} (/send/{from}/{to})");
 }
 
 async fn recv(
     State(msgs): State<Msgs>,
-    Path((from, to)): Path<(u32, u32)>,
+    Path((to, from)): Path<(u32, u32)>,
 ) -> Result<Vec<u8>, StatusCode> {
     let mut msgs = msgs.lock().await;
     let Some(msgs) = msgs.get_mut(&from).and_then(|msgs| msgs.get_mut(&to)) else {
-        return Err(StatusCode::BAD_REQUEST);
+        tracing::error!("No queue from {from} to {to} (recv/{to}/{from})");
+        return Err(StatusCode::NOT_FOUND);
     };
     let Some(msg) = msgs.pop_front() else {
-        return Err(StatusCode::BAD_REQUEST);
+        tracing::error!("No message in queue from {from} to {to} (recv/{to}/{from})");
+        return Err(StatusCode::NOT_FOUND);
     };
+    tracing::debug!("Responding with message from {from} to {to} (recv/{to}/{from})");
     Ok(msg)
 }
