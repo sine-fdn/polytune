@@ -118,11 +118,11 @@
               </button>
             </div>
             <div
-              class="playground-output-div hidden md:flex md:items-center"
+              class="playground-output-div md:flex md:items-center"
               class="mb-4"
             >
               <svg
-                class="playground-spinner hidden animate-spin h-10 w-10 text-blue-500"
+                class="playground-spinner hidden animate-spin mt-2 h-8 w-8 text-blue-500"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
@@ -167,9 +167,6 @@
           const spinner = cell.getElementsByClassName("playground-spinner")[0];
           const btn_compute = cell.getElementsByClassName(
             "playground-btn-compute"
-          )[0];
-          const output_div = cell.getElementsByClassName(
-            "playground-output-div"
           )[0];
           btn_compute.addEventListener("click", async function () {
             let radioButtons = document.getElementsByName(
@@ -227,7 +224,6 @@
               output.classList.add("text-red-500");
             } finally {
               output.classList.remove("hidden");
-              output_div.classList.remove("hidden");
               spinner.classList.add("hidden");
               btn_compute.classList.remove("cursor-not-allowed");
               btn_compute.classList.remove("opacity-50");

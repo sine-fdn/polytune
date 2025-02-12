@@ -65,7 +65,6 @@ impl Channel for HttpChannel {
             let Ok(resp) = client.post(&url).body(msg.clone()).send().await else {
                 println!("Could not reach party {p} at {url}...");
                 TimeoutFuture::new(100).await;
-                //tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             };
             match resp.status() {
@@ -73,7 +72,6 @@ impl Channel for HttpChannel {
                 status => eprintln!("Unexpected status code: {status}"),
             }
             TimeoutFuture::new(100).await;
-            //tokio::time::sleep(Duration::from_millis(100)).await;
         }
         return Err(format!("Could not reach {url}"));
     }
@@ -90,7 +88,6 @@ impl Channel for HttpChannel {
             let Ok(resp) = client.post(&url).send().await else {
                 println!("Could not reach party {p} at {url}...");
                 TimeoutFuture::new(100).await;
-                //tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             };
             match resp.status() {
@@ -101,7 +98,6 @@ impl Channel for HttpChannel {
                 status => eprintln!("Unexpected status code: {status}"),
             }
             TimeoutFuture::new(100).await;
-            //tokio::time::sleep(Duration::from_millis(100)).await;
         }
         return Err(format!("Could not reach {url}"));
     }
