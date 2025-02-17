@@ -1,7 +1,7 @@
 use anyhow::Error;
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::{HeaderValue, Method},
     routing::post,
     Router,
@@ -54,6 +54,7 @@ async fn main() -> Result<(), Error> {
         .route("/recv/:from/:to", post(recv))
         .with_state(state)
         .layer(cors)
+        .layer(DefaultBodyLimit::max(1000 * 1024 * 1024))
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use gloo_timers::future::TimeoutFuture;
 use polytune::{
     channel::Channel,
-    garble_lang::{compile, literal::Literal, token::UnsignedNumType},
+    garble_lang::{compile, literal::Literal, token::SignedNumType},
     protocol::{mpc, Preprocessor},
 };
 use reqwest::StatusCode;
@@ -11,14 +11,17 @@ use url::Url;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub async fn compute(url: String, party: usize, input: u32) -> Result<u32, String> {
+pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Result<String, String> {
     let url = Url::from_str(&url).map_err(|e| format!("Invalid URL {url}: {e}"))?;
-    let code = include_str!("../.add.garble.rs");
+    let code = include_str!("../.benchmark.garble.rs").replace(
+        "let range_in_percent = 10;",
+        &format!("let range_in_percent = {range};"),
+    );
     let prg = compile(&code).map_err(|e| e.prettify(&code))?;
-    let input_literal = Literal::NumUnsigned(input as u64, UnsignedNumType::U32);
+    let input_literal = Literal::NumSigned(input as i64, SignedNumType::I32);
     let input = prg
         .literal_arg(party, input_literal)
-        .map_err(|e| format!("Invalid u32 input: {e}"))?
+        .map_err(|e| format!("Invalid i32 input: {e}"))?
         .as_bits();
     let fpre = Preprocessor::Untrusted;
     let p_out = vec![0, 1, 2];
@@ -29,11 +32,7 @@ pub async fn compute(url: String, party: usize, input: u32) -> Result<u32, Strin
     let output = prg
         .parse_output(&output)
         .map_err(|e| format!("Invalid output bits: {e}"))?;
-    if let Literal::NumUnsigned(n, UnsignedNumType::U32) = output {
-        Ok(n as u32)
-    } else {
-        Err(format!("Expected a u32 output, but found {output}"))
-    }
+    Ok(output.to_string())
 }
 
 struct HttpChannel {

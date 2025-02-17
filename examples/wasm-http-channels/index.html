@@ -87,7 +87,7 @@
               class="playground-input-p0 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
               placeholder="Private Input (Party 0)"
-              value="3"
+              value="85"
             />
           </div>
 
@@ -96,7 +96,7 @@
               class="playground-input-p1 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
               placeholder="Private Input (Party 1)"
-              value="5"
+              value="100"
             />
           </div>
 
@@ -105,7 +105,7 @@
               class="playground-input-p2 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               type="text"
               placeholder="Private Input (Party 2)"
-              value="7"
+              value="115"
             />
           </div>
           <div class="md:flex md:items-center">
@@ -195,21 +195,22 @@
             output.classList.add("hidden");
             try {
               const t0 = performance.now();
-              compute(url, 0, input0)
+              const range_in_percent = 10;
+              compute(url, 0, input0, range_in_percent)
                 .then((result) => {
                   console.log("Party 0, success:", result);
                 })
                 .catch((error) => {
                   console.error("Party 0, error:", error);
                 });
-              compute(url, 1, input1)
+              compute(url, 1, input1, range_in_percent)
                 .then((result) => {
                   console.log("Party 1, success:", result);
                 })
                 .catch((error) => {
                   console.error("Party 1, error:", error);
                 });
-              const result = await compute(url, 2, input2);
+              const result = await compute(url, 2, input2, range_in_percent);
               const t1 = performance.now();
 
               console.log(`MPC: ${((t1 - t0) / 1000).toFixed(2)}s`);
