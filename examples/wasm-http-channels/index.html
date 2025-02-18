@@ -47,41 +47,24 @@
             </h1>
           </div>
           <div class="mb-4">
-            <fieldset
-              class="flex border shadow appearance-none rounded w-full py-2 px-3 text-gray-700 leading-tight"
-            >
-              <div class="text-gray-500">MPC Server</div>
-              <div class="form-check form-check-inline px-2">
-                <input
-                  class="form-check-input rounded-full h-4 w-4 border border-gray-300 bg-white checked:bg-blue-600 checked:border-blue-600 focus:outline-none transition duration-200 mt-1 align-top bg-no-repeat bg-center bg-contain float-left mr-2 cursor-pointer"
-                  type="radio"
-                  name="serverUrlRadioOptions"
-                  id="radioRemote"
-                  value="https://echo-server.sine.dev"
-                />
-                <label
-                  class="form-check-label inline-block text-gray-800"
-                  for="inlineRadio10"
-                  >https://echo-server.sine.dev</label
-                >
-              </div>
-              <div class="form-check form-check-inline">
-                <input
-                  class="form-check-input rounded-full h-4 w-4 border border-gray-300 bg-white checked:bg-blue-600 checked:border-blue-600 focus:outline-none transition duration-200 mt-1 align-top bg-no-repeat bg-center bg-contain float-left mr-2 cursor-pointer"
-                  type="radio"
-                  name="serverUrlRadioOptions"
-                  id="radioLocal"
-                  value="http://127.0.0.1:8000"
-                  checked
-                />
-                <label
-                  class="form-check-label inline-block text-gray-800"
-                  for="inlineRadio10"
-                  >http://127.0.0.1:8000</label
-                >
-              </div>
-            </fieldset>
+            <input
+              class="playground-server-url shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Message Broker Server URL"
+              value="http://127.0.0.1:8000"
+            />
           </div>
+          <div class="mb-4">
+            <input
+              class="playground-input-range shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Benchmark Range in %"
+              value="20"
+            />
+          </div>
+
+          <hr class="m-8" />
+
           <div class="mb-4">
             <input
               class="playground-input-p0 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -169,16 +152,12 @@
             "playground-btn-compute"
           )[0];
           btn_compute.addEventListener("click", async function () {
-            let radioButtons = document.getElementsByName(
-              "serverUrlRadioOptions"
-            );
-
-            let url = "";
-            for (let radio of radioButtons) {
-              if (radio.checked) {
-                url = radio.value;
-              }
-            }
+            const endpoint = cell.getElementsByClassName(
+              "playground-server-url"
+            )[0].value;
+            const range_in_percent = cell.getElementsByClassName(
+              "playground-input-range"
+            )[0].value;
             const input0 = cell.getElementsByClassName("playground-input-p0")[0]
               .value;
             const input1 = cell.getElementsByClassName("playground-input-p1")[0]
@@ -193,9 +172,11 @@
             let is_success = false;
             const output = cell.getElementsByClassName("playground-output")[0];
             output.classList.add("hidden");
+
+            const session_id = Math.floor(Math.random() * (1 << 60));
+            const url = `${endpoint}/session/sesh-${session_id}/`;
             try {
               const t0 = performance.now();
-              const range_in_percent = 10;
               compute(url, 0, input0, range_in_percent)
                 .then((result) => {
                   console.log("Party 0, success:", result);

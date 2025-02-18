@@ -18,7 +18,7 @@ use std::{
 use tokio::{sync::Mutex, time::sleep};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-type Msgs = Arc<Mutex<HashMap<u32, HashMap<u32, VecDeque<Vec<u8>>>>>>;
+type Msgs = Arc<Mutex<HashMap<String, HashMap<u32, HashMap<u32, VecDeque<Vec<u8>>>>>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -50,8 +50,8 @@ async fn main() -> Result<(), Error> {
 
     let state: Msgs = Arc::new(Mutex::new(HashMap::new()));
     let app = Router::new()
-        .route("/send/:from/:to", post(send))
-        .route("/recv/:from/:to", post(recv))
+        .route("/session/:session/send/:from/:to", post(send))
+        .route("/session/:session/recv/:from/:to", post(recv))
         .with_state(state)
         .layer(cors)
         .layer(DefaultBodyLimit::max(1000 * 1024 * 1024))
@@ -64,9 +64,15 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn send(State(msgs): State<Msgs>, Path((from, to)): Path<(u32, u32)>, body: Bytes) {
+async fn send(
+    State(msgs): State<Msgs>,
+    Path((session, from, to)): Path<(String, u32, u32)>,
+    body: Bytes,
+) {
     let mut msgs = msgs.lock().await;
-    msgs.entry(from)
+    msgs.entry(session)
+        .or_default()
+        .entry(from)
         .or_default()
         .entry(to)
         .or_default()
@@ -76,11 +82,15 @@ async fn send(State(msgs): State<Msgs>, Path((from, to)): Path<(u32, u32)>, body
 
 async fn recv(
     State(msgs): State<Msgs>,
-    Path((to, from)): Path<(u32, u32)>,
+    Path((session, to, from)): Path<(String, u32, u32)>,
 ) -> Result<Vec<u8>, StatusCode> {
-    for _ in 0..20 {
+    for _ in 0..100 {
         let mut msgs = msgs.lock().await;
-        let Some(msgs) = msgs.get_mut(&from).and_then(|msgs| msgs.get_mut(&to)) else {
+        let Some(msgs) = msgs
+            .get_mut(&session)
+            .and_then(|session| session.get_mut(&from))
+            .and_then(|msgs| msgs.get_mut(&to))
+        else {
             tracing::warn!("No queue from {from} to {to} (recv/{to}/{from})");
             sleep(Duration::from_millis(50)).await;
             continue;

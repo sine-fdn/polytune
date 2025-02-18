@@ -9,15 +9,17 @@ use polytune::{
 use reqwest::StatusCode;
 use url::Url;
 use wasm_bindgen::prelude::*;
+use web_sys::console;
 
 #[wasm_bindgen]
-pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Result<String, String> {
+pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Result<JsValue, String> {
     let url = Url::from_str(&url).map_err(|e| format!("Invalid URL {url}: {e}"))?;
     let code = include_str!("../.benchmark.garble.rs").replace(
         "let range_in_percent = 10;",
         &format!("let range_in_percent = {range};"),
     );
     let prg = compile(&code).map_err(|e| e.prettify(&code))?;
+    console::log_1(&prg.circuit.report_gates().into());
     let input_literal = Literal::NumSigned(input as i64, SignedNumType::I32);
     let input = prg
         .literal_arg(party, input_literal)
@@ -32,7 +34,16 @@ pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Resul
     let output = prg
         .parse_output(&output)
         .map_err(|e| format!("Invalid output bits: {e}"))?;
-    Ok(output.to_string())
+    match output {
+        Literal::Array(elems) if elems.len() == 3 => Ok(elems
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .into()),
+        output => Err(format!(
+            "Expected an array of buckets as output, but found {output}"
+        )),
+    }
 }
 
 struct HttpChannel {
