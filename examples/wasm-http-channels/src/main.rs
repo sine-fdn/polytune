@@ -30,6 +30,10 @@ async fn main() -> Result<(), Error> {
             "http://127.0.0.1:9000".parse::<HeaderValue>().unwrap(),
             "http://[::1]:9000".parse::<HeaderValue>().unwrap(),
             "http://[::]:9000".parse::<HeaderValue>().unwrap(),
+            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+            "http://127.0.0.1:3000".parse::<HeaderValue>().unwrap(),
+            "http://[::1]:3000".parse::<HeaderValue>().unwrap(),
+            "http://[::]:3000".parse::<HeaderValue>().unwrap(),
         ])
         .allow_methods([
             Method::GET,
