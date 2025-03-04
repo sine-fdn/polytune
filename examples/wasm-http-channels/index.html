@@ -1,0 +1,226 @@
+<html>
+  <head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+    <link
+      href="https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://uploads-ssl.webflow.com/6262a2a7735ff102899431ef/6262a2a7735ff1a94d943269_SINE_Favicon.png"
+      rel="shortcut icon"
+      type="image/x-icon"
+    />
+  </head>
+
+  <body class="bg-gray-300">
+    <div class="w-full max-w-5xl mx-auto py-4">
+      <div>
+        <a href="https://sine.foundation" target="_blank"
+          ><img
+            src="./assets/SINE_logo.png"
+            alt="SINE Foundation"
+            class="h-8 md:h-10 mx-auto my-8"
+        /></a>
+        <form class="playground-cell bg-white shadow-md rounded px-6 pt-6 pb-6">
+          <div class="pb-6 text-center">
+            <h1 class="text-lg">
+              Playground for
+              <a
+                href="https://sine.foundation/library/002-smpc"
+                alt="Secure
+                Multi-Party Computation"
+                style="
+                  text-decoration: underline #fef08a;
+                  text-decoration-thickness: 4px;
+                "
+                >Secure Multi-Party Computation</a
+              >
+              using SINE's
+              <a
+                href="https://github.com/sine-fdn/polytune"
+                style="
+                  text-decoration: underline #fef08a;
+                  text-decoration-thickness: 4px;
+                "
+                >Polytune Engine</a
+              >.
+            </h1>
+          </div>
+          <div class="mb-4">
+            <input
+              class="playground-server-url shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Message Broker Server URL"
+              value="http://127.0.0.1:8000"
+            />
+          </div>
+          <div class="mb-4">
+            <input
+              class="playground-input-range shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Benchmark Range in %"
+              value="20"
+            />
+          </div>
+
+          <hr class="m-8" />
+
+          <div class="mb-4">
+            <input
+              class="playground-input-p0 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Private Input (Party 0)"
+              value="85"
+            />
+          </div>
+
+          <div class="mb-4">
+            <input
+              class="playground-input-p1 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Private Input (Party 1)"
+              value="100"
+            />
+          </div>
+
+          <div class="mb-4">
+            <input
+              class="playground-input-p2 shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              type="text"
+              placeholder="Private Input (Party 2)"
+              value="115"
+            />
+          </div>
+          <div class="md:flex md:items-center">
+            <div class="pr-4">
+              <button
+                class="playground-btn-compute bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-2 rounded focus:outline-none focus:shadow-outline inline-flex items-center"
+                type="button"
+              >
+                Compute
+              </button>
+            </div>
+            <div
+              class="playground-output-div md:flex md:items-center"
+              class="mb-4"
+            >
+              <svg
+                class="playground-spinner hidden animate-spin mt-2 h-8 w-8 text-blue-500"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                ></circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              <pre
+                style="white-space: pre-wrap"
+                class="font-mono appearance-none rounded w-full py-2 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              ><code class="playground-output" name="source-code"></code></pre>
+            </div>
+          </div>
+          <p class="text-center text-gray-500 text-xs">
+            SMPC Engine WASM Notebook by
+            <a
+              class="text-blue-400 hover:text-blue-500 transition duration-300 ease-in-out"
+              href="https://sine.foundation/"
+              >SINE Foundation e.V.</a
+            >
+          </p>
+        </form>
+      </div>
+      <!-- Note the usage of `type=module` here as this is an ES6 module -->
+      <script type="module">
+        import init, { compute } from "./pkg/polytune_wasm_http_channels.js";
+
+        const cell = document.getElementsByClassName("playground-cell")[0];
+
+        const addCellListeners = (cell) => {
+          const spinner = cell.getElementsByClassName("playground-spinner")[0];
+          const btn_compute = cell.getElementsByClassName(
+            "playground-btn-compute"
+          )[0];
+          btn_compute.addEventListener("click", async function () {
+            const endpoint = cell.getElementsByClassName(
+              "playground-server-url"
+            )[0].value;
+            const range_in_percent = cell.getElementsByClassName(
+              "playground-input-range"
+            )[0].value;
+            const input0 = cell.getElementsByClassName("playground-input-p0")[0]
+              .value;
+            const input1 = cell.getElementsByClassName("playground-input-p1")[0]
+              .value;
+            const input2 = cell.getElementsByClassName("playground-input-p2")[0]
+              .value;
+            spinner.classList.remove("hidden");
+            btn_compute.classList.add("cursor-not-allowed");
+            btn_compute.classList.add("opacity-50");
+            btn_compute.disabled = true;
+
+            let is_success = false;
+            const output = cell.getElementsByClassName("playground-output")[0];
+            output.classList.add("hidden");
+
+            const session_id = Math.floor(Math.random() * (1 << 60));
+            const url = `${endpoint}/session/sesh-${session_id}/`;
+            try {
+              const t0 = performance.now();
+              compute(url, 0, input0, range_in_percent)
+                .then((result) => {
+                  console.log("Party 0, success:", result);
+                })
+                .catch((error) => {
+                  console.error("Party 0, error:", error);
+                });
+              compute(url, 1, input1, range_in_percent)
+                .then((result) => {
+                  console.log("Party 1, success:", result);
+                })
+                .catch((error) => {
+                  console.error("Party 1, error:", error);
+                });
+              const result = await compute(url, 2, input2, range_in_percent);
+              const t1 = performance.now();
+
+              console.log(`MPC: ${((t1 - t0) / 1000).toFixed(2)}s`);
+
+              output.innerHTML = result;
+              output.classList.remove("border-red-500");
+              output.classList.remove("text-red-500");
+              is_success = true;
+            } catch (e) {
+              output.innerHTML = e;
+              output.classList.add("border-red-500");
+              output.classList.add("text-red-500");
+            } finally {
+              output.classList.remove("hidden");
+              spinner.classList.add("hidden");
+              btn_compute.classList.remove("cursor-not-allowed");
+              btn_compute.classList.remove("opacity-50");
+              btn_compute.disabled = false;
+            }
+          });
+        };
+
+        init().then(() => {
+          console.log(
+            "Ready for running Secure Multi-Party Computation from WASM..."
+          );
+          addCellListeners(cell);
+        });
+      </script>
+    </div>
+  </body>
+</html>

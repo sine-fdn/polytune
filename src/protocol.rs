@@ -4,13 +4,11 @@ use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use smallvec::smallvec;
-use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::{
-    channel::{self, recv_from, recv_vec_from, send_to, Channel, SimpleChannel},
+    channel::{self, recv_from, recv_vec_from, send_to, Channel},
     data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
     faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
-    fpre::fpre,
     garble::{self, decrypt, encrypt, GarblingKey},
 };
 
@@ -135,17 +133,22 @@ impl From<MpcError> for Error {
 }
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
     output_parties: &[usize],
     trusted: bool,
 ) -> Result<Vec<bool>, Error> {
-    let tokio = Runtime::new().expect("Could not start tokio runtime");
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("Could not start tokio runtime");
     tokio.block_on(simulate_mpc_async(circuit, inputs, output_parties, trusted))
 }
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn simulate_mpc_async(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -155,14 +158,14 @@ pub async fn simulate_mpc_async(
     let p_eval = 0;
     let p_pre = inputs.len();
 
-    let mut channels: Vec<SimpleChannel>;
+    let mut channels: Vec<channel::SimpleChannel>;
     if trusted {
-        channels = SimpleChannel::channels(inputs.len() + 1);
+        channels = channel::SimpleChannel::channels(inputs.len() + 1);
         let mut channel = channels.pop().unwrap();
         let parties = inputs.len();
-        tokio::spawn(async move { fpre(&mut channel, parties).await });
+        tokio::spawn(async move { crate::fpre::fpre(&mut channel, parties).await });
     } else {
-        channels = SimpleChannel::channels(inputs.len());
+        channels = channel::SimpleChannel::channels(inputs.len());
     }
 
     let mut parties = channels.into_iter().zip(inputs).enumerate();
@@ -175,7 +178,7 @@ pub async fn simulate_mpc_async(
         Preprocessor::Untrusted
     };
 
-    let mut computation: JoinSet<Vec<bool>> = JoinSet::new();
+    let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
     for (p_own, (mut channel, inputs)) in parties {
         let circuit = circuit.clone();
         let inputs = inputs.to_vec();

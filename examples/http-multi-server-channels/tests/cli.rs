@@ -60,7 +60,7 @@ fn simulate() {
         for mut child in children {
             child.kill().unwrap();
         }
-        if out == "The result is 6u32" {
+        if out == "The result is 6" {
             return;
         } else {
             eprintln!("Last line is '{out}'");

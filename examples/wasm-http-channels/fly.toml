@@ -1,0 +1,25 @@
+# fly.toml app configuration file generated for parlay on 2025-03-03T16:48:21Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'parlay'
+primary_region = 'fra'
+
+[build]
+
+[env]
+PORT = '8080'
+
+[http_service]
+internal_port = 8080
+force_https = true
+auto_stop_machines = 'stop'
+auto_start_machines = false
+min_machines_running = 1
+processes = ['app']
+
+[[vm]]
+memory = '2gb'
+cpu_kind = 'shared'
+cpus = 1

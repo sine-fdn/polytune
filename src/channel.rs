@@ -1,8 +1,9 @@
 //! A communication channel used to send/receive messages to/from another party.
 
-use std::{fmt, future::Future, time::Duration};
+use std::{fmt, future::Future};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::{
     sync::mpsc::{channel, error::SendError, Receiver, Sender},
     time::timeout,
@@ -63,7 +64,7 @@ pub trait Channel {
         i: usize,
         remaining: usize,
         chunk: Vec<u8>,
-    ) -> impl Future<Output = Result<(), Self::SendError>> + Send;
+    ) -> impl Future<Output = Result<(), Self::SendError>>;
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     fn recv_bytes_from(
@@ -71,7 +72,7 @@ pub trait Channel {
         party: usize,
         phase: &str,
         i: usize,
-    ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
+    ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>>;
 }
 
 /// Serializes and sends an MPC message to the other party.
@@ -158,6 +159,7 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
 }
 
 /// A simple synchronous channel using [`Sender`] and [`Receiver`].
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
@@ -165,6 +167,7 @@ pub struct SimpleChannel {
     pub(crate) bytes_sent: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SimpleChannel {
     /// Creates channels for N parties to communicate with each other.
     pub fn channels(parties: usize) -> Vec<Self> {
@@ -197,8 +200,9 @@ impl SimpleChannel {
     }
 }
 
-#[derive(Debug)]
 /// The error raised by `recv` calls of a [`SimpleChannel`].
+#[derive(Debug)]
+#[cfg(not(target_arch = "wasm32"))]
 pub enum AsyncRecvError {
     /// The channel has been closed.
     Closed,
@@ -206,6 +210,7 @@ pub enum AsyncRecvError {
     TimeoutElapsed,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Channel for SimpleChannel {
     type SendError = SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
@@ -244,7 +249,7 @@ impl Channel for SimpleChannel {
             .as_mut()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
             .recv();
-        match timeout(Duration::from_secs(10 * 60), chunk).await {
+        match timeout(std::time::Duration::from_secs(10 * 60), chunk).await {
             Ok(Some(chunk)) => Ok(chunk),
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),

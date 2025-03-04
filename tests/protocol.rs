@@ -237,7 +237,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
                 let output = simulate_mpc(&prg.circuit, &[&x, &y, &z], &output_parties, false)?;
                 let result = prg.parse_output(&output).unwrap();
                 println!("{calculation} = {result}");
-                assert_eq!(format!("{result}"), format!("{expected}u8"));
+                assert_eq!(format!("{result}"), format!("{expected}"));
             }
         }
     }
