@@ -111,14 +111,17 @@ async fn send(
     body: Bytes,
 ) {
     let mut msgs = msgs.lock().await;
-    msgs.entry(session)
+    if !msgs.contains_key(&session) {
+        tracing::info!("Starting new session {session}");
+    }
+    msgs.entry(session.clone())
         .or_default()
         .entry(from)
         .or_default()
         .entry(to)
         .or_default()
         .push_back(body.to_vec());
-    tracing::debug!("Stored message from {from} to {to} (/send/{from}/{to})");
+    tracing::debug!("Stored message from {from} to {to} ({session}/send/{from}/{to})");
 }
 
 async fn recv(
@@ -132,18 +135,18 @@ async fn recv(
             .and_then(|session| session.get_mut(&from))
             .and_then(|msgs| msgs.get_mut(&to))
         else {
-            tracing::warn!("No queue from {from} to {to} (recv/{to}/{from})");
+            tracing::debug!("No queue from {from} to {to} ({session}/recv/{to}/{from})");
             sleep(Duration::from_millis(50)).await;
             continue;
         };
         let Some(msg) = msgs.pop_front() else {
-            tracing::warn!("No message in queue from {from} to {to} (recv/{to}/{from})");
+            tracing::debug!("No message in queue from {from} to {to} ({session}/recv/{to}/{from})");
             sleep(Duration::from_millis(50)).await;
             continue;
         };
-        tracing::debug!("Responding with message from {from} to {to} (recv/{to}/{from})");
+        tracing::debug!("Responding with message from {from} to {to} ({session}/recv/{to}/{from})");
         return Ok(msg);
     }
-    tracing::error!("No message in queue from {from} to {to} (recv/{to}/{from})");
+    tracing::error!("No message in queue from {from} to {to} ({session}/recv/{to}/{from})");
     return Err(StatusCode::NOT_FOUND);
 }
