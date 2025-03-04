@@ -3,15 +3,18 @@ use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderValue, Method},
-    routing::post,
+    routing::{get, post},
     Router,
 };
+use clap::Parser;
 use http::header;
 use reqwest::StatusCode;
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    env,
+    net::{IpAddr, SocketAddr},
     result::Result,
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -20,12 +23,28 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 type Msgs = Arc<Mutex<HashMap<String, HashMap<u32, HashMap<u32, VecDeque<Vec<u8>>>>>>>;
 
+/// A message broker for Multi-Party Computation.
+#[derive(Debug, Parser)]
+#[command(name = "broker")]
+struct Cli {
+    /// The IP address to listen on.
+    #[arg(long, short)]
+    addr: Option<String>,
+    /// The port to listen on.
+    #[arg(long, short)]
+    port: Option<u16>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
+    let Cli { addr, port } = Cli::parse();
 
     let cors = CorsLayer::new()
         .allow_origin([
+            "https://verification-pilot-ui.vercel.app"
+                .parse::<HeaderValue>()
+                .unwrap(),
             "http://localhost:9000".parse::<HeaderValue>().unwrap(),
             "http://127.0.0.1:9000".parse::<HeaderValue>().unwrap(),
             "http://[::1]:9000".parse::<HeaderValue>().unwrap(),
@@ -54,6 +73,7 @@ async fn main() -> Result<(), Error> {
 
     let state: Msgs = Arc::new(Mutex::new(HashMap::new()));
     let app = Router::new()
+        .route("/ping", get(ping))
         .route("/session/:session/send/:from/:to", post(send))
         .route("/session/:session/recv/:from/:to", post(recv))
         .with_state(state)
@@ -61,11 +81,28 @@ async fn main() -> Result<(), Error> {
         .layer(DefaultBodyLimit::max(1000 * 1024 * 1024))
         .layer(TraceLayer::new_for_http());
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    let addr = if let Ok(socket_addr) = env::var("SOCKET_ADDRESS") {
+        SocketAddr::from_str(&socket_addr)
+            .unwrap_or_else(|_| panic!("Invalid socket address: {socket_addr}"))
+    } else {
+        let addr = addr.unwrap_or_else(|| "127.0.0.1".into());
+        let port = port.unwrap_or(8080);
+        match addr.parse::<IpAddr>() {
+            Ok(addr) => SocketAddr::new(addr, port),
+            Err(_) => {
+                tracing::error!("Invalid IP address: {addr}, using 127.0.0.1 instead");
+                SocketAddr::from(([127, 0, 0, 1], port))
+            }
+        }
+    };
     tracing::info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn ping() -> &'static str {
+    "pong"
 }
 
 async fn send(
