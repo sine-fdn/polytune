@@ -27,8 +27,9 @@ pub fn u128_to_block(inp: u128) -> Block {
     Block::from(array)
 }
 
+#[maybe_async::maybe_async]
 pub(crate) async fn kos_ot_sender(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     deltas: &[Block],
     p_to: usize,
     shared_rand: &mut ChaCha20Rng,
@@ -46,8 +47,9 @@ pub(crate) async fn kos_ot_sender(
     Ok(sender_out)
 }
 
+#[maybe_async::maybe_async]
 pub(crate) async fn kos_ot_receiver(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     bs: &[bool],
     p_to: usize,
     shared_rand: &mut ChaCha20Rng,

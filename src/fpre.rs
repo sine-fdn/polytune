@@ -44,6 +44,7 @@ impl From<channel::Error> for Error {
 }
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
+#[maybe_async::maybe_async]
 pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Error> {
     for p in 0..parties {
         recv_from::<()>(channel, p, "delta (fpre)").await?;

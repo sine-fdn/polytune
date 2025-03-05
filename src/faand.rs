@@ -95,10 +95,11 @@ pub fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<[u128; 2], Error> {
 }
 
 /// Implements the verification step of broadcast with abort based on Goldwasser and Lindell's protocol.
+#[maybe_async::maybe_async]
 pub(crate) async fn broadcast_verification<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     i: usize,
     n: usize,
     phase: &str,
@@ -150,10 +151,11 @@ pub(crate) async fn broadcast_verification<
 /// Implements broadcast with abort based on Goldwasser and Lindell's protocol
 /// for all parties at once, where each party sends its vector to all others.
 /// The function returns the vector received and verified by broadcast.
+#[maybe_async::maybe_async]
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     i: usize,
     n: usize,
     phase: &str,
@@ -176,11 +178,12 @@ pub(crate) async fn broadcast<
 
 /// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
 /// the vector is broadcasted, the second element is simply sent to all parties.
+#[maybe_async::maybe_async]
 pub(crate) async fn broadcast_first_send_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     i: usize,
     n: usize,
     phase: &str,
@@ -212,8 +215,9 @@ pub(crate) async fn broadcast_first_send_second<
 /// to the randomness generation, and all contributions are combined securely to generate
 /// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
 /// cryptographically secure random number generator.
+#[maybe_async::maybe_async]
 pub(crate) async fn shared_rng(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     i: usize,
     n: usize,
 ) -> Result<ChaCha20Rng, Error> {
@@ -266,8 +270,9 @@ pub(crate) async fn shared_rng(
 ///
 /// This function generates a shared random number generator (RNG) between every two parties using
 /// two-party coin tossing for the two-party KOS OT protocol.
+#[maybe_async::maybe_async]
 pub(crate) async fn shared_rng_pairwise(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     i: usize,
     n: usize,
 ) -> Result<Vec<Vec<Option<ChaCha20Rng>>>, Error> {
@@ -340,8 +345,9 @@ pub(crate) async fn shared_rng_pairwise(
 /// each pair of parties and then checking the validity of the MACs and keys by checking the XOR
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
+#[maybe_async::maybe_async]
 async fn fabitn(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     i: usize,
     n: usize,
     l: usize,
@@ -466,8 +472,9 @@ async fn fabitn(
 ///    - They then verify these commitments by performing decommitments and checking the validity of the
 ///      MACs against the commitments.
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
+#[maybe_async::maybe_async]
 pub(crate) async fn fashare(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     i: usize,
     n: usize,
     l: usize,
@@ -573,8 +580,9 @@ pub(crate) async fn fashare(
 /// This protocol computes the half-authenticated AND of two bit strings.
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
+#[maybe_async::maybe_async]
 async fn fhaand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     i: usize,
     n: usize,
     l: usize,
@@ -640,8 +648,9 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
 /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
 /// the XOR of the output values z.
+#[maybe_async::maybe_async]
 async fn flaand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
     i: usize,
     n: usize,
@@ -763,8 +772,9 @@ type Bucket<'a> = SmallVec<[(&'a Share, &'a Share, &'a Share); 3]>;
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+#[maybe_async::maybe_async]
 async fn faand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     i: usize,
     n: usize,
     l: usize, //num_and_gates
@@ -813,8 +823,9 @@ async fn faand(
 }
 
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
+#[maybe_async::maybe_async]
 pub(crate) async fn beaver_aand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     alpha_beta_shares: Vec<(Share, Share)>,
     i: usize,
     n: usize,
@@ -895,8 +906,9 @@ pub(crate) async fn beaver_aand(
 }
 
 /// Check and return d-values for a vector of shares.
+#[maybe_async::maybe_async]
 async fn check_dvalue(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&mut (impl Channel + Send), Delta),
     i: usize,
     n: usize,
     buckets: &[Bucket<'_>],

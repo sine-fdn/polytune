@@ -43,6 +43,7 @@ pub type KosSender = kos::Sender<ChouOrlandiReceiver>;
 pub type KosReceiver = kos::Receiver<ChouOrlandiSender>;
 
 /// Trait for one-out-of-two oblivious transfer from the sender's point-of-view.
+#[maybe_async::maybe_async]
 pub trait Sender
 where
     Self: Sized,
@@ -52,41 +53,43 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    fn init<C: Channel, RNG: CryptoRng + Rng>(
+    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<Self, Error>>;
+    ) -> Result<Self, Error>;
     /// Sends messages.
-    fn send<C: Channel, RNG: CryptoRng + Rng>(
+    async fn send<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         &mut self,
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<(), Error>>;
+    ) -> Result<(), Error>;
 }
 
 /// Trait for initializing an oblivious transfer object with a fixed key.
+#[maybe_async::maybe_async]
 pub trait FixedKeyInitializer
 where
     Self: Sized,
 {
     /// Runs any one-time initialization to create the oblivious transfer
     /// object with a fixed key.
-    fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
+    async fn init_fixed_key<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<Self, Error>>;
+    ) -> Result<Self, Error>;
 }
 
 /// Trait for one-out-of-two oblivious transfer from the receiver's
 /// point-of-view.
+#[maybe_async::maybe_async]
 pub trait Receiver
 where
     Self: Sized,
@@ -96,55 +99,57 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    fn init<C: Channel, RNG: CryptoRng + Rng>(
+    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<Self, Error>>;
+    ) -> Result<Self, Error>;
     /// Receives messages.
-    fn recv<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
+    ) -> Result<Vec<Self::Msg>, Error>;
 }
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the sender's
 /// point-of-view.
 #[allow(clippy::type_complexity)]
+#[maybe_async::maybe_async]
 pub trait CorrelatedSender: Sender
 where
     Self: Sized,
 {
     /// Correlated oblivious transfer send. Takes as input an array `deltas`
     /// which specifies the offset between the zero and one message.
-    fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    async fn send_correlated<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         &mut self,
         channel: &mut C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<Vec<(Self::Msg, Self::Msg)>, Error>>;
+    ) -> Result<Vec<(Self::Msg, Self::Msg)>, Error>;
 }
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the receiver's
 /// point-of-view.
+#[maybe_async::maybe_async]
 pub trait CorrelatedReceiver: Receiver
 where
     Self: Sized,
 {
     /// Correlated oblivious transfer receive.
-    fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
+    async fn recv_correlated<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
-    ) -> impl std::future::Future<Output = Result<Vec<Self::Msg>, Error>>;
+    ) -> Result<Vec<Self::Msg>, Error>;
 }

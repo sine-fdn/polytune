@@ -134,6 +134,7 @@ impl From<MpcError> for Error {
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 #[cfg(not(target_arch = "wasm32"))]
+#[maybe_async::async_impl]
 pub fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -148,7 +149,19 @@ pub fn simulate_mpc(
 }
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+#[maybe_async::sync_impl]
+pub fn simulate_mpc(
+    circuit: &Circuit,
+    inputs: &[&[bool]],
+    output_parties: &[usize],
+    trusted: bool,
+) -> Result<Vec<bool>, Error> {
+    simulate_mpc_sync(circuit, inputs, output_parties, trusted)
+}
+
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 #[cfg(not(target_arch = "wasm32"))]
+#[maybe_async::async_impl]
 pub async fn simulate_mpc_async(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -243,6 +256,104 @@ pub async fn simulate_mpc_async(
     }
 }
 
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+#[cfg(not(target_arch = "wasm32"))]
+#[maybe_async::sync_impl]
+pub fn simulate_mpc_sync(
+    circuit: &Circuit,
+    inputs: &[&[bool]],
+    output_parties: &[usize],
+    trusted: bool,
+) -> Result<Vec<bool>, Error> {
+    let p_eval = 0;
+    let p_pre = inputs.len();
+
+    let mut channels: Vec<channel::SimpleChannel>;
+    if trusted {
+        channels = channel::SimpleChannel::channels(inputs.len() + 1);
+        let mut channel = channels.pop().unwrap();
+        let parties = inputs.len();
+        let _ = crate::fpre::fpre(&mut channel, parties);
+    } else {
+        channels = channel::SimpleChannel::channels(inputs.len());
+    }
+
+    let mut parties = channels.into_iter().zip(inputs).enumerate();
+    let Some(evaluator) = parties.next() else {
+        return Ok(vec![]);
+    };
+    let p_fpre = if trusted {
+        Preprocessor::TrustedDealer(p_pre)
+    } else {
+        Preprocessor::Untrusted
+    };
+
+    let mut computation_threads = vec![];
+    for (p_own, (mut channel, inputs)) in parties {
+        let circuit = circuit.clone();
+        let inputs = inputs.to_vec();
+        let output_parties = output_parties.to_vec();
+        let handle = std::thread::spawn(move || {
+            let result = mpc(
+                &mut channel,
+                &circuit,
+                &inputs,
+                p_fpre,
+                p_eval,
+                p_own,
+                &output_parties,
+            );
+            let mut res_party = Vec::new();
+            match result {
+                Err(e) => {
+                    eprintln!("SMPC protocol failed for party {:?}: {:?}", p_own, e);
+                }
+                Ok(res) => {
+                    let mb = channel.bytes_sent as f64 / 1024.0 / 1024.0;
+                    println!("Party {p_own} sent {mb:.2}MB of messages");
+                    res_party = res;
+                }
+            }
+            res_party
+        });
+        computation_threads.push(handle);
+    }
+
+    let (_, (mut party_channel, inputs)) = evaluator;
+    let eval_result = mpc(
+        &mut party_channel,
+        circuit,
+        inputs,
+        p_fpre,
+        p_eval,
+        p_eval,
+        output_parties,
+    );
+    match eval_result {
+        Err(e) => {
+            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+            Ok(vec![])
+        }
+        Ok(res) => {
+            let mut outputs = vec![res];
+            for handle in computation_threads {
+                let output = handle.join().unwrap();
+                if !output.is_empty() {
+                    outputs.push(output);
+                }
+            }
+            outputs.retain(|o| !o.is_empty());
+            if !outputs.windows(2).all(|w| w[0] == w[1]) {
+                eprintln!("The result does not match for all output parties: {outputs:?}");
+            }
+            let mb = party_channel.bytes_sent as f64 / 1024.0 / 1024.0;
+            println!("Party {p_eval} sent {mb:.2}MB of messages");
+            println!("MPC simulation finished successfully!");
+            Ok(outputs.pop().unwrap_or_default())
+        }
+    }
+}
+
 /// Specifies how correlated randomness is provided in the prepocessing phase.
 #[derive(Debug, Clone, Copy)]
 pub enum Preprocessor {
@@ -253,8 +364,9 @@ pub enum Preprocessor {
 }
 
 /// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
+#[maybe_async::maybe_async]
 pub async fn mpc(
-    channel: &mut impl Channel,
+    channel: &mut (impl Channel + Send),
     circuit: &Circuit,
     inputs: &[bool],
     p_fpre: Preprocessor,
