@@ -89,5 +89,5 @@ fn simulate() {
     let out = String::from_utf8(out.stdout).unwrap();
     let out = out.lines().last().unwrap_or_default();
     child.kill().unwrap();
-    assert_eq!("The result is 6u32", out);
+    assert_eq!("The result is 6", out);
 }
