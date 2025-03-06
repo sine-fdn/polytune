@@ -3,6 +3,17 @@
 The file `hax-driver.py` can be used as a shorthand to invoke the
 right commands for hax extraction to F* and F* typechecking.
 
+To be able to use it, make sure the following environment variables
+are set correctly:
+- `FSTAR_HOME`: path to your [F* installation](https://github.com/FStarLang/FStar)
+- `HACL_HOME`: path to the local copy of the [HACL* repository](https://github.com/hacl-star/hacl-star)
+- `HAX_HOME`: path to the local copy to the [hax repository](https://github.com/cryspen/hax)
+
+To run the extraction to F* , use `hax-driver.py extract-fstar`.
+
+To attempt F* typechecking of the resulting extraction, use
+`hax-driver.py typecheck-fstar`.
+
 Currently, it extracts the following functions to F*:
 - `polytune::faand::combine_two_leaky_ands`
 
