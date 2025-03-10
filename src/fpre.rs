@@ -1,5 +1,6 @@
 //! The FPre preprocessor as a (semi-)trusted party, providing correlated randomness.
 
+use maybe_async::maybe_async;
 use rand::random;
 use smallvec::smallvec;
 
@@ -44,7 +45,8 @@ impl From<channel::Error> for Error {
 }
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
-pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Error> {
+#[maybe_async(AFIT)]
+pub async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
     for p in 0..parties {
         recv_from::<()>(channel, p, "delta (fpre)").await?;
     }

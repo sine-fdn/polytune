@@ -1,6 +1,7 @@
 //! Secure multi-party computation protocol with communication via channels.
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
+use maybe_async::{async_impl, maybe_async};
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use smallvec::smallvec;
@@ -134,6 +135,7 @@ impl From<MpcError> for Error {
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 #[cfg(not(target_arch = "wasm32"))]
+#[async_impl(AFIT)]
 pub fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -149,6 +151,7 @@ pub fn simulate_mpc(
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 #[cfg(not(target_arch = "wasm32"))]
+#[async_impl(AFIT)]
 pub async fn simulate_mpc_async(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -253,6 +256,7 @@ pub enum Preprocessor {
 }
 
 /// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
+#[maybe_async(AFIT)]
 pub async fn mpc(
     channel: &mut impl Channel,
     circuit: &Circuit,

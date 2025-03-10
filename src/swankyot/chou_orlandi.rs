@@ -27,17 +27,19 @@ use curve25519_dalek::{
     ristretto::{CompressedRistretto, RistrettoBasepointTable, RistrettoPoint},
     scalar::Scalar,
 };
+use maybe_async::maybe_async;
 use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{Block, Malicious, SemiHonest};
 
 /// Oblivious transfer sender.
-pub struct Sender {
+pub(crate) struct Sender {
     y: Scalar,
     s: RistrettoPoint,
     counter: u128,
 }
 
+#[maybe_async(AFIT)]
 impl OtSender for Sender {
     type Msg = Block;
 
@@ -85,11 +87,12 @@ impl OtSender for Sender {
 }
 
 /// Oblivious transfer receiver.
-pub struct Receiver {
+pub(crate) struct Receiver {
     s: RistrettoBasepointTable,
     counter: u128,
 }
 
+#[maybe_async(AFIT)]
 impl OtReceiver for Receiver {
     type Msg = Block;
 

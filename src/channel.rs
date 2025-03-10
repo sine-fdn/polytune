@@ -1,7 +1,8 @@
 //! A communication channel used to send/receive messages to/from another party.
 
-use std::{fmt, future::Future};
+use std::fmt;
 
+use maybe_async::{async_impl, maybe_async};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::{
@@ -50,6 +51,7 @@ struct RecvChunk<T> {
 }
 
 /// A communication channel used to send/receive messages to/from another party.
+#[maybe_async(AFIT)]
 pub trait Channel {
     /// The error that can occur sending messages over the channel.
     type SendError: fmt::Debug;
@@ -57,25 +59,26 @@ pub trait Channel {
     type RecvError: fmt::Debug;
 
     /// Sends a message to the party with the given index (must be between `0..participants`).
-    fn send_bytes_to(
+    async fn send_bytes_to(
         &mut self,
         party: usize,
         phase: &str,
         i: usize,
         remaining: usize,
         chunk: Vec<u8>,
-    ) -> impl Future<Output = Result<(), Self::SendError>>;
+    ) -> Result<(), Self::SendError>;
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
-    fn recv_bytes_from(
+    async fn recv_bytes_from(
         &mut self,
         party: usize,
         phase: &str,
         i: usize,
-    ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>>;
+    ) -> Result<Vec<u8>, Self::RecvError>;
 }
 
 /// Serializes and sends an MPC message to the other party.
+#[maybe_async(AFIT)]
 pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
@@ -110,6 +113,7 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
 }
 
 /// Receives and deserializes an MPC message from the other party.
+#[maybe_async(AFIT)]
 pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
@@ -141,6 +145,7 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
 }
 
 /// Receives and deserializes a Vec from the other party (while checking the length).
+#[maybe_async(AFIT)]
 pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
@@ -158,7 +163,7 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
     }
 }
 
-/// A simple synchronous channel using [`Sender`] and [`Receiver`].
+/// A simple asynchronous channel using [`Sender`] and [`Receiver`].
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct SimpleChannel {
@@ -211,6 +216,7 @@ pub enum AsyncRecvError {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[async_impl(AFIT)]
 impl Channel for SimpleChannel {
     type SendError = SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
