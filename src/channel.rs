@@ -49,7 +49,7 @@ struct RecvChunk<T> {
 }
 
 /// A communication channel used to send/receive messages to/from another party.
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 pub trait Channel {
     /// The error that can occur sending messages over the channel.
     type SendError: fmt::Debug;
@@ -229,7 +229,7 @@ pub enum UnifiedSendError {
     SyncSend(SyncSendError<Vec<u8>>),
 }
 
-#[maybe_async::async_impl]
+#[maybe_async::async_impl(?Send)]
 impl Channel for SimpleAsyncChannel {
     type SendError = UnifiedSendError;
     type RecvError = RecvError;

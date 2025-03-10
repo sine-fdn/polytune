@@ -57,7 +57,7 @@ impl HttpChannel {
     }
 }
 
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 impl Channel for HttpChannel {
     type SendError = String;
     type RecvError = String;

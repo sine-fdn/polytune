@@ -38,11 +38,11 @@ pub struct Sender {
     counter: u128,
 }
 
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 impl OtSender for Sender {
     type Msg = Block;
 
-    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         mut rng: &mut RNG,
         p_to: usize,
@@ -54,7 +54,7 @@ impl OtSender for Sender {
         Ok(Self { y, s, counter: 0 })
     }
 
-    async fn send<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn send<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[(Block, Block)],
@@ -91,11 +91,11 @@ pub struct Receiver {
     counter: u128,
 }
 
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 impl OtReceiver for Receiver {
     type Msg = Block;
 
-    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         _: &mut RNG,
         p_to: usize,
@@ -107,7 +107,7 @@ impl OtReceiver for Receiver {
         Ok(Self { s, counter: 0 })
     }
 
-    async fn recv<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn recv<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[bool],

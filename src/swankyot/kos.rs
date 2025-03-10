@@ -37,7 +37,7 @@ pub struct Receiver<OT: OtSender<Msg = Block> + Malicious> {
 
 #[maybe_async::maybe_async]
 impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
-    pub(super) async fn send_setup<C: Channel + Send>(
+    pub(super) async fn send_setup<C: Channel >(
         &mut self,
         channel: &mut C,
         m: usize,
@@ -71,9 +71,9 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
     }
 }
 
-#[maybe_async::maybe_async]
-impl<OT: OtReceiver<Msg = Block> + Malicious + Send> FixedKeyInitializer for Sender<OT> {
-    async fn init_fixed_key<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+#[maybe_async::maybe_async(?Send)]
+impl<OT: OtReceiver<Msg = Block> + Malicious > FixedKeyInitializer for Sender<OT> {
+    async fn init_fixed_key<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
@@ -85,11 +85,11 @@ impl<OT: OtReceiver<Msg = Block> + Malicious + Send> FixedKeyInitializer for Sen
     }
 }
 
-#[maybe_async::maybe_async]
-impl<OT: OtReceiver<Msg = Block> + Malicious + Send> OtSender for Sender<OT> {
+#[maybe_async::maybe_async(?Send)]
+impl<OT: OtReceiver<Msg = Block> + Malicious > OtSender for Sender<OT> {
     type Msg = Block;
 
-    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
@@ -99,7 +99,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious + Send> OtSender for Sender<OT> {
         Ok(Self { ot })
     }
 
-    async fn send<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn send<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[(Block, Block)],
@@ -126,9 +126,9 @@ impl<OT: OtReceiver<Msg = Block> + Malicious + Send> OtSender for Sender<OT> {
     }
 }
 
-#[maybe_async::maybe_async]
-impl<OT: OtReceiver<Msg = Block> + Malicious + Send> CorrelatedSender for Sender<OT> {
-    async fn send_correlated<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+#[maybe_async::maybe_async(?Send)]
+impl<OT: OtReceiver<Msg = Block> + Malicious > CorrelatedSender for Sender<OT> {
+    async fn send_correlated<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         deltas: &[Self::Msg],
@@ -158,7 +158,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious + Send> CorrelatedSender for Sender
 
 #[maybe_async::maybe_async]
 impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
-    pub(super) async fn recv_setup<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    pub(super) async fn recv_setup<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -191,11 +191,11 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
     }
 }
 
-#[maybe_async::maybe_async]
-impl<OT: OtSender<Msg = Block> + Malicious + Send> OtReceiver for Receiver<OT> {
+#[maybe_async::maybe_async(?Send)]
+impl<OT: OtSender<Msg = Block> + Malicious > OtReceiver for Receiver<OT> {
     type Msg = Block;
 
-    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
@@ -205,7 +205,7 @@ impl<OT: OtSender<Msg = Block> + Malicious + Send> OtReceiver for Receiver<OT> {
         Ok(Self { ot })
     }
 
-    async fn recv<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn recv<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -235,9 +235,9 @@ impl<OT: OtSender<Msg = Block> + Malicious + Send> OtReceiver for Receiver<OT> {
     }
 }
 
-#[maybe_async::maybe_async]
-impl<OT: OtSender<Msg = Block> + Malicious + Send> CorrelatedReceiver for Receiver<OT> {
-    async fn recv_correlated<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+#[maybe_async::maybe_async(?Send)]
+impl<OT: OtSender<Msg = Block> + Malicious > CorrelatedReceiver for Receiver<OT> {
+    async fn recv_correlated<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[bool],

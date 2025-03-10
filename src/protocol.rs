@@ -134,7 +134,7 @@ impl From<MpcError> for Error {
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 #[cfg(not(target_arch = "wasm32"))]
-#[maybe_async::async_impl]
+#[maybe_async::async_impl(?Send)]
 pub fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -161,7 +161,7 @@ pub fn simulate_mpc(
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 #[cfg(not(target_arch = "wasm32"))]
-#[maybe_async::async_impl]
+#[maybe_async::async_impl(?Send)]
 pub async fn simulate_mpc_async(
     circuit: &Circuit,
     inputs: &[&[bool]],
@@ -197,7 +197,7 @@ pub async fn simulate_mpc_async(
         let inputs = inputs.to_vec();
         let output_parties = output_parties.to_vec();
         computation.spawn(async move {
-            let result = mpc(
+            let result: Result<Vec<bool>, Error> = mpc(
                 &mut channel,
                 &circuit,
                 &inputs,

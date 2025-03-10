@@ -43,7 +43,7 @@ pub type KosSender = kos::Sender<ChouOrlandiReceiver>;
 pub type KosReceiver = kos::Receiver<ChouOrlandiSender>;
 
 /// Trait for one-out-of-two oblivious transfer from the sender's point-of-view.
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 pub trait Sender
 where
     Self: Sized,
@@ -53,14 +53,14 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
     ) -> Result<Self, Error>;
     /// Sends messages.
-    async fn send<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn send<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[(Self::Msg, Self::Msg)],
@@ -71,14 +71,14 @@ where
 }
 
 /// Trait for initializing an oblivious transfer object with a fixed key.
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 pub trait FixedKeyInitializer
 where
     Self: Sized,
 {
     /// Runs any one-time initialization to create the oblivious transfer
     /// object with a fixed key.
-    async fn init_fixed_key<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init_fixed_key<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         s_: [u8; 16],
         rng: &mut RNG,
@@ -89,7 +89,7 @@ where
 
 /// Trait for one-out-of-two oblivious transfer from the receiver's
 /// point-of-view.
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 pub trait Receiver
 where
     Self: Sized,
@@ -99,14 +99,14 @@ where
     type Msg: Sized + AsMut<[u8]>;
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
-    async fn init<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn init<C: Channel , RNG: CryptoRng + Rng >(
         channel: &mut C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
     ) -> Result<Self, Error>;
     /// Receives messages.
-    async fn recv<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn recv<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
@@ -119,14 +119,14 @@ where
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the sender's
 /// point-of-view.
 #[allow(clippy::type_complexity)]
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 pub trait CorrelatedSender: Sender
 where
     Self: Sized,
 {
     /// Correlated oblivious transfer send. Takes as input an array `deltas`
     /// which specifies the offset between the zero and one message.
-    async fn send_correlated<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn send_correlated<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         deltas: &[Self::Msg],
@@ -138,13 +138,13 @@ where
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the receiver's
 /// point-of-view.
-#[maybe_async::maybe_async]
+#[maybe_async::maybe_async(?Send)]
 pub trait CorrelatedReceiver: Receiver
 where
     Self: Sized,
 {
     /// Correlated oblivious transfer receive.
-    async fn recv_correlated<C: Channel + Send, RNG: CryptoRng + Rng + Send>(
+    async fn recv_correlated<C: Channel , RNG: CryptoRng + Rng >(
         &mut self,
         channel: &mut C,
         inputs: &[bool],
