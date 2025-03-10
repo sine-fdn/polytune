@@ -54,10 +54,12 @@ impl PollingHttpChannel {
     }
 }
 
+#[maybe_async::maybe_async]
 impl Channel for PollingHttpChannel {
     type SendError = HttpChannelError;
     type RecvError = HttpChannelError;
 
+    #[maybe_async::async_impl]
     async fn send_bytes_to(
         &mut self,
         p: usize,
@@ -75,6 +77,7 @@ impl Channel for PollingHttpChannel {
         }
     }
 
+    #[maybe_async::async_impl]
     async fn recv_bytes_from(
         &mut self,
         p: usize,

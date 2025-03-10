@@ -40,7 +40,9 @@ web-sys = { version = "0.3.77", features = ["console"] }
 # for the server:
 #
 anyhow = { version = "1.0.79", optional = true }
+async-trait = "0.1.77"
 axum = { version = "0.7.4", optional = true }
+maybe-async = { version = "0.2" }
 tower-http = { version = "0.5.1", features = [
     "trace",
     "cors",

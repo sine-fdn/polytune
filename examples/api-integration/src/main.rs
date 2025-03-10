@@ -366,10 +366,12 @@ struct HttpChannel {
     recv: Vec<Receiver<Vec<u8>>>,
 }
 
+#[maybe_async::maybe_async]
 impl Channel for HttpChannel {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
 
+    #[maybe_async::async_impl]
     async fn send_bytes_to(
         &mut self,
         p: usize,
@@ -410,6 +412,7 @@ impl Channel for HttpChannel {
         }
     }
 
+    #[maybe_async::async_impl]
     async fn recv_bytes_from(
         &mut self,
         p: usize,
