@@ -196,7 +196,7 @@ pub async fn fpre(channel: &mut impl Channel, parties: usize) -> Result<(), Erro
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
+        channel::{recv_from, recv_vec_from, send_to, SimpleAsyncChannel},
         fpre::{fpre, Auth, Delta, Error, Key, Mac, Share},
     };
     use smallvec::smallvec;
@@ -204,7 +204,7 @@ mod tests {
     #[tokio::test]
     async fn xor_homomorphic_mac() -> Result<(), Error> {
         let parties = 2;
-        let mut channels = SimpleChannel::channels(parties + 1);
+        let mut channels = SimpleAsyncChannel::channels(parties + 1);
         let mut channel = channels.pop().unwrap();
         tokio::spawn(async move { fpre(&mut channel, parties).await });
         let fpre_party = parties;
@@ -265,7 +265,7 @@ mod tests {
     async fn authenticated_and_shares() -> Result<(), Error> {
         for i in 0..3 {
             let parties = 2;
-            let mut channels = SimpleChannel::channels(parties + 1);
+            let mut channels = SimpleAsyncChannel::channels(parties + 1);
             let mut channel = channels.pop().unwrap();
             tokio::spawn(async move { fpre(&mut channel, parties).await });
             let fpre_party = parties;

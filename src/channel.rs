@@ -161,57 +161,37 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
     }
 }
 
-/// A simple synchronous channel using [`Sender`] and [`Receiver`].
+/// A simple asynchronous channel using [`Sender`] and [`Receiver`].
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
-pub struct SimpleChannel {
-    #[allow(dead_code)]
-    s_async: Vec<Option<Sender<Vec<u8>>>>,
-    #[allow(dead_code)]
-    r_async: Vec<Option<Receiver<Vec<u8>>>>,
-
-    #[allow(dead_code)]
-    s_sync: Vec<Option<SyncSender<Vec<u8>>>>,
-    #[allow(dead_code)]
-    r_sync: Vec<Option<SyncReceiver<Vec<u8>>>>,
+#[allow(dead_code)]
+pub struct SimpleAsyncChannel {
+    s: Vec<Option<Sender<Vec<u8>>>>,
+    r: Vec<Option<Receiver<Vec<u8>>>>,
 
     pub(crate) bytes_sent: usize,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-// Set up channels for N parties to communicate with each other
-fn create_channel_setup(parties: usize) -> Vec<SimpleChannel> {
-    let mut channels = vec![];
-
-    for _ in 0..parties {
-        let mut s_async: Vec<Option<Sender<Vec<u8>>>> = vec![];
-        let mut r_async: Vec<Option<Receiver<Vec<u8>>>> = vec![];
-        let mut s_sync: Vec<Option<SyncSender<Vec<u8>>>> = vec![];
-        let mut r_sync: Vec<Option<SyncReceiver<Vec<u8>>>> = vec![];
-        for _ in 0..parties {
-            s_async.push(None);
-            r_async.push(None);
-            s_sync.push(None);
-            r_sync.push(None);
-        }
-        let bytes_sent = 0;
-        channels.push(SimpleChannel {
-            s_async,
-            r_async,
-            s_sync,
-            r_sync,
-            bytes_sent,
-        });
-    }
-    channels
-}
-
 #[maybe_async::async_impl]
-impl SimpleChannel {
+impl SimpleAsyncChannel {
     /// Creates channels for N parties to communicate with each other.
     pub fn channels(parties: usize) -> Vec<Self> {
         let buffer_capacity = 1024;
-        let mut channels = create_channel_setup(parties);
+
+        let mut channels = vec![];
+
+        for _ in 0..parties {
+            let mut s: Vec<Option<Sender<Vec<u8>>>> = vec![];
+            let mut r: Vec<Option<Receiver<Vec<u8>>>> = vec![];
+            for _ in 0..parties {
+                s.push(None);
+                r.push(None);
+            }
+            let bytes_sent = 0;
+            channels.push(SimpleAsyncChannel { s, r, bytes_sent });
+        }
+
         for a in 0..parties {
             for b in 0..parties {
                 if a == b {
@@ -219,32 +199,10 @@ impl SimpleChannel {
                 }
                 let (send_a_to_b, recv_a_to_b) = tokio::sync::mpsc::channel(buffer_capacity);
                 let (send_b_to_a, recv_b_to_a) = tokio::sync::mpsc::channel(buffer_capacity);
-                channels[a].s_async[b] = Some(send_a_to_b);
-                channels[b].s_async[a] = Some(send_b_to_a);
-                channels[a].r_async[b] = Some(recv_b_to_a);
-                channels[b].r_async[a] = Some(recv_a_to_b);
-            }
-        }
-        channels
-    }
-}
-
-#[maybe_async::sync_impl]
-impl SimpleChannel {
-    /// Creates channels for N parties to communicate with each other.
-    pub fn channels(parties: usize) -> Vec<Self> {
-        let mut channels = create_channel_setup(parties);
-        for a in 0..parties {
-            for b in 0..parties {
-                if a == b {
-                    continue;
-                }
-                let (send_a_to_b, recv_a_to_b) = std::sync::mpsc::channel::<Vec<u8>>();
-                let (send_b_to_a, recv_b_to_a) = std::sync::mpsc::channel::<Vec<u8>>();
-                channels[a].s_sync[b] = Some(send_a_to_b);
-                channels[b].s_sync[a] = Some(send_b_to_a);
-                channels[a].r_sync[b] = Some(recv_b_to_a);
-                channels[b].r_sync[a] = Some(recv_a_to_b);
+                channels[a].s[b] = Some(send_a_to_b);
+                channels[b].s[a] = Some(send_b_to_a);
+                channels[a].r[b] = Some(recv_b_to_a);
+                channels[b].r[a] = Some(recv_a_to_b);
             }
         }
         channels
@@ -271,12 +229,11 @@ pub enum UnifiedSendError {
     SyncSend(SyncSendError<Vec<u8>>),
 }
 
-#[maybe_async::maybe_async]
-impl Channel for SimpleChannel {
+#[maybe_async::async_impl]
+impl Channel for SimpleAsyncChannel {
     type SendError = UnifiedSendError;
     type RecvError = RecvError;
 
-    #[maybe_async::async_impl]
     async fn send_bytes_to(
         &mut self,
         p: usize,
@@ -294,7 +251,7 @@ impl Channel for SimpleChannel {
         } else {
             println!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
         }
-        self.s_async[p]
+        self.s[p]
             .as_ref()
             .unwrap_or_else(|| panic!("No sender for party {p}"))
             .send(msg)
@@ -302,14 +259,13 @@ impl Channel for SimpleChannel {
             .map_err(UnifiedSendError::AsyncSend)
     }
 
-    #[maybe_async::async_impl]
     async fn recv_bytes_from(
         &mut self,
         p: usize,
         _phase: &str,
         _i: usize,
     ) -> Result<Vec<u8>, RecvError> {
-        let chunk = self.r_async[p]
+        let chunk = self.r[p]
             .as_mut()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
             .recv();
@@ -319,8 +275,58 @@ impl Channel for SimpleChannel {
             Err(_) => Err(RecvError::TimeoutElapsed),
         }
     }
+}
 
-    #[maybe_async::sync_impl]
+/// A simple synchronous channel using [`Sender`] and [`Receiver`].
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct SimpleSyncChannel {
+    s: Vec<Option<SyncSender<Vec<u8>>>>,
+    r: Vec<Option<SyncReceiver<Vec<u8>>>>,
+
+    pub(crate) bytes_sent: usize,
+}
+
+#[maybe_async::sync_impl]
+impl SimpleSyncChannel {
+    /// Creates channels for N parties to communicate with each other.
+    pub fn channels(parties: usize) -> Vec<Self> {
+        let mut channels = vec![];
+
+        for _ in 0..parties {
+            let mut s: Vec<Option<SyncSender<Vec<u8>>>> = vec![];
+            let mut r: Vec<Option<SyncReceiver<Vec<u8>>>> = vec![];
+            for _ in 0..parties {
+                s.push(None);
+                r.push(None);
+            }
+            let bytes_sent = 0;
+            channels.push(SimpleSyncChannel { s, r, bytes_sent });
+        }
+
+        for a in 0..parties {
+            for b in 0..parties {
+                if a == b {
+                    continue;
+                }
+                let (send_a_to_b, recv_a_to_b) = std::sync::mpsc::channel::<Vec<u8>>();
+                let (send_b_to_a, recv_b_to_a) = std::sync::mpsc::channel::<Vec<u8>>();
+                channels[a].s[b] = Some(send_a_to_b);
+                channels[b].s[a] = Some(send_b_to_a);
+                channels[a].r[b] = Some(recv_b_to_a);
+                channels[b].r[a] = Some(recv_a_to_b);
+            }
+        }
+        channels
+    }
+}
+
+#[maybe_async::sync_impl]
+impl Channel for SimpleSyncChannel {
+    type SendError = UnifiedSendError;
+    type RecvError = RecvError;
+
     fn send_bytes_to(
         &mut self,
         p: usize,
@@ -338,16 +344,15 @@ impl Channel for SimpleChannel {
         } else {
             println!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
         }
-        self.s_sync[p]
+        self.s[p]
             .as_ref()
             .unwrap_or_else(|| panic!("No sender for party {p}"))
             .send(msg)
             .map_err(UnifiedSendError::SyncSend)
     }
 
-    #[maybe_async::sync_impl]
     fn recv_bytes_from(&mut self, p: usize, _phase: &str, _i: usize) -> Result<Vec<u8>, RecvError> {
-        let chunk = self.r_sync[p]
+        let chunk = self.r[p]
             .as_mut()
             .unwrap_or_else(|| panic!("No receiver for party {p}"));
 

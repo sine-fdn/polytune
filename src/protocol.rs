@@ -171,14 +171,14 @@ pub async fn simulate_mpc_async(
     let p_eval = 0;
     let p_pre = inputs.len();
 
-    let mut channels: Vec<channel::SimpleChannel>;
+    let mut channels: Vec<channel::SimpleAsyncChannel>;
     if trusted {
-        channels = channel::SimpleChannel::channels(inputs.len() + 1);
+        channels = channel::SimpleAsyncChannel::channels(inputs.len() + 1);
         let mut channel = channels.pop().unwrap();
         let parties = inputs.len();
         tokio::spawn(async move { crate::fpre::fpre(&mut channel, parties).await });
     } else {
-        channels = channel::SimpleChannel::channels(inputs.len());
+        channels = channel::SimpleAsyncChannel::channels(inputs.len());
     }
 
     let mut parties = channels.into_iter().zip(inputs).enumerate();
@@ -268,14 +268,14 @@ pub fn simulate_mpc_sync(
     let p_eval = 0;
     let p_pre = inputs.len();
 
-    let mut channels: Vec<channel::SimpleChannel>;
+    let mut channels: Vec<channel::SimpleSyncChannel>;
     if trusted {
-        channels = channel::SimpleChannel::channels(inputs.len() + 1);
+        channels = channel::SimpleSyncChannel::channels(inputs.len() + 1);
         let mut channel = channels.pop().unwrap();
         let parties = inputs.len();
         let _ = crate::fpre::fpre(&mut channel, parties);
     } else {
-        channels = channel::SimpleChannel::channels(inputs.len());
+        channels = channel::SimpleSyncChannel::channels(inputs.len());
     }
 
     let mut parties = channels.into_iter().zip(inputs).enumerate();
