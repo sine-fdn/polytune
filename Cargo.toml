@@ -11,6 +11,9 @@ name = "polytune"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+is_sync = ["maybe-async/is_sync"]
+
 [dependencies]
 bincode = "1.3.3"
 blake3 = "1.5.0"
