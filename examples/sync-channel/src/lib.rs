@@ -1,121 +1,97 @@
-use maybe_async::sync_impl;
-use polytune::{
-    fpre::{fpre, Error as FpreError},
-    garble_lang::circuit::Circuit,
-    protocol::{mpc, Error as MpcError, Preprocessor},
-};
-use sync_channel::SimpleSyncChannel;
+use polytune::channel::Channel;
+use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 
-mod sync_channel;
-
-/// A custom error type for MPC computation and communication.
+/// A simple synchronous channel using [`Sender`] and [`Receiver`].
 #[derive(Debug)]
-pub enum Error {
-    /// Caused by the core MPC protocol computation.
-    MpcError(MpcError),
-    /// Caused by the preprocessing phase.
-    FpreError(FpreError),
-    /// Caused by thread-related errors.
-    ThreadError(String),
+pub struct SimpleSyncChannel {
+    pub(crate) s: Vec<Option<Sender<Vec<u8>>>>,
+    pub(crate) r: Vec<Option<Receiver<Vec<u8>>>>,
+    pub bytes_sent: usize,
 }
 
-/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
-#[sync_impl]
-pub fn simulate_mpc_sync(
-    circuit: &Circuit,
-    inputs: &[&[bool]],
-    output_parties: &[usize],
-    trusted: bool,
-) -> Result<Vec<bool>, Error> {
-    let p_eval = 0;
-    let p_pre = inputs.len();
+impl SimpleSyncChannel {
+    /// Creates channels for N parties to communicate with each other.
+    pub fn channels(parties: usize) -> Vec<Self> {
+        let mut channels = vec![];
 
-    let mut channels: Vec<SimpleSyncChannel>;
-    let fpre_thread = if trusted {
-        channels = SimpleSyncChannel::channels(inputs.len() + 1);
-        let mut channel = channels.pop().unwrap();
-        let parties = inputs.len();
-        Some(std::thread::spawn(move || {
-            fpre(&mut channel, parties).map_err(Error::FpreError)
-        }))
-    } else {
-        channels = SimpleSyncChannel::channels(inputs.len());
-        None
-    };
-
-    let mut parties = channels.into_iter().zip(inputs).enumerate();
-    let Some(evaluator) = parties.next() else {
-        return Ok(vec![]);
-    };
-    let p_fpre = if trusted {
-        Preprocessor::TrustedDealer(p_pre)
-    } else {
-        Preprocessor::Untrusted
-    };
-
-    let mut computation_threads = vec![];
-    for (p_own, (mut channel, inputs)) in parties {
-        let circuit = circuit.clone();
-        let inputs = inputs.to_vec();
-        let output_parties = output_parties.to_vec();
-        let handle = std::thread::spawn(move || {
-            let result = mpc(
-                &mut channel,
-                &circuit,
-                &inputs,
-                p_fpre,
-                p_eval,
-                p_own,
-                &output_parties,
-            );
-            match result {
-                Err(e) => Err(Error::MpcError(e)),
-                Ok(res) => Ok(res),
+        for _ in 0..parties {
+            let mut s = vec![];
+            let mut r = vec![];
+            for _ in 0..parties {
+                s.push(None);
+                r.push(None);
             }
-        });
-        computation_threads.push(handle);
+            let bytes_sent = 0;
+            channels.push(SimpleSyncChannel { s, r, bytes_sent });
+        }
+
+        for a in 0..parties {
+            for b in 0..parties {
+                if a == b {
+                    continue;
+                }
+                let (send_a_to_b, recv_a_to_b) = channel::<Vec<u8>>();
+                let (send_b_to_a, recv_b_to_a) = channel::<Vec<u8>>();
+                channels[a].s[b] = Some(send_a_to_b);
+                channels[b].s[a] = Some(send_b_to_a);
+                channels[a].r[b] = Some(recv_b_to_a);
+                channels[b].r[a] = Some(recv_a_to_b);
+            }
+        }
+        channels
+    }
+}
+
+/// The error raised by `recv` calls of a [`SimpleChannel`].
+#[derive(Debug)]
+pub enum SyncRecvError {
+    /// The channel has been closed.
+    Closed,
+    /// No message was received before the timeout.
+    TimeoutElapsed,
+}
+
+impl Channel for SimpleSyncChannel {
+    type SendError = SendError<Vec<u8>>;
+    type RecvError = SyncRecvError;
+
+    fn send_bytes_to(
+        &mut self,
+        p: usize,
+        phase: &str,
+        i: usize,
+        remaining: usize,
+        msg: Vec<u8>,
+    ) -> Result<(), SendError<Vec<u8>>> {
+        self.bytes_sent += msg.len();
+        let mb = msg.len() as f64 / 1024.0 / 1024.0;
+        let i = i + 1;
+        let total = i + remaining;
+        if i == 1 {
+            println!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
+        } else {
+            println!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
+        }
+        self.s[p]
+            .as_ref()
+            .unwrap_or_else(|| panic!("No sender for party {p}"))
+            .send(msg)
     }
 
-    let (_, (mut party_channel, inputs)) = evaluator;
-    let eval_result = mpc(
-        &mut party_channel,
-        circuit,
-        inputs,
-        p_fpre,
-        p_eval,
-        p_eval,
-        output_parties,
-    );
+    fn recv_bytes_from(
+        &mut self,
+        p: usize,
+        _phase: &str,
+        _i: usize,
+    ) -> Result<Vec<u8>, SyncRecvError> {
+        let chunk = self.r[p]
+            .as_mut()
+            .unwrap_or_else(|| panic!("No receiver for party {p}"));
 
-    match eval_result {
-        Err(e) => Err(Error::MpcError(e)),
-        Ok(res) => {
-            let mut outputs = vec![res];
-            for handle in computation_threads {
-                match handle.join() {
-                    Ok(Ok(output)) if !output.is_empty() => outputs.push(output),
-                    Ok(Err(e)) => return Err(e),
-                    Err(e) => return Err(Error::ThreadError(format!("Thread panicked: {:?}", e))),
-                    _ => {}
-                }
-            }
-            if let Some(handle) = fpre_thread {
-                match handle.join() {
-                    Ok(Err(e)) => return Err(e),
-                    Err(e) => {
-                        return Err(Error::ThreadError(format!("fpre thread panicked: {:?}", e)))
-                    }
-                    _ => {}
-                }
-            }
-            outputs.retain(|o| !o.is_empty());
-            if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                eprintln!("The result does not match for all output parties: {outputs:?}");
-            }
-            let mb = party_channel.bytes_sent as f64 / 1024.0 / 1024.0;
-            println!("Party {p_eval} sent {mb:.2}MB of messages");
-            println!("MPC simulation finished successfully!");
-            Ok(outputs.pop().unwrap_or_default())
+        match chunk.recv_timeout(std::time::Duration::from_secs(10 * 60)) {
+            Ok(chunk) => Ok(chunk),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(SyncRecvError::TimeoutElapsed),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(SyncRecvError::Closed),
         }
     }
 }
