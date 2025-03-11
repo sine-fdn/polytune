@@ -4,6 +4,7 @@ workspace = { members = [
     "examples/iroh-p2p-channels",
     "examples/wasm-http-channels",
     "examples/sql-integration",
+    "examples/sync-channel",
     "examples/api-integration",
 ] }
 [package]
