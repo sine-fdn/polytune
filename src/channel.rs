@@ -5,10 +5,7 @@ use std::fmt;
 use maybe_async::{async_impl, maybe_async};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::{
-    sync::mpsc::{channel, error::SendError, Receiver, Sender},
-    time::timeout,
-};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 /// Errors related to sending / receiving / (de-)serializing messages.
 #[derive(Debug)]
@@ -168,6 +165,7 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
 /// A simple asynchronous channel using [`Sender`] and [`Receiver`].
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
     r: Vec<Option<Receiver<Vec<u8>>>>,
@@ -220,7 +218,7 @@ pub enum AsyncRecvError {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_impl(AFIT)]
 impl Channel for SimpleChannel {
-    type SendError = SendError<Vec<u8>>;
+    type SendError = tokio::sync::mpsc::error::SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
 
     async fn send_bytes_to(
@@ -230,7 +228,7 @@ impl Channel for SimpleChannel {
         i: usize,
         remaining: usize,
         msg: Vec<u8>,
-    ) -> Result<(), SendError<Vec<u8>>> {
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<Vec<u8>>> {
         self.bytes_sent += msg.len();
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         let i = i + 1;
@@ -257,7 +255,7 @@ impl Channel for SimpleChannel {
             .as_mut()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
             .recv();
-        match timeout(std::time::Duration::from_secs(10 * 60), chunk).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(10 * 60), chunk).await {
             Ok(Some(chunk)) => Ok(chunk),
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),
