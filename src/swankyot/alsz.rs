@@ -17,13 +17,14 @@ use crate::{
     },
 };
 
+use maybe_async::maybe_async;
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{utils as scutils, AesHash, AesRng, Block, SemiHonest, AES_HASH};
 use std::marker::PhantomData;
 
 /// Oblivious transfer sender.
-pub struct Sender<OT: OtReceiver<Msg = Block> + SemiHonest> {
+pub(crate) struct Sender<OT: OtReceiver<Msg = Block> + SemiHonest> {
     _ot: PhantomData<OT>,
     pub(super) hash: AesHash,
     s: Vec<bool>,
@@ -31,12 +32,13 @@ pub struct Sender<OT: OtReceiver<Msg = Block> + SemiHonest> {
     rngs: Vec<AesRng>,
 }
 /// Oblivious transfer receiver.
-pub struct Receiver<OT: OtSender<Msg = Block> + SemiHonest> {
+pub(crate) struct Receiver<OT: OtSender<Msg = Block> + SemiHonest> {
     _ot: PhantomData<OT>,
     pub(super) hash: AesHash,
     rngs: Vec<(AesRng, AesRng)>,
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT> {
     async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
@@ -62,6 +64,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
     pub(super) async fn send_setup<C: Channel>(
         &mut self,
@@ -85,6 +88,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     type Msg = Block;
 
@@ -125,6 +129,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
     async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -154,6 +159,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
     pub(super) async fn recv_setup<C: Channel>(
         &mut self,
@@ -182,6 +188,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     type Msg = Block;
 
@@ -212,6 +219,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         })
     }
 
+    #[maybe_async(AFIT)]
     async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
@@ -237,6 +245,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT> {
     async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -266,7 +275,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> SemiHonest for Receiver<OT> {}
 
 /// u8vec to boolvec
 #[inline]
-pub fn u8vec_to_boolvec(v: &[u8]) -> Vec<bool> {
+pub(crate) fn u8vec_to_boolvec(v: &[u8]) -> Vec<bool> {
     let mut bv = Vec::with_capacity(v.len() * 8);
     for byte in v.iter() {
         for i in 0..8 {
@@ -278,7 +287,7 @@ pub fn u8vec_to_boolvec(v: &[u8]) -> Vec<bool> {
 
 /// boolvec to u8vec
 #[inline]
-pub fn boolvec_to_u8vec(bv: &[bool]) -> Vec<u8> {
+pub(crate) fn boolvec_to_u8vec(bv: &[bool]) -> Vec<u8> {
     let offset = if bv.len() % 8 == 0 { 0 } else { 1 };
     let mut v = vec![0u8; bv.len() / 8 + offset];
     for (i, b) in bv.iter().enumerate() {
@@ -330,6 +339,6 @@ fn transpose_naive(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
 
 /// transpose a matrix of bits
 #[inline]
-pub fn transpose(m: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
+pub(crate) fn transpose(m: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
     transpose_naive(m, nrows, ncols)
 }

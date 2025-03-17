@@ -1,0 +1,9 @@
+[package]
+name = "polytune-sync-channel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+garble_lang = { version = "0.5.0", features = ["serde"] }
+polytune = { path = "../../", version = "0.1.0", features = ["is_sync"] }
+serde = { version = "1.0.195", features = ["derive"] }

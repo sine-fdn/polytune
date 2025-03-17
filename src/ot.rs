@@ -3,11 +3,12 @@ use crate::swankyot::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Send
 
 use crate::{channel::Channel, faand::Error};
 
+use maybe_async::maybe_async;
 use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{AesRng, Block};
 
 /// Transform Block to u128
-pub fn block_to_u128(inp: Block) -> u128 {
+pub(crate) fn block_to_u128(inp: Block) -> u128 {
     let array: [u8; 16] = inp.into();
     let mut value = 0;
     for &byte in array.iter() {
@@ -16,6 +17,7 @@ pub fn block_to_u128(inp: Block) -> u128 {
     value
 }
 
+#[maybe_async(AFIT)]
 pub(crate) async fn kos_ot_sender(
     channel: &mut impl Channel,
     deltas: &[Block],
@@ -35,6 +37,7 @@ pub(crate) async fn kos_ot_sender(
     Ok(sender_out)
 }
 
+#[maybe_async(AFIT)]
 pub(crate) async fn kos_ot_receiver(
     channel: &mut impl Channel,
     bs: &[bool],

@@ -18,6 +18,7 @@ use crate::{
     },
 };
 
+use maybe_async::maybe_async;
 use rand::{CryptoRng, Rng, RngCore};
 use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{Block, Malicious, SemiHonest};
@@ -26,15 +27,16 @@ use scuttlebutt::{Block, Malicious, SemiHonest};
 const SSP: usize = 40;
 
 /// Oblivious transfer extension sender.
-pub struct Sender<OT: OtReceiver<Msg = Block> + Malicious> {
+pub(crate) struct Sender<OT: OtReceiver<Msg = Block> + Malicious> {
     pub(super) ot: AlszSender<OT>,
 }
 
 /// Oblivious transfer extension receiver.
-pub struct Receiver<OT: OtSender<Msg = Block> + Malicious> {
+pub(crate) struct Receiver<OT: OtSender<Msg = Block> + Malicious> {
     ot: AlszReceiver<OT>,
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
     pub(super) async fn send_setup<C: Channel>(
         &mut self,
@@ -70,6 +72,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + Malicious> FixedKeyInitializer for Sender<OT> {
     async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
@@ -83,6 +86,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> FixedKeyInitializer for Sender<OT>
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
     type Msg = Block;
 
@@ -123,6 +127,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
     async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -152,6 +157,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
     pub(super) async fn recv_setup<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -186,6 +192,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
     type Msg = Block;
 
@@ -229,6 +236,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
     }
 }
 
+#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> {
     async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -265,6 +273,6 @@ impl<OT: OtSender<Msg = Block> + Malicious> Malicious for Receiver<OT> {}
 
 /// XOR two blocks
 #[inline(always)]
-pub fn xor_two_blocks(x: &(Block, Block), y: &(Block, Block)) -> (Block, Block) {
+pub(crate) fn xor_two_blocks(x: &(Block, Block), y: &(Block, Block)) -> (Block, Block) {
     (x.0 ^ y.0, x.1 ^ y.1)
 }
