@@ -255,7 +255,7 @@ pub enum Preprocessor {
     Untrusted,
 }
 
-/// Executes the MPC protocol for one party and returns the outputs (empty for the contributor).
+/// Executes the MPC protocol for one party and returns the output bits.
 #[maybe_async(AFIT)]
 pub async fn mpc(
     channel: &mut impl Channel,
