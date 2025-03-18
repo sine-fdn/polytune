@@ -1,14 +1,16 @@
-use polytune::channel::Channel;
-use std::sync::mpsc::{channel, Receiver, SendError, Sender};
+use maybe_async::sync_impl;
+use std::sync::mpsc::{Receiver, Sender};
 
 /// A simple synchronous channel using [`Sender`] and [`Receiver`].
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct SimpleSyncChannel {
     pub(crate) s: Vec<Option<Sender<Vec<u8>>>>,
     pub(crate) r: Vec<Option<Receiver<Vec<u8>>>>,
     pub bytes_sent: usize,
 }
 
+#[sync_impl]
 impl SimpleSyncChannel {
     /// Creates channels for N parties to communicate with each other.
     pub fn channels(parties: usize) -> Vec<Self> {
@@ -30,8 +32,8 @@ impl SimpleSyncChannel {
                 if a == b {
                     continue;
                 }
-                let (send_a_to_b, recv_a_to_b) = channel::<Vec<u8>>();
-                let (send_b_to_a, recv_b_to_a) = channel::<Vec<u8>>();
+                let (send_a_to_b, recv_a_to_b) = std::sync::mpsc::channel::<Vec<u8>>();
+                let (send_b_to_a, recv_b_to_a) = std::sync::mpsc::channel::<Vec<u8>>();
                 channels[a].s[b] = Some(send_a_to_b);
                 channels[b].s[a] = Some(send_b_to_a);
                 channels[a].r[b] = Some(recv_b_to_a);
@@ -51,8 +53,9 @@ pub enum SyncRecvError {
     TimeoutElapsed,
 }
 
-impl Channel for SimpleSyncChannel {
-    type SendError = SendError<Vec<u8>>;
+#[sync_impl]
+impl polytune::channel::Channel for SimpleSyncChannel {
+    type SendError = std::sync::mpsc::SendError<Vec<u8>>;
     type RecvError = SyncRecvError;
 
     fn send_bytes_to(
@@ -62,7 +65,7 @@ impl Channel for SimpleSyncChannel {
         i: usize,
         remaining: usize,
         msg: Vec<u8>,
-    ) -> Result<(), SendError<Vec<u8>>> {
+    ) -> Result<(), std::sync::mpsc::SendError<Vec<u8>>> {
         self.bytes_sent += msg.len();
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         let i = i + 1;
