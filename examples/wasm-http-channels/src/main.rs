@@ -42,6 +42,9 @@ async fn main() -> Result<(), Error> {
 
     let cors = CorsLayer::new()
         .allow_origin([
+            "https://benchmarking.sine.dev"
+                .parse::<HeaderValue>()
+                .unwrap(),
             "https://verification-pilot-ui.vercel.app"
                 .parse::<HeaderValue>()
                 .unwrap(),
