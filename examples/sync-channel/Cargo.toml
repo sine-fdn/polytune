@@ -3,7 +3,11 @@ name = "polytune-sync-channel"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+is_sync = ["polytune/is_sync"]
+
 [dependencies]
 garble_lang = { version = "0.5.0", features = ["serde"] }
-polytune = { path = "../../", version = "0.1.0", features = ["is_sync"] }
+maybe-async = { version = "0.2" }
+polytune = { path = "../../", version = "0.1.0" }
 serde = { version = "1.0.195", features = ["derive"] }
