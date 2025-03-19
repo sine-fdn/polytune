@@ -7,12 +7,11 @@
 pub use garble_lang;
 
 pub mod channel;
-pub mod data_types;
-pub mod faand;
 pub mod fpre;
-pub mod ot;
 pub mod protocol;
 
-pub mod swankyot;
-
+mod data_types;
+mod faand;
 mod garble;
+mod ot;
+mod swankyot;

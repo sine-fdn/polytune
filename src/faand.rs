@@ -1,7 +1,6 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use blake3;
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -22,7 +21,7 @@ const RHO: usize = 40;
 #[derive(Debug)]
 pub enum Error {
     /// A message could not be sent or received.
-    ChannelError(channel::Error),
+    ChannelErr(channel::Error),
     /// The value of bi is not 0 or 1.
     InvalidBitValue,
     /// A commitment could not be opened.
@@ -30,15 +29,15 @@ pub enum Error {
     /// Empty vector.
     EmptyVector,
     /// Conversion error.
-    ConversionError,
+    ConversionErr,
     /// Empty bucket.
-    EmptyBucketError,
+    EmptyBucket,
     /// A message was sent, but it contained no data.
     EmptyMsg,
     /// Invalid array length.
     InvalidLength,
     /// Broadcast not consistent.
-    BroadcastError,
+    InconsistentBroadcast,
     /// KOS consistency check failed.
     KOSConsistencyCheckFailed,
     /// The MAC is not the correct one in aBit.
@@ -58,7 +57,7 @@ pub enum Error {
 /// Converts a `channel::Error` into a custom `Error` type.
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
-        Self::ChannelError(e)
+        Self::ChannelErr(e)
     }
 }
 
@@ -88,7 +87,7 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
     if data.is_empty() {
         return Err(Error::EmptyVector);
     }
-    let serialized_data = bincode::serialize(data).map_err(|_| Error::ConversionError)?;
+    let serialized_data = bincode::serialize(data).map_err(|_| Error::ConversionErr)?;
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(&serialized_data);
@@ -150,7 +149,7 @@ pub(crate) async fn broadcast_verification<
             if vec_k[j].is_none() {
                 return Err(Error::EmptyVector);
             } else if vec_k[j] != Some(hash_vecs[j]) {
-                return Err(Error::BroadcastError);
+                return Err(Error::InconsistentBroadcast);
             }
         }
     }
@@ -563,7 +562,7 @@ pub(crate) async fn fashare(
                 if let Ok(mac) = dm[start..end].try_into().map(u128::from_be_bytes) {
                     xor_xk_macs[kk][r] ^= mac;
                 } else {
-                    return Err(Error::ConversionError);
+                    return Err(Error::ConversionErr);
                 }
             }
         }
@@ -990,7 +989,7 @@ fn combine_bucket(
     let mut bucket = bucket.into_iter();
     let (x, y, z) = match bucket.next() {
         Some(item) => item,
-        None => return Err(Error::EmptyBucketError),
+        None => return Err(Error::EmptyBucket),
     };
     let mut result = (x.clone(), y.clone(), z.clone());
 
