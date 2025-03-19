@@ -42,6 +42,9 @@ async fn main() -> Result<(), Error> {
 
     let cors = CorsLayer::new()
         .allow_origin([
+            "https://benchmarking.sine.dev"
+                .parse::<HeaderValue>()
+                .unwrap(),
             "https://verification-pilot-ui.vercel.app"
                 .parse::<HeaderValue>()
                 .unwrap(),
@@ -128,7 +131,7 @@ async fn recv(
     State(msgs): State<Msgs>,
     Path((session, to, from)): Path<(String, u32, u32)>,
 ) -> Result<Vec<u8>, StatusCode> {
-    for _ in 0..100 {
+    for _ in 0..600 {
         let mut msgs = msgs.lock().await;
         let Some(msgs) = msgs
             .get_mut(&session)
