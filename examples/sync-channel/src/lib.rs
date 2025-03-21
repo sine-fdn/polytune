@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 pub struct SimpleSyncChannel {
     pub(crate) s: Vec<Option<Sender<Vec<u8>>>>,
     pub(crate) r: Vec<Option<Receiver<Vec<u8>>>>,
-    pub bytes_sent: usize,
+    pub(crate) bytes_sent: usize,
 }
 
 #[sync_impl]
@@ -44,7 +44,7 @@ impl SimpleSyncChannel {
     }
 }
 
-/// The error raised by `recv` calls of a [`SimpleChannel`].
+/// The error raised by `recv` calls of a [`SimpleSyncChannel`].
 #[derive(Debug)]
 pub enum SyncRecvError {
     /// The channel has been closed.
