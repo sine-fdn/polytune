@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 pub struct SimpleSyncChannel {
     pub(crate) s: Vec<Option<Sender<Vec<u8>>>>,
     pub(crate) r: Vec<Option<Receiver<Vec<u8>>>>,
-    pub(crate) bytes_sent: usize,
+    pub bytes_sent: usize,
 }
 
 #[sync_impl]
