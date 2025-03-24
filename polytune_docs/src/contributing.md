@@ -4,7 +4,7 @@ While Polytune was developed by us at the [SINE Foundation](https://sine.foundat
 
 [![Github](github-mark.png "Contribute on Github")](https://github.com/sine-fdn/polytune)
 
-The Polytune MPC Engine implements a complex protocol [[WRK17]](https://eprint.iacr.org/2017/189.pdf) with many steps. The different steps and their modules are as follows:
+Wondering where to start? The Polytune MPC Engine implements a complex protocol [[WRK17]](https://eprint.iacr.org/2017/189.pdf) with many steps. The different steps and their modules are as follows:
 
 1. [`ot.rs`](https://github.com/sine-fdn/polytune/blob/main/src/ot.rs) implements a maliciously secure correlated OT receiver and sender based on (a modified version of) the KOS OT implementation of [swanky](https://github.com/GaloisInc/swanky/tree/dev/ocelot).
 2. [`fpre.rs`](https://github.com/sine-fdn/polytune/blob/main/src/fpre.rs) implements the preprocessing phase with an additional party, the trusted dealer, who distributes the correlated randomness used in the MPC protocol. Note that this requires a different trust assumption and should only be used with caution.
