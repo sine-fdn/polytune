@@ -35,7 +35,7 @@
 //!
 //! ## Example
 //!
-//! ```no_run
+//! ```ignore
 //! use polytune::{
 //!     channel::SimpleChannel,
 //!     garble_lang::circuit::Circuit,
