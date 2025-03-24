@@ -14,30 +14,59 @@ We provide example implementations for:
 - WebAssembly-compatible HTTP channels for clients
 - Peer-to-Peer channels
 
-## `Channel` Trait Definition
+## How to Implement Your Own `Channel`
 
-The `Channel` trait defines two core methods for sending and receiving messages:
+1. **Define a Struct**: Implement your own channel struct, ensuring it manages communication between multiple parties.
+2. **Implement the `Channel` Trait**: Define the required methods (`send_bytes_to`, `recv_bytes_from`) based on your chosen communication mechanism.
+3. **Handle Errors Gracefully**: Ensure robust error handling for message sending and receiving.
+
+That's it! You can create a custom `Channel` implementation that integrates seamlessly with Polytune, adapting it to different transport mechanisms such as network sockets or async channels.
+
+## Implementation Requirements
+
+When implementing the `Channel` trait, you need to:
+
+1. Define the error types for sending and receiving operations
+2. Implement the sending mechanism through `send_bytes_to`
+3. Implement the receiving mechanism through `recv_bytes_from`
 
 ```rust
-#[maybe_async(AFIT)]
-pub trait Channel {
-    type SendError: fmt::Debug;
-    type RecvError: fmt::Debug;
+trait Channel {
+    type SendError;
+    type RecvError;
 
     async fn send_bytes_to(
         &mut self,
-        party: usize,
+        p: usize,
         phase: &str,
         i: usize,
         remaining: usize,
-        chunk: Vec<u8>,
+        msg: Vec<u8>,
     ) -> Result<(), Self::SendError>;
 
     async fn recv_bytes_from(
         &mut self,
-        party: usize,
+        p: usize,
         phase: &str,
         i: usize,
     ) -> Result<Vec<u8>, Self::RecvError>;
 }
 ```
+
+## Tips for Custom Implementations
+
+1. **Channel Parameters**:
+
+   - `p`: Index of the target party for send/receive
+   - `phase`: String identifier for the current protocol phase
+   - `i`: Index within the current phase (useful for tracking progress)
+   - `remaining`: Number of remaining messages (for send operations)
+
+2. **Connection Management**:
+
+   - Consider connection setup/teardown if needed
+   - Ensure proper resource cleanup
+
+3. **Security Considerations**:
+   - Add encryption if transmitting over insecure channels
+   - Implement authentication mechanisms if needed
