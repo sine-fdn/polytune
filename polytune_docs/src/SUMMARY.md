@@ -6,7 +6,7 @@
 - [Customizable Channels](./examples/channel.md)
   - [Sync](./examples/sync.md)
   - [HTTP Multi-Server](./examples/http_multi.md)
-  - [HTTP Single-Server](./examples/https_single.md)
+  - [HTTP Single-Server](./examples/http_single.md)
   - [WASM Client](./examples/wasm.md)
   - [Peer-to-Peer](./examples/iroh.md)
   - [SQL Integration](./examples/sql.md)
