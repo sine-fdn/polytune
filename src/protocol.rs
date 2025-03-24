@@ -255,7 +255,45 @@ pub enum Preprocessor {
     Untrusted,
 }
 
-/// Executes the MPC protocol for one party and returns the output bits.
+/// Executes the Secure Multi-Party Computation (MPC) protocol for a single party.
+///
+/// This function implements a garbled circuit-based MPC protocol where parties cooperatively
+/// compute a function without revealing their private inputs. The protocol consists of several
+/// phases: preprocessing, input processing, circuit evaluation, and output determination.
+///
+/// # Arguments
+///
+/// * `channel` - Communication channel to interact with other parties
+/// * `circuit` - The Boolean circuit to be evaluated in the MPC protocol
+/// * `inputs` - The party's private boolean input bits
+/// * `p_fpre` - Specifies how preprocessing randomness is generated (trusted dealer or untrusted)
+/// * `p_eval` - Index of the party that will evaluate the garbled circuit
+/// * `p_own` - Index of the current party executing this function
+/// * `p_out` - Indices of parties that will receive the computation output
+///
+/// # Returns
+///
+/// A vector of boolean values representing the computation result, or an error if the protocol
+/// fails.
+///
+/// # Errors
+///
+/// Returns `Error` if:
+/// - The circuit is invalid
+/// - Party indices are invalid
+/// - Input size doesn't match circuit expectations
+/// - Communication with other parties fails
+/// - Protocol-specific errors occur during execution (authentication failures, missing shares,
+///   etc.)
+///
+/// # Protocol Overview
+///
+/// The protocol proceeds through the following phases:
+/// 1. Function-independent preprocessing: generates correlated randomness needed by all parties
+/// 2. Function-dependent preprocessing: prepares secret shares and garbled gates for AND operations
+/// 3. Input processing: handles sharing and masking of private inputs
+/// 4. Circuit evaluation: performed by the evaluator party only
+/// 5. Output determination: reveals the computation result to designated output parties
 #[maybe_async(AFIT)]
 pub async fn mpc(
     channel: &mut impl Channel,

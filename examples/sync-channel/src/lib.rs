@@ -44,7 +44,7 @@ impl SimpleSyncChannel {
     }
 }
 
-/// The error raised by `recv` calls of a [`SimpleChannel`].
+/// The error raised by `recv` calls of a [`SimpleSyncChannel`].
 #[derive(Debug)]
 pub enum SyncRecvError {
     /// The channel has been closed.
