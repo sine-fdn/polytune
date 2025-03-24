@@ -3,7 +3,6 @@
 - [What is Polytune?](./landing.md)
 - [MPC Protocol](./protocol.md)
 - [Installation](./installation.md)
-- [Benchmarks](./bench.md)
 - [Customizable Channels](./examples/channel.md)
   - [Sync Channels](./examples/sync.md)
   - [HTTP Multi-Server Channels](./examples/http_multi.md)
@@ -12,4 +11,5 @@
   - [Peer-to-Peer Channels](./examples/iroh.md)
   - [SQL Integration](./examples/sql.md)
   - [API Integration](./examples/api.md)
+- [Benchmarks](./bench.md)
 - [Contributing](./contributing.md)
