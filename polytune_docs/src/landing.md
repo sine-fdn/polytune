@@ -2,7 +2,7 @@
 
 [Secure Multi-Party Computation (MPC)](https://sine.foundation/library/002-smpc) allows two or more parties to interactively perform a computation on their private inputs, without revealing any additional information about their inputs to each other, other than what the result of the computation reveals.
 
-Our aim at SINE is to make advanced technology, such as MPC, available to as many companies as possible. We are especially keen to apply  [MPC for the exchange of sustainability data](https://sine.foundation/library/sine-is-partnering-with-wbcsd-to-decarbonise-the-economy).
+Our aim at SINE is to make advanced technology, such as MPC, available to as many companies as possible. We are especially keen to apply [MPC for the exchange of sustainability data](https://sine.foundation/library/sine-is-partnering-with-wbcsd-to-decarbonise-the-economy).
 
 Polytune, our MPC engine, aims at fulfilling our vision by providing an easy-to-use framework to apply this technology wherever there is a need to share data privately, without a third-party trustee.
 
@@ -11,16 +11,14 @@ Polytune implements the multi-party [[WRK17b]](https://eprint.iacr.org/2017/189.
 > ⚠️ **Note**  
 > Our MPC engine is being actively developed, so expect breaking changes.
 
-Polytune is directly compatible with [Garble](https://github.com/sine-fdn/garble-lang), our programming language that allows us to describe computations on a high level and translate them to a Boolean circuit format that is required by the [[WRK17b]](https://eprint.iacr.org/2017/189.pdf) MPC protocol. 
+Polytune is directly compatible with [Garble](https://github.com/sine-fdn/garble-lang), our programming language that allows us to describe computations on a high level and translate them to a Boolean circuit format that is required by the [[WRK17b]](https://eprint.iacr.org/2017/189.pdf) MPC protocol.
 Learn more about Garble: [Garble Documentation](https://garble-lang.org/).
 
 You can see examples for the usage with examples described in Garble, e.g., [`benches/.join.garble.rs`](https://github.com/sine-fdn/polytune/blob/main/benches/.join.garble.rs) or in [`examples/sql-integration/.example.garble.rs`](https://github.com/sine-fdn/polytune/blob/main/examples/sql-integration/.example.garble.rs).
 
-
-
 ## Funded by
 
 <p float="left">
-  <img src="../../BMBF_Logo.png" height="200" />
-  <img src="../../EU_Logo.png" height="200" /> 
+  <img src="logos/BMBF_Logo.png" height="200" />
+  <img src="logos/EU_Logo.png" height="200" /> 
 </p>
