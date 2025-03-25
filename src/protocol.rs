@@ -96,7 +96,7 @@ impl From<faand::Error> for Error {
     }
 }
 
-/// A custom error type for all MPC operations.
+/// A custom error type for all steps of the main MPC protocol.
 #[derive(Debug)]
 pub enum MpcError {
     /// No secret share was sent during preprocessing for the specified wire.
@@ -187,7 +187,7 @@ pub async fn simulate_mpc_async(
         let inputs = inputs.to_vec();
         let output_parties = output_parties.to_vec();
         computation.spawn(async move {
-            let result = mpc(
+            let result = _mpc(
                 &mut channel,
                 &circuit,
                 &inputs,
@@ -212,7 +212,7 @@ pub async fn simulate_mpc_async(
         });
     }
     let (_, (mut party_channel, inputs)) = evaluator;
-    let eval_result = mpc(
+    let eval_result = _mpc(
         &mut party_channel,
         circuit,
         inputs,
@@ -248,7 +248,7 @@ pub async fn simulate_mpc_async(
 
 /// Specifies how correlated randomness is provided in the prepocessing phase.
 #[derive(Debug, Clone, Copy)]
-pub enum Preprocessor {
+pub(crate) enum Preprocessor {
     /// Correlated randomness is provided by the (semi-)trusted party with the given index.
     TrustedDealer(usize),
     /// The preprocessing is done using OT extension among the parties, no third party necessary.
@@ -266,7 +266,6 @@ pub enum Preprocessor {
 /// * `channel` - Communication channel to interact with other parties
 /// * `circuit` - The Boolean circuit to be evaluated in the MPC protocol
 /// * `inputs` - The party's private boolean input bits
-/// * `p_fpre` - Specifies how preprocessing randomness is generated (trusted dealer or untrusted)
 /// * `p_eval` - Index of the party that will evaluate the garbled circuit
 /// * `p_own` - Index of the current party executing this function
 /// * `p_out` - Indices of parties that will receive the computation output
@@ -296,6 +295,19 @@ pub enum Preprocessor {
 /// 5. Output determination: reveals the computation result to designated output parties
 #[maybe_async(AFIT)]
 pub async fn mpc(
+    channel: &mut impl Channel,
+    circuit: &Circuit,
+    inputs: &[bool],
+    p_eval: usize,
+    p_own: usize,
+    p_out: &[usize],
+) -> Result<Vec<bool>, Error> {
+    let p_fpre = Preprocessor::Untrusted;
+    _mpc(channel, circuit, inputs, p_fpre, p_eval, p_own, p_out).await
+}
+
+#[maybe_async(AFIT)]
+pub(crate) async fn _mpc(
     channel: &mut impl Channel,
     circuit: &Circuit,
     inputs: &[bool],

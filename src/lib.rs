@@ -18,7 +18,6 @@
 //!
 //! * [`protocol`]: The [`protocol::mpc`] function which executes the protocol for a single party.
 //! * [`channel`]: Communication abstractions for exchanging data between parties.
-//! * [`fpre`]: Function preprocessing with a trusted dealer (usually not necessary).
 //!
 //! ## Basic Usage
 //!
@@ -51,7 +50,6 @@
 //!
 //! // Define party roles and inputs
 //! let my_inputs = vec![true, false, true];
-//! let p_fpre = Preprocessor::Untrusted;
 //! let p_eval = 0; // Party 0 is the evaluator
 //! let p_own = 1;  // This code is running as party 1
 //! let p_out = vec![0, 1]; // Parties 0 and 1 receive the output
@@ -61,7 +59,6 @@
 //!     &mut channel,
 //!     &circuit,
 //!     &my_inputs,
-//!     p_fpre,
 //!     p_eval,
 //!     p_own,
 //!     &p_out,
@@ -84,11 +81,11 @@
 pub use garble_lang;
 
 pub mod channel;
-pub mod fpre;
 pub mod protocol;
 
 mod data_types;
 mod faand;
+mod fpre;
 mod garble;
 mod ot;
 mod swankyot;

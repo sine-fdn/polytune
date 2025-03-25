@@ -11,7 +11,7 @@ use crate::{
 
 /// Errors that can occur while executing FPre as a trusted dealer.
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     /// One of the parties tried to cheat.
     CheatingDetected,
     /// The parties expect a different number of random shares.
@@ -46,7 +46,7 @@ impl From<channel::Error> for Error {
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
 #[maybe_async(AFIT)]
-pub async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
+pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
     for p in 0..parties {
         recv_from::<()>(channel, p, "delta (fpre)").await?;
     }
