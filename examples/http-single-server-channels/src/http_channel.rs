@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use polytune::channel::Channel;
+use polytune::channel::{Channel, RecvInfo, SendInfo};
 use reqwest::StatusCode;
 use tokio::time::sleep;
 
@@ -61,10 +61,8 @@ impl Channel for PollingHttpChannel {
     async fn send_bytes_to(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
-        _remaining: usize,
         msg: Vec<u8>,
+        _info: SendInfo,
     ) -> Result<(), HttpChannelError> {
         let url = format!("{}/send/{}/{}/{}", self.url, self.session, self.party, p);
         let resp: reqwest::Response = self.client.post(url).body(msg).send().await?;
@@ -78,8 +76,7 @@ impl Channel for PollingHttpChannel {
     async fn recv_bytes_from(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
+        _info: RecvInfo,
     ) -> Result<Vec<u8>, HttpChannelError> {
         let url = format!("{}/recv/{}/{}/{}", self.url, self.session, p, self.party);
         let mut attempts = 0;
