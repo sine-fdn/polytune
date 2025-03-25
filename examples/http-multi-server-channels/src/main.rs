@@ -9,7 +9,7 @@ use clap::Parser;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::compile,
-    protocol::{mpc, Preprocessor},
+    protocol::mpc,
 };
 use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
@@ -50,10 +50,9 @@ async fn main() -> Result<(), Error> {
     let code = fs::read_to_string(&program).await?;
     let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
     let input = prg.parse_arg(party, &input)?.as_bits();
-    let fpre = Preprocessor::Untrusted;
     let p_out: Vec<_> = (0..urls.len()).collect();
     let mut channel = HttpChannel::new(urls, party).await?;
-    let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, party, &p_out).await?;
+    let output = mpc(&mut channel, &prg.circuit, &input, 0, party, &p_out).await?;
     if !output.is_empty() {
         println!("\nThe result is {}", prg.parse_output(&output)?);
     }

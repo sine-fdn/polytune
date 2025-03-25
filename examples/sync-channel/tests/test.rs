@@ -15,7 +15,7 @@
 mod tests {
     use polytune::{
         garble_lang::compile,
-        protocol::{mpc, Error, Preprocessor},
+        protocol::{mpc, Error},
     };
     use polytune_sync_channel::SimpleSyncChannel;
 
@@ -34,7 +34,6 @@ mod tests {
 
                     let channels = SimpleSyncChannel::channels(inputs.len());
                     let p_eval = 0;
-                    let p_fpre = Preprocessor::Untrusted;
                     let p_out: Vec<usize> = vec![0, 1, 2];
 
                     let mut parties = channels.into_iter().zip(inputs).enumerate();
@@ -46,8 +45,7 @@ mod tests {
                         let inputs = inputs.to_vec();
                         let p_out = p_out.clone();
                         let handle = std::thread::spawn(move || {
-                            let out =
-                                mpc(&mut ch, &circuit, &inputs, p_fpre, p_eval, p_own, &p_out);
+                            let out = mpc(&mut ch, &circuit, &inputs, p_eval, p_own, &p_out);
                             match out {
                                 Err(e) => Err(e),
                                 Ok(res) => Ok(res),
@@ -58,8 +56,7 @@ mod tests {
 
                     let (_, (mut ch, inputs)) = evaluator;
                     let circuit = &prg.circuit;
-                    let out =
-                        mpc(&mut ch, &circuit, inputs, p_fpre, p_eval, p_eval, &p_out).unwrap();
+                    let out = mpc(&mut ch, &circuit, inputs, p_eval, p_eval, &p_out).unwrap();
 
                     let mut outputs = vec![out];
                     for handle in computation_threads {
