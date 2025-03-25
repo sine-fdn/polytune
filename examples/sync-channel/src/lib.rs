@@ -61,15 +61,14 @@ impl polytune::channel::Channel for SimpleSyncChannel {
     fn send_bytes_to(
         &mut self,
         p: usize,
-        phase: &str,
-        i: usize,
-        remaining: usize,
         msg: Vec<u8>,
+        info: polytune::channel::SendInfo,
     ) -> Result<(), std::sync::mpsc::SendError<Vec<u8>>> {
         self.bytes_sent += msg.len();
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        let i = i + 1;
-        let total = i + remaining;
+        let i = info.sent();
+        let total = info.total();
+        let phase = info.phase();
         if i == 1 {
             println!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
         } else {
@@ -84,8 +83,7 @@ impl polytune::channel::Channel for SimpleSyncChannel {
     fn recv_bytes_from(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
+        _info: polytune::channel::RecvInfo,
     ) -> Result<Vec<u8>, SyncRecvError> {
         let chunk = self.r[p]
             .as_mut()
