@@ -37,10 +37,8 @@ impl Channel for IrohChannel {
     async fn send_bytes_to(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
-        _remaining: usize,
         msg: Vec<u8>,
+        _info: SendInfo,
     ) -> Result<(), Self::SendError> {
         info!("sending {} bytes to {p}", msg.len());
         let mut send = self.conns[p].as_ref().unwrap().open_uni().await?;
@@ -52,8 +50,7 @@ impl Channel for IrohChannel {
     async fn recv_bytes_from(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
+        _info: RecvInfo,
     ) -> Result<Vec<u8>, Self::RecvError> {
         let mut recv = self.conns[p].as_ref().unwrap().accept_uni().await?;
         let msg = recv.read_to_end(self.max_msg_bytes).await?;

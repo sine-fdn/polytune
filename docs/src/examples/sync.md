@@ -16,10 +16,8 @@ The `SimpleSyncChannel` implements the `Channel` trait from Polytune with the fo
 fn send_bytes_to(
     &mut self,
     p: usize,
-    phase: &str,
-    i: usize,
-    remaining: usize,
     msg: Vec<u8>
+    info: SendInfo,
 ) -> Result<(), std::sync::mpsc::SendError<Vec<u8>>>;
 ```
 
@@ -33,8 +31,7 @@ fn send_bytes_to(
 fn recv_bytes_from(
     &mut self,
     p: usize,
-    _phase: &str,
-    _i: usize,
+    info: RecvInfo,
 ) -> Result<Vec<u8>, SyncRecvError>;
 ```
 
