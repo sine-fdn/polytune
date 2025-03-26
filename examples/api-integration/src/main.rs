@@ -8,7 +8,7 @@ use axum::{
 };
 use clap::Parser;
 use polytune::{
-    channel::Channel,
+    channel::{Channel, RecvInfo, SendInfo},
     garble_lang::{compile_with_constants, literal::Literal},
     protocol::{mpc, Preprocessor},
 };
@@ -373,17 +373,16 @@ impl Channel for HttpChannel {
     async fn send_bytes_to(
         &mut self,
         p: usize,
-        phase: &str,
-        i: usize,
-        remaining: usize,
         msg: Vec<u8>,
+        info: SendInfo,
     ) -> Result<(), Self::SendError> {
         let simulated_delay_in_ms = 300;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        let i = i + 1;
-        let total = i + remaining;
+        let i = info.sent();
+        let total = info.total();
+        let phase = info.phase();
         if i == 1 {
             info!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
         } else {
@@ -413,8 +412,7 @@ impl Channel for HttpChannel {
     async fn recv_bytes_from(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
+        _info: RecvInfo,
     ) -> Result<Vec<u8>, Self::RecvError> {
         timeout(Duration::from_secs(30 * 60), self.recv[p].recv())
             .await

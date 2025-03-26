@@ -38,17 +38,14 @@ trait Channel {
     async fn send_bytes_to(
         &mut self,
         p: usize,
-        phase: &str,
-        i: usize,
-        remaining: usize,
         msg: Vec<u8>,
+        info: SendInfo,
     ) -> Result<(), Self::SendError>;
 
     async fn recv_bytes_from(
         &mut self,
         p: usize,
-        phase: &str,
-        i: usize,
+        info: RecvInfo,
     ) -> Result<Vec<u8>, Self::RecvError>;
 }
 ```
@@ -58,9 +55,7 @@ trait Channel {
 1. **Channel Parameters**:
 
    - `p`: Index of the target party for send/receive
-   - `phase`: String identifier for the current protocol phase
-   - `i`: Index within the current phase (useful for tracking progress)
-   - `remaining`: Number of remaining messages (for send operations)
+   - `info`: Various information useful for logging
 
 2. **Connection Management**:
 

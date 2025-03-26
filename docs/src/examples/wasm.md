@@ -41,10 +41,8 @@ impl Channel for HttpChannel {
     async fn send_bytes_to(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
-        _remaining: usize,
         msg: Vec<u8>,
+        _info: SendInfo,
     ) -> Result<(), Self::SendError> {
         let client = reqwest::Client::new();
         let url = format!("{}send/{}/{}", self.url, self.party, p);
@@ -66,8 +64,7 @@ impl Channel for HttpChannel {
     async fn recv_bytes_from(
         &mut self,
         p: usize,
-        _phase: &str,
-        _i: usize,
+        _info: RecvInfo,
     ) -> Result<Vec<u8>, Self::RecvError> {
         // Implementation with retries and timeouts
         // ...
