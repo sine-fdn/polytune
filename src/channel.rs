@@ -140,6 +140,14 @@ impl RecvInfo {
 }
 
 /// A communication channel used to send/receive messages to/from another party.
+///
+/// This trait defines the core interface for message transport in the protocol.
+/// Implementations of this trait determine how messages are physically sent and received,
+/// which can vary based on the environment (network, in-process, etc.).
+///
+/// The trait supports both asynchronous and synchronous implementations through
+/// the `maybe_async` crate. By default, methods are asynchronous, but synchronous
+/// implementations can be created by enabling the `is_sync` feature.
 #[maybe_async(AFIT)]
 pub trait Channel {
     /// The error that can occur sending messages over the channel.
