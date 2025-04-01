@@ -1,4 +1,37 @@
-//! Secure multi-party computation protocol with communication via channels.
+//! Secure multi-party computation protocol implementing maliciously-secure MPC using garbled
+//! circuits.
+//!
+//! This module provides the core execution engine of Polytune, orchestrating secure computation
+//! between multiple parties without revealing their private inputs. The implementation uses
+//! authenticated shares and cryptographic primitives to ensure security against malicious
+//! adversaries.
+//!
+//! # Key Features
+//!
+//! - Malicious security against adversaries who may deviate from the protocol
+//! - Garbled circuit approach with authenticated inputs and outputs
+//! - Support for both trusted dealer and distributed preprocessing
+//! - Comprehensive error handling for protocol violations
+//! - Channel-based abstraction for inter-party communication
+//!
+//! # Protocol Workflow
+//!
+//! The MPC protocol consists of five main phases:
+//!
+//! 1. Function-independent preprocessing: Generates correlated randomness needed by all parties
+//! 2. Function-dependent preprocessing: Prepares secret shares and garbled gates for AND operations
+//! 3. Input processing: Handles secure sharing and masking of private inputs from all parties
+//! 4. Circuit evaluation: Performed by the designated evaluator party or parties
+//! 5. Output determination: Reveals computation results only to designated output parties
+//!
+//! # Primary API
+//!
+//! The main entry point is the [`mpc`] function, which should be called by each participating party
+//! with their respective private inputs and party identifiers. The function handles all
+//! communication and protocol steps, returning the computation result to authorized output parties.
+//!
+//! Security is enforced through message authentication codes (MACs), delta-based key generation,
+//! and comprehensive verification of all protocol steps.
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use maybe_async::maybe_async;
