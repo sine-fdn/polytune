@@ -1,4 +1,32 @@
-//! A communication channel used to send/receive messages to/from another party.
+//! Provides communication channels for sending and receiving messages between parties in a
+//! protocol.
+//!
+//! This module defines the fundamental abstraction for communication in the form of the [`Channel`]
+//! trait, which can be implemented to support various communication methods and environments.
+//!
+//! The core design philosophy is to separate the protocol logic from the specifics of message
+//! transport. The protocol implementation does not need to be concerned with how messages are
+//! physically transmitted - it only interacts with the abstract `Channel` interface. This means you
+//! can switch between different channel implementations (network sockets, in-memory channels, etc.)
+//! without changing protocol code.
+//!
+//! ## Async and Sync Support
+//!
+//! By default, the `Channel` trait uses asynchronous methods for sending and receiving messages.
+//! However, a synchronous version can be used by enabling the `is_sync` feature flag. The module
+//! uses the `maybe_async` crate to support both modes from the same codebase.
+//!
+//! ## Message Chunking
+//!
+//! The module provides automatic chunking of large messages to avoid issues with message size
+//! limits. Messages are split into chunks, serialized, and reassembled on the receiving end
+//! transparently.
+//!
+//! ## Serialization
+//!
+//! Messages are serialized using `bincode`, allowing for efficient binary encoding of structured
+//! data. The channel primarily works with byte vectors, while higher-level send/receive functions
+//! handle serialization and deserialization of application-level messages.
 
 use std::fmt;
 
