@@ -152,7 +152,6 @@ async fn main() -> Result<()> {
     println!("> starting the computation...");
 
     let mut channel = IrohChannel {
-        n: 0,
         sender,
         receiver,
         received_msgs: HashMap::new(),
@@ -176,10 +175,9 @@ async fn main() -> Result<()> {
 }
 
 struct IrohChannel {
-    n: usize,
     sender: GossipSender,
     receiver: GossipReceiver,
-    received_msgs: HashMap<usize, VecDeque<(usize, Vec<u8>)>>,
+    received_msgs: HashMap<usize, VecDeque<Vec<u8>>>,
     party: usize,
 }
 
@@ -193,21 +191,14 @@ impl Channel for IrohChannel {
         msg: Vec<u8>,
         _info: SendInfo,
     ) -> Result<(), Self::SendError> {
-        tracing::info!(
-            "sending msg {}-{} with {} bytes to {p}",
-            self.party,
-            self.n,
-            msg.len()
-        );
+        tracing::info!("sending msg {} bytes from {} to {p}", msg.len(), self.party);
         let message = Message {
-            n: self.n,
             from_party: self.party,
             to_party: p,
             data: msg,
         };
         let data: Bytes = postcard::to_stdvec(&message)?.into();
         self.sender.broadcast(data).await?;
-        self.n += 1;
         Ok(())
     }
 
@@ -218,8 +209,8 @@ impl Channel for IrohChannel {
     ) -> Result<Vec<u8>, Self::RecvError> {
         tracing::info!("receiving message from {p}");
         if let Some(msgs) = self.received_msgs.get_mut(&p) {
-            if let Some((n, msg)) = msgs.pop_front() {
-                tracing::info!("found stored message {p}-{n}");
+            if let Some(msg) = msgs.pop_front() {
+                tracing::info!("found stored message from {p}");
                 return Ok(msg);
             }
         }
@@ -229,43 +220,36 @@ impl Channel for IrohChannel {
                 let message: Message = postcard::from_bytes(&msg.content)?;
                 if message.to_party == self.party {
                     if message.from_party == p {
-                        tracing::info!(
-                            "received {} bytes from {p}-{}",
-                            message.data.len(),
-                            message.n
-                        );
+                        tracing::info!("received {} bytes from {p}", message.data.len());
                         return Ok(message.data);
                     } else {
-                        tracing::info!(
-                            "received {} bytes, storing message {}-{} for now",
+                        tracing::debug!(
+                            "received {} bytes, storing message from {} for now",
                             message.data.len(),
                             message.from_party,
-                            message.n
                         );
                         self.received_msgs
                             .entry(message.from_party)
                             .or_default()
-                            .push_back((message.n, message.data));
+                            .push_back(message.data);
                     }
                 } else {
-                    tracing::info!(
-                        "Ignoring message {}-{} to {}",
+                    tracing::debug!(
+                        "Ignoring message from {} to {}",
                         message.from_party,
-                        message.n,
                         message.to_party
                     );
                 }
             } else {
-                tracing::info!("{event:?}");
+                tracing::trace!("{event:?}");
             }
         }
-        bail!("Expect to receive an event!")
+        bail!("Expected to receive an event!")
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Message {
-    n: usize,
     from_party: usize,
     to_party: usize,
     data: Vec<u8>,
