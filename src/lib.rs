@@ -38,7 +38,7 @@
 //! use polytune::{
 //!     channel::SimpleChannel,
 //!     garble_lang::circuit::Circuit,
-//!     protocol::{mpc, Preprocessor},
+//!     protocol::mpc,
 //! };
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {

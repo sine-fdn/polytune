@@ -15,7 +15,7 @@ use polytune::{
         literal::{Literal, VariantLiteral},
         token::{SignedNumType, UnsignedNumType},
     },
-    protocol::{mpc, Preprocessor},
+    protocol::mpc,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
