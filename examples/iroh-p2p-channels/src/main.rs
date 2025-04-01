@@ -1,263 +1,306 @@
-use std::{net::SocketAddr, path::PathBuf, process::exit, sync::Arc, time::Duration};
-
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-use iroh_channel::IrohChannel;
-use iroh_net::{derp::DerpMode, key::SecretKey, MagicEndpoint, NodeAddr};
-use polytune::{
-    fpre::fpre,
-    garble_lang::compile,
-    protocol::{mpc, Preprocessor},
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt,
+    net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
+    process::exit,
+    str::FromStr,
+    time::Duration,
 };
-use quinn::Connection;
-use serde::{Deserialize, Serialize};
-use tokio::{fs, sync::Mutex, time::sleep};
-use url::Url;
 
-mod iroh_channel;
+use anyhow::{bail, Result};
+use bytes::Bytes;
+use clap::{Parser, Subcommand};
+use iroh::{Endpoint, NodeAddr, RelayMap, RelayMode, RelayUrl, SecretKey};
+use iroh_gossip::{
+    net::{Event, Gossip, GossipEvent, GossipReceiver, GossipSender, GOSSIP_ALPN},
+    proto::TopicId,
+};
+use n0_future::StreamExt;
+use polytune::{
+    channel::{Channel, RecvInfo, SendInfo},
+    garble_lang::compile,
+    protocol::mpc,
+};
+use serde::{Deserialize, Serialize};
+use tokio::{fs, time::sleep};
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
 #[command(name = "polytune")]
 struct Cli {
-    #[command(subcommand)]
-    command: Commands,
+    /// secret key to derive our node id from.
+    #[clap(long)]
+    secret_key: Option<String>,
+    /// Set a custom relay server. By default, the relay server hosted by n0 will be used.
+    #[clap(short, long)]
+    relay: Option<RelayUrl>,
+    /// Set the bind port for our socket. By default, a random port will be used.
+    #[clap(short, long, default_value = "0")]
+    bind_port: u16,
+    /// The path to the Garble program to execute.
+    #[arg(long)]
+    program: PathBuf,
+    /// The index of the party (0 for the first participant, 1 for the second, etc).
+    #[arg(long)]
+    party: usize,
+    /// The party's input as a Garble literal, e.g. "123u32".
+    #[arg(short, long)]
+    input: String,
+    #[clap(subcommand)]
+    command: Command,
 }
 
 #[derive(Debug, Subcommand)]
-enum Commands {
-    /// Runs a client as a trusted dealer, responsible for correlated randomness.
-    #[command(arg_required_else_help = true)]
-    Pre {
-        /// The number of parties participating in the computation.
-        #[arg(short, long)]
-        parties: usize,
+enum Command {
+    /// Start an MPC session for others to join.
+    New,
+    /// Join an MPC session.
+    Join {
+        /// The ticket, as base32 string.
+        ticket: String,
     },
-    /// Runs a client as a party that participates with its own inputs.
-    #[command(arg_required_else_help = true)]
-    Party {
-        /// The id of the remote node.
-        #[clap(long)]
-        node_id: iroh_net::NodeId,
-        /// The list of direct UDP addresses for the remote node.
-        #[clap(long, value_parser, num_args = 1.., value_delimiter = ';')]
-        addrs: Vec<SocketAddr>,
-        /// The url of the DERP server the remote node can also be reached at.
-        #[clap(long)]
-        derp_url: Url,
-        /// The path to the Garble program to execute.
-        #[arg(long)]
-        program: PathBuf,
-        /// The index of the party (0 for the first participant, 1 for the second, etc).
-        #[arg(long)]
-        party: usize,
-        /// The party's input as a Garble literal, e.g. "123u32".
-        #[arg(short, long)]
-        input: String,
-    },
-}
-
-const ALPN: &[u8] = b"polytune/p2p/iroh";
-const MAX_MSG_BYTES: usize = 1_024_000;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct JoinMessage {
-    party: usize,
-    node_id: iroh_net::NodeId,
-    addrs: Vec<SocketAddr>,
-    derp_url: Url,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let args = Cli::parse();
-    match args.command {
-        Commands::Pre { parties } => {
-            tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::ERROR)
-                .init();
-            println!("Starting preprocessor, waiting for other parties to connect...");
-            let secret_key = SecretKey::generate();
 
-            let endpoint = MagicEndpoint::builder()
-                .secret_key(secret_key)
-                .alpns(vec![ALPN.to_vec()])
-                .derp_mode(DerpMode::Default)
-                .bind(0)
-                .await?;
+    let Ok(prg) = fs::read_to_string(&args.program).await else {
+        eprintln!("Could not find '{}'", args.program.display());
+        exit(-1);
+    };
+    let prg = compile(&prg).unwrap();
+    let input = prg.parse_arg(args.party, &args.input).unwrap().as_bits();
+    let parties = prg.circuit.input_gates.len();
 
-            let own_node_id = endpoint.node_id();
-
-            let local_addrs = endpoint
-                .local_endpoints()
-                .await?
-                .into_iter()
-                .map(|endpoint| endpoint.addr.to_string())
-                .collect::<Vec<_>>()
-                .join(";");
-
-            let derp_url = endpoint
-                .my_derp()
-                .expect("could not connect to a DERP server");
-            println!("\nTo connect as a party run the following command, additionally specifying --party, --program and --input:");
-            println!("\ncargo run -- party --node-id={own_node_id} --addrs={local_addrs} --derp-url={derp_url}");
-            let mut participants: Vec<Option<(Connection, JoinMessage)>> = vec![None; parties];
-            while let Some(conn) = endpoint.accept().await {
-                let (_node_id, alpn, conn) = iroh_net::magic_endpoint::accept_conn(conn).await?;
-                if alpn.as_bytes() != ALPN {
-                    continue;
-                }
-                let mut recv = conn.accept_uni().await?;
-                let msg = recv.read_to_end(MAX_MSG_BYTES).await?;
-                let msg: JoinMessage = bincode::deserialize(&msg)?;
-                let party = msg.party;
-                if party < parties {
-                    println!("Party {party} ({}) joined", msg.node_id);
-                    participants[party] = Some((conn, msg));
-                }
-                if participants.iter().flatten().count() == parties {
-                    break;
-                }
-            }
-            let joined: Vec<_> = participants
-                .iter()
-                .flatten()
-                .map(|(_, p)| p)
-                .cloned()
-                .collect();
-            for (conn, _) in participants.iter().flatten() {
-                let mut send = conn.open_uni().await?;
-                send.write_all(&bincode::serialize(&joined)?).await?;
-                send.finish().await?;
-            }
-
-            println!("Connected to all parties, running MPC protocol now...");
-            let conns: Vec<_> = participants
-                .into_iter()
-                .map(|c| c.map(|(c, _)| c))
-                .collect();
-
-            let mut channel = IrohChannel::new(conns, MAX_MSG_BYTES);
-            fpre(&mut channel, parties).await.unwrap();
-            Ok(())
+    // parse the cli command
+    let (topic, peers) = match &args.command {
+        Command::New => {
+            let topic = TopicId::from_bytes(rand::random());
+            println!("> opening chat room for topic {topic}");
+            (topic, vec![])
         }
-        Commands::Party {
-            node_id,
-            addrs,
-            derp_url,
-            program,
-            party,
-            input,
-        } => {
-            let Ok(prg) = fs::read_to_string(&program).await else {
-                eprintln!("Could not find '{}'", program.display());
-                exit(-1);
-            };
-            let prg = compile(&prg).unwrap();
-            let input = prg.parse_arg(party, &input).unwrap().as_bits();
-            let parties = prg.circuit.input_gates.len();
-
-            println!("Connecting to preprocessor...");
-            let secret_key = SecretKey::generate();
-
-            let endpoint = MagicEndpoint::builder()
-                .secret_key(secret_key)
-                .alpns(vec![ALPN.to_vec()])
-                .derp_mode(DerpMode::Default)
-                .bind(0)
-                .await?;
-
-            let own_node_id = endpoint.node_id();
-            let local_addrs = endpoint
-                .local_endpoints()
-                .await?
-                .into_iter()
-                .map(|endpoint| endpoint.addr)
-                .collect::<Vec<_>>();
-
-            let my_derp_url = endpoint
-                .my_derp()
-                .expect("could not connect to a DERP server");
-            let addr = NodeAddr::from_parts(node_id, Some(derp_url), addrs);
-            let pre_conn = endpoint.connect(addr, ALPN).await?;
-
-            let mut send = pre_conn.open_uni().await?;
-
-            let msg = JoinMessage {
-                party,
-                node_id: own_node_id,
-                addrs: local_addrs,
-                derp_url: my_derp_url,
-            };
-            send.write_all(&bincode::serialize(&msg)?).await?;
-            send.finish().await?;
-
-            println!("Found preprocessor, waiting for list of other parties...");
-            let mut recv = pre_conn.accept_uni().await?;
-
-            let participants: Arc<Mutex<Vec<Option<Connection>>>> =
-                Arc::new(Mutex::new(vec![None; parties]));
-            let joined: Vec<JoinMessage> =
-                bincode::deserialize(&recv.read_to_end(MAX_MSG_BYTES).await?)?;
-            let listen_endpoint = endpoint.clone();
-            let listen_joined = joined.clone();
-            let listen_participants = Arc::clone(&participants);
-            tokio::spawn(async move {
-                while let Some(conn) = listen_endpoint.accept().await {
-                    let (node_id, alpn, conn) = iroh_net::magic_endpoint::accept_conn(conn).await?;
-                    if alpn.as_bytes() != ALPN {
-                        continue;
-                    }
-                    for joined in listen_joined.iter() {
-                        if joined.node_id == node_id {
-                            listen_participants.lock().await[joined.party] = Some(conn);
-                            break;
-                        }
-                    }
-                    if listen_participants.lock().await.iter().flatten().count() == parties {
-                        return Ok::<_, anyhow::Error>(());
-                    }
-                }
-                Ok::<_, anyhow::Error>(())
-            });
-            for joined in joined {
-                if joined.party != party {
-                    println!("Connecting to party {} ({})", joined.party, joined.node_id);
-                }
-                if joined.party < party {
-                    let addr =
-                        NodeAddr::from_parts(joined.node_id, Some(joined.derp_url), joined.addrs);
-                    let conn = endpoint.connect(addr, ALPN).await?;
-                    participants.lock().await[joined.party] = Some(conn);
-                }
-            }
-            while participants.lock().await.iter().flatten().count() < parties - 1 {
-                sleep(Duration::from_millis(100)).await;
-            }
-            println!("Connected to all parties, running MPC protocol now...");
-            let mut conns: Vec<_> = participants.lock().await.clone();
-            conns.push(Some(pre_conn));
-
-            let p_eval = 0;
-            let fpre = Preprocessor::TrustedDealer(conns.len() - 1);
-            let mut channel = IrohChannel::new(conns, MAX_MSG_BYTES);
-            let p_out: Vec<_> = (0..parties).collect();
-            let output = mpc(
-                &mut channel,
-                &prg.circuit,
-                &input,
-                fpre,
-                p_eval,
-                party,
-                &p_out,
-            )
-            .await
-            .unwrap();
-            if !output.is_empty() {
-                let result = prg.parse_output(&output).unwrap();
-                println!("\nThe result is {result}");
-            }
-            Ok(())
+        Command::Join { ticket } => {
+            println!("> trying to decode ticket...");
+            let Ticket { topic, peers } = Ticket::from_str(ticket)?;
+            println!("> joining chat room for topic {topic}");
+            (topic, peers)
         }
+    };
+
+    // parse or generate our secret key
+    let secret_key = match args.secret_key {
+        None => SecretKey::generate(rand::rngs::OsRng),
+        Some(key) => key.parse()?,
+    };
+    println!("> our secret key: {secret_key}");
+
+    // configure our relay map
+    let relay_mode = match args.relay {
+        Some(url) => RelayMode::Custom(RelayMap::from_url(url)),
+        None => RelayMode::Default,
+    };
+
+    // build our magic endpoint
+    let endpoint = Endpoint::builder()
+        .secret_key(secret_key)
+        .relay_mode(relay_mode)
+        .bind_addr_v4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, args.bind_port))
+        .bind()
+        .await?;
+    println!("> our node id: {}", endpoint.node_id());
+
+    // create the gossip protocol
+    let gossip = Gossip::builder()
+        .max_message_size(100 * 1024 * 1024)
+        .spawn(endpoint.clone())
+        .await?;
+
+    // print a ticket that includes our own node id and endpoint addresses
+    let ticket = {
+        let me = endpoint.node_addr().await?;
+        let peers = peers.iter().cloned().chain([me]).collect();
+        Ticket { topic, peers }
+    };
+    println!("> ticket to join us: {ticket}");
+
+    // setup router
+    let router = iroh::protocol::Router::builder(endpoint.clone())
+        .accept(GOSSIP_ALPN, gossip.clone())
+        .spawn()
+        .await?;
+
+    // join the gossip topic by connecting to known peers, if any
+    let peer_ids = peers.iter().map(|p| p.node_id).collect();
+    if peers.is_empty() {
+        println!("> waiting for peers to join us...");
+    } else {
+        println!("> trying to connect to {} peers...", peers.len());
+        // add the peer addrs from the ticket to our endpoint's addressbook so that they can be dialed
+        for peer in peers.into_iter() {
+            endpoint.add_node_addr(peer)?;
+        }
+    };
+    let (sender, receiver) = gossip.subscribe_and_join(topic, peer_ids).await?.split();
+
+    let secs = 20;
+    println!("> connected, other peers have {secs} time to join before the computation starts!");
+
+    sleep(Duration::from_secs(secs)).await;
+    println!("> starting the computation...");
+
+    let mut channel = IrohChannel {
+        n: 0,
+        sender,
+        receiver,
+        received_msgs: HashMap::new(),
+        party: args.party,
+    };
+
+    let p_eval = 0;
+    let p_own = args.party;
+    let p_out: Vec<_> = (0..parties).collect();
+
+    let output = mpc(&mut channel, &prg.circuit, &input, p_eval, p_own, &p_out).await?;
+
+    // shutdown
+    router.shutdown().await?;
+
+    if !output.is_empty() {
+        let result = prg.parse_output(&output).unwrap();
+        println!("\nThe result is {result}");
+    }
+    Ok(())
+}
+
+struct IrohChannel {
+    n: usize,
+    sender: GossipSender,
+    receiver: GossipReceiver,
+    received_msgs: HashMap<usize, VecDeque<(usize, Vec<u8>)>>,
+    party: usize,
+}
+
+impl Channel for IrohChannel {
+    type SendError = anyhow::Error;
+    type RecvError = anyhow::Error;
+
+    async fn send_bytes_to(
+        &mut self,
+        p: usize,
+        msg: Vec<u8>,
+        _info: SendInfo,
+    ) -> Result<(), Self::SendError> {
+        tracing::info!(
+            "sending msg {}-{} with {} bytes to {p}",
+            self.party,
+            self.n,
+            msg.len()
+        );
+        let message = Message {
+            n: self.n,
+            from_party: self.party,
+            to_party: p,
+            data: msg,
+        };
+        let data: Bytes = postcard::to_stdvec(&message)?.into();
+        self.sender.broadcast(data).await?;
+        self.n += 1;
+        Ok(())
+    }
+
+    async fn recv_bytes_from(
+        &mut self,
+        p: usize,
+        _info: RecvInfo,
+    ) -> Result<Vec<u8>, Self::RecvError> {
+        tracing::info!("receiving message from {p}");
+        if let Some(msgs) = self.received_msgs.get_mut(&p) {
+            if let Some((n, msg)) = msgs.pop_front() {
+                tracing::info!("found stored message {p}-{n}");
+                return Ok(msg);
+            }
+        }
+        tracing::info!("could not find stored message, waiting for message instead...");
+        while let Some(event) = self.receiver.try_next().await? {
+            if let Event::Gossip(GossipEvent::Received(msg)) = event {
+                let message: Message = postcard::from_bytes(&msg.content)?;
+                if message.to_party == self.party {
+                    if message.from_party == p {
+                        tracing::info!(
+                            "received {} bytes from {p}-{}",
+                            message.data.len(),
+                            message.n
+                        );
+                        return Ok(message.data);
+                    } else {
+                        tracing::info!(
+                            "received {} bytes, storing message {}-{} for now",
+                            message.data.len(),
+                            message.from_party,
+                            message.n
+                        );
+                        self.received_msgs
+                            .entry(message.from_party)
+                            .or_default()
+                            .push_back((message.n, message.data));
+                    }
+                } else {
+                    tracing::info!(
+                        "Ignoring message {}-{} to {}",
+                        message.from_party,
+                        message.n,
+                        message.to_party
+                    );
+                }
+            } else {
+                tracing::info!("{event:?}");
+            }
+        }
+        bail!("Expect to receive an event!")
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Message {
+    n: usize,
+    from_party: usize,
+    to_party: usize,
+    data: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Ticket {
+    topic: TopicId,
+    peers: Vec<NodeAddr>,
+}
+impl Ticket {
+    /// Deserializes from bytes.
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        postcard::from_bytes(bytes).map_err(Into::into)
+    }
+    /// Serializes to bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        postcard::to_stdvec(self).expect("postcard::to_stdvec is infallible")
+    }
+}
+
+/// Serializes to base32.
+impl fmt::Display for Ticket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut text = data_encoding::BASE32_NOPAD.encode(&self.to_bytes()[..]);
+        text.make_ascii_lowercase();
+        write!(f, "{}", text)
+    }
+}
+
+/// Deserializes from base32.
+impl FromStr for Ticket {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = data_encoding::BASE32_NOPAD.decode(s.to_ascii_uppercase().as_bytes())?;
+        Self::from_bytes(&bytes)
     }
 }
