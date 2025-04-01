@@ -1,5 +1,4 @@
-//! Provides communication channels for sending and receiving messages between parties in a
-//! protocol.
+//! Provides communication channels for sending and receiving messages between parties.
 //!
 //! This module defines the fundamental abstraction for communication in the form of the [`Channel`]
 //! trait, which can be implemented to support various communication methods and environments.

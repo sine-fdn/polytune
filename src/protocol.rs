@@ -1,5 +1,5 @@
-//! Secure multi-party computation protocol implementing maliciously-secure MPC using garbled
-//! circuits.
+//! The [WRK17b](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979) protocol, implementing
+//! maliciously-secure MPC using garbled circuits.
 //!
 //! This module provides the core execution engine of Polytune, orchestrating secure computation
 //! between multiple parties without revealing their private inputs. The implementation uses
