@@ -16,7 +16,7 @@
 //!
 //! The crate is structured into several modules:
 //!
-//! * [`protocol`]: The [`protocol::mpc`] function which executes the protocol for a single party.
+//! * [`protocol`]: Contains the [`protocol::mpc`] function that executes the protocol for a party.
 //! * [`channel`]: Communication abstractions for exchanging data between parties.
 //!
 //! ## Basic Usage
@@ -28,9 +28,6 @@
 //! 3. Prepare private inputs
 //! 4. Call the [`protocol::mpc`] function with appropriate parameters
 //! 5. Process the resulting outputs
-//!
-//! For simulated environments (testing/development), you can use the [`protocol::simulate_mpc`]
-//! function.
 //!
 //! ## Example
 //!
