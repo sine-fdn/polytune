@@ -242,7 +242,8 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
 pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
     r: Vec<Option<Receiver<Vec<u8>>>>,
-    pub(crate) bytes_sent: usize,
+    /// The total number of bytes sent over the channel.
+    pub bytes_sent: usize,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

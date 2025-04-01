@@ -2,7 +2,101 @@ use garble_lang::{
     circuit::{Circuit, Gate},
     compile,
 };
-use polytune::protocol::{simulate_mpc, Error};
+use polytune::{
+    channel,
+    protocol::{mpc, Error},
+};
+
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+fn simulate_mpc(
+    circuit: &Circuit,
+    inputs: &[&[bool]],
+    output_parties: &[usize],
+) -> Result<Vec<bool>, Error> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("Could not start tokio runtime");
+    rt.block_on(simulate_mpc_async(circuit, inputs, output_parties))
+}
+
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+async fn simulate_mpc_async(
+    circuit: &Circuit,
+    inputs: &[&[bool]],
+    output_parties: &[usize],
+) -> Result<Vec<bool>, Error> {
+    let p_eval = 0;
+
+    let channels = channel::SimpleChannel::channels(inputs.len());
+
+    let mut parties = channels.into_iter().zip(inputs).enumerate();
+    let Some((_, (mut eval_channel, inputs))) = parties.next() else {
+        return Ok(vec![]);
+    };
+
+    let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
+    for (p_own, (mut channel, inputs)) in parties {
+        let circuit = circuit.clone();
+        let inputs = inputs.to_vec();
+        let output_parties = output_parties.to_vec();
+        computation.spawn(async move {
+            match mpc(
+                &mut channel,
+                &circuit,
+                &inputs,
+                p_eval,
+                p_own,
+                &output_parties,
+            )
+            .await
+            {
+                Ok(res) => {
+                    println!(
+                        "Party {p_own} sent {:.2}MB of messages",
+                        channel.bytes_sent as f64 / 1024.0 / 1024.0
+                    );
+                    res
+                }
+                Err(e) => {
+                    eprintln!("SMPC protocol failed for party {p_own}: {:?}", e);
+                    vec![]
+                }
+            }
+        });
+    }
+    let eval_result = mpc(
+        &mut eval_channel,
+        circuit,
+        inputs,
+        p_eval,
+        p_eval,
+        output_parties,
+    )
+    .await;
+    match eval_result {
+        Err(e) => {
+            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+            Ok(vec![])
+        }
+        Ok(res) => {
+            let mut outputs = vec![res];
+            while let Some(output) = computation.join_next().await {
+                if let Ok(output) = output {
+                    outputs.push(output);
+                }
+            }
+            outputs.retain(|o| !o.is_empty());
+            if !outputs.windows(2).all(|w| w[0] == w[1]) {
+                eprintln!("The result does not match for all output parties: {outputs:?}");
+            }
+            let mb = eval_channel.bytes_sent as f64 / 1024.0 / 1024.0;
+            println!("Party {p_eval} sent {mb:.2}MB of messages");
+            println!("MPC simulation finished successfully!");
+            Ok(outputs.pop().unwrap_or_default())
+        }
+    }
+}
 
 /// Tests the evaluation of a simple XOR circuit in a two-party computation (2PC) setting.
 ///
@@ -29,7 +123,7 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x, z], &[y]], &output_parties, false)?;
+                let output = simulate_mpc(&circuit, &[&[x, z], &[y]], &output_parties)?;
                 assert_eq!(output, vec![x ^ y ^ z]);
             }
         }
@@ -62,7 +156,7 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], &output_parties, false)?;
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], &output_parties)?;
                 assert_eq!(output, vec![x ^ y ^ z]);
             }
         }
@@ -97,7 +191,7 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
                 output_gates: vec![2, 3, 4, 5],
             };
 
-            let output = simulate_mpc(&circuit, &[&[x], &[y]], &output_parties, false)?;
+            let output = simulate_mpc(&circuit, &[&[x], &[y]], &output_parties)?;
             assert_eq!(output, vec![!x, !y, x, y]);
         }
     }
@@ -137,7 +231,7 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
                     output_gates: vec![3, 4, 5, 6, 7, 8],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], &output_parties, false)?;
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], &output_parties)?;
                 assert_eq!(output, vec![!x, !y, !z, x, y, z]);
             }
         }
@@ -170,7 +264,7 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x, z], &[y]], &output_parties, false)?;
+                let output = simulate_mpc(&circuit, &[&[x, z], &[y]], &output_parties)?;
                 assert_eq!(output, vec![x & y & z]);
             }
         }
@@ -203,7 +297,7 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
                     output_gates: vec![4],
                 };
 
-                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], &output_parties, false)?;
+                let output = simulate_mpc(&circuit, &[&[x], &[y], &[z]], &output_parties)?;
                 assert_eq!(output, vec![x & y & z]);
             }
         }
@@ -234,7 +328,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
                 let x = prg.parse_arg(0, &format!("{x}u8")).unwrap().as_bits();
                 let y = prg.parse_arg(1, &format!("{y}u8")).unwrap().as_bits();
                 let z = prg.parse_arg(2, &format!("{z}u8")).unwrap().as_bits();
-                let output = simulate_mpc(&prg.circuit, &[&x, &y, &z], &output_parties, false)?;
+                let output = simulate_mpc(&prg.circuit, &[&x, &y, &z], &output_parties)?;
                 let result = prg.parse_output(&output).unwrap();
                 println!("{calculation} = {result}");
                 assert_eq!(format!("{result}"), format!("{expected}"));
@@ -285,7 +379,7 @@ fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
             gates: gates.clone(),
             output_gates,
         };
-        let output_smpc = simulate_mpc(&circuit, &input_refs, &output_parties, false)?;
+        let output_smpc = simulate_mpc(&circuit, &input_refs, &output_parties)?;
         let output_direct = eval_directly(&circuit, &input_refs);
         assert_eq!(output_smpc, output_direct);
 
@@ -352,7 +446,7 @@ fn eval_mixed_circuits() -> Result<(), Error> {
     for (w, (circuit, in_a, in_b)) in circuits_with_inputs.into_iter().enumerate() {
         if w % eval_only_every_n == 0 {
             total_tests += 1;
-            let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], &output_parties, false)?;
+            let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], &output_parties)?;
             let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
             if output_smpc != output_direct {
                 println!("Circuit: {:?}", circuit);

@@ -1,7 +1,7 @@
 //! Secure multi-party computation protocol with communication via channels.
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use maybe_async::{async_impl, maybe_async};
+use maybe_async::maybe_async;
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use smallvec::smallvec;
@@ -133,121 +133,9 @@ impl From<MpcError> for Error {
     }
 }
 
-/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
-#[cfg(not(target_arch = "wasm32"))]
-#[async_impl(AFIT)]
-pub fn simulate_mpc(
-    circuit: &Circuit,
-    inputs: &[&[bool]],
-    output_parties: &[usize],
-    trusted: bool,
-) -> Result<Vec<bool>, Error> {
-    let tokio = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("Could not start tokio runtime");
-    tokio.block_on(simulate_mpc_async(circuit, inputs, output_parties, trusted))
-}
-
-/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
-#[cfg(not(target_arch = "wasm32"))]
-#[async_impl(AFIT)]
-pub async fn simulate_mpc_async(
-    circuit: &Circuit,
-    inputs: &[&[bool]],
-    output_parties: &[usize],
-    trusted: bool,
-) -> Result<Vec<bool>, Error> {
-    let p_eval = 0;
-    let p_pre = inputs.len();
-
-    let mut channels: Vec<channel::SimpleChannel>;
-    if trusted {
-        channels = channel::SimpleChannel::channels(inputs.len() + 1);
-        let mut channel = channels.pop().unwrap();
-        let parties = inputs.len();
-        tokio::spawn(async move { crate::fpre::fpre(&mut channel, parties).await });
-    } else {
-        channels = channel::SimpleChannel::channels(inputs.len());
-    }
-
-    let mut parties = channels.into_iter().zip(inputs).enumerate();
-    let Some(evaluator) = parties.next() else {
-        return Ok(vec![]);
-    };
-    let p_fpre = if trusted {
-        Preprocessor::TrustedDealer(p_pre)
-    } else {
-        Preprocessor::Untrusted
-    };
-
-    let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
-    for (p_own, (mut channel, inputs)) in parties {
-        let circuit = circuit.clone();
-        let inputs = inputs.to_vec();
-        let output_parties = output_parties.to_vec();
-        computation.spawn(async move {
-            let result = _mpc(
-                &mut channel,
-                &circuit,
-                &inputs,
-                p_fpre,
-                p_eval,
-                p_own,
-                &output_parties,
-            )
-            .await;
-            let mut res_party = Vec::new();
-            match result {
-                Err(e) => {
-                    eprintln!("SMPC protocol failed for party {:?}: {:?}", p_own, e);
-                }
-                Ok(res) => {
-                    let mb = channel.bytes_sent as f64 / 1024.0 / 1024.0;
-                    println!("Party {p_own} sent {mb:.2}MB of messages");
-                    res_party = res;
-                }
-            }
-            res_party
-        });
-    }
-    let (_, (mut party_channel, inputs)) = evaluator;
-    let eval_result = _mpc(
-        &mut party_channel,
-        circuit,
-        inputs,
-        p_fpre,
-        p_eval,
-        p_eval,
-        output_parties,
-    )
-    .await;
-    match eval_result {
-        Err(e) => {
-            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
-            Ok(vec![])
-        }
-        Ok(res) => {
-            let mut outputs = vec![res];
-            while let Some(output) = computation.join_next().await {
-                if let Ok(output) = output {
-                    outputs.push(output);
-                }
-            }
-            outputs.retain(|o| !o.is_empty());
-            if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                eprintln!("The result does not match for all output parties: {outputs:?}");
-            }
-            let mb = party_channel.bytes_sent as f64 / 1024.0 / 1024.0;
-            println!("Party {p_eval} sent {mb:.2}MB of messages");
-            println!("MPC simulation finished successfully!");
-            Ok(outputs.pop().unwrap_or_default())
-        }
-    }
-}
-
 /// Specifies how correlated randomness is provided in the prepocessing phase.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub(crate) enum Preprocessor {
     /// Correlated randomness is provided by the (semi-)trusted party with the given index.
     TrustedDealer(usize),
