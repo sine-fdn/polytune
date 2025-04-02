@@ -10,7 +10,7 @@ use clap::Parser;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::{compile_with_constants, literal::Literal},
-    protocol::{mpc, Preprocessor},
+    protocol::mpc,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -211,8 +211,7 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
     );
     let input = prg.literal_arg(*party, input.clone())?.as_bits();
 
-    // Now that we have our input, we can start the actual session without a trusted third party:
-    let fpre = Preprocessor::Untrusted;
+    // Now that we have our input, we can start the actual session:
     let p_out: Vec<_> = vec![*leader];
     let mut channel = {
         let mut locked = state.lock().await;
@@ -235,7 +234,7 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
     };
 
     // We run the computation using MPC, which might take some time...
-    let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, *party, &p_out).await?;
+    let output = mpc(&mut channel, &prg.circuit, &input, 0, *party, &p_out).await?;
 
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();

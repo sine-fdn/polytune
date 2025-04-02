@@ -11,7 +11,8 @@ use crate::{
 
 /// Errors that can occur while executing FPre as a trusted dealer.
 #[derive(Debug)]
-pub enum Error {
+#[allow(dead_code)]
+pub(crate) enum Error {
     /// One of the parties tried to cheat.
     CheatingDetected,
     /// The parties expect a different number of random shares.
@@ -46,7 +47,8 @@ impl From<channel::Error> for Error {
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
 #[maybe_async(AFIT)]
-pub async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
+#[allow(dead_code)]
+pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
     for p in 0..parties {
         recv_from::<()>(channel, p, "delta (fpre)").await?;
     }
@@ -199,7 +201,9 @@ mod tests {
     use crate::{
         channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
         fpre::{fpre, Auth, Delta, Error, Key, Mac, Share},
+        protocol::{Preprocessor, _mpc},
     };
+    use garble_lang::{circuit::Circuit, compile};
     use smallvec::smallvec;
 
     #[tokio::test]
@@ -372,5 +376,121 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn eval_garble_prg_3pc_td() -> Result<(), Error> {
+        let output_parties: Vec<usize> = vec![0, 1, 2];
+        let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
+        for x in 0..3 {
+            for y in 0..3 {
+                for z in 0..3 {
+                    let expected = x * y * z;
+                    let calculation = format!("{x}u8 * {y}u8 * {z}u8");
+                    let x = prg.parse_arg(0, &format!("{x}u8")).unwrap().as_bits();
+                    let y = prg.parse_arg(1, &format!("{y}u8")).unwrap().as_bits();
+                    let z = prg.parse_arg(2, &format!("{z}u8")).unwrap().as_bits();
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_time()
+                        .build()
+                        .expect("Could not start tokio runtime");
+                    let output = rt.block_on(simulate_mpc_trusted_dealer(
+                        &prg.circuit,
+                        &[&x, &y, &z],
+                        &output_parties,
+                    ))?;
+                    let result = prg.parse_output(&output).unwrap();
+                    println!("{calculation} = {result}");
+                    assert_eq!(format!("{result}"), format!("{expected}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+    async fn simulate_mpc_trusted_dealer(
+        circuit: &Circuit,
+        inputs: &[&[bool]],
+        output_parties: &[usize],
+    ) -> Result<Vec<bool>, Error> {
+        let p_eval = 0;
+        let p_pre = inputs.len();
+
+        let mut channels: Vec<SimpleChannel>;
+        channels = SimpleChannel::channels(inputs.len() + 1);
+        let mut channel = channels.pop().unwrap();
+        let parties = inputs.len();
+        tokio::spawn(async move { crate::fpre::fpre(&mut channel, parties).await });
+
+        let mut parties = channels.into_iter().zip(inputs).enumerate();
+        let Some((_, (mut eval_channel, inputs))) = parties.next() else {
+            return Ok(vec![]);
+        };
+        let p_fpre = Preprocessor::TrustedDealer(p_pre);
+
+        let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
+        for (p_own, (mut channel, inputs)) in parties {
+            let circuit = circuit.clone();
+            let inputs = inputs.to_vec();
+            let output_parties = output_parties.to_vec();
+            computation.spawn(async move {
+                match _mpc(
+                    &mut channel,
+                    &circuit,
+                    &inputs,
+                    p_fpre,
+                    p_eval,
+                    p_own,
+                    &output_parties,
+                )
+                .await
+                {
+                    Ok(res) => {
+                        println!(
+                            "Party {p_own} sent {:.2}MB of messages",
+                            channel.bytes_sent as f64 / 1024.0 / 1024.0
+                        );
+                        res
+                    }
+                    Err(e) => {
+                        eprintln!("SMPC protocol failed for party {p_own}: {:?}", e);
+                        vec![]
+                    }
+                }
+            });
+        }
+        let eval_result = _mpc(
+            &mut eval_channel,
+            circuit,
+            inputs,
+            p_fpre,
+            p_eval,
+            p_eval,
+            output_parties,
+        )
+        .await;
+        match eval_result {
+            Err(e) => {
+                eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+                Ok(vec![])
+            }
+            Ok(res) => {
+                let mut outputs = vec![res];
+                while let Some(output) = computation.join_next().await {
+                    if let Ok(output) = output {
+                        outputs.push(output);
+                    }
+                }
+                outputs.retain(|o| !o.is_empty());
+                if !outputs.windows(2).all(|w| w[0] == w[1]) {
+                    eprintln!("The result does not match for all output parties: {outputs:?}");
+                }
+                let mb = eval_channel.bytes_sent as f64 / 1024.0 / 1024.0;
+                println!("Party {p_eval} sent {mb:.2}MB of messages");
+                println!("MPC simulation finished successfully!");
+                Ok(outputs.pop().unwrap_or_default())
+            }
+        }
     }
 }

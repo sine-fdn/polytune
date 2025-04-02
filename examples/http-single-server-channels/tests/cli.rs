@@ -14,33 +14,6 @@ fn simulate() {
         .spawn()
         .unwrap();
     sleep(Duration::from_millis(500));
-    let mut cmd = Command::new("cargo")
-        .args([
-            "run",
-            "--release",
-            "--",
-            "pre",
-            ENDPOINT,
-            "--session=test",
-            "--parties=3",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    sleep(Duration::from_millis(500));
-    let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines();
-    let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
-    thread::spawn(move || {
-        while let Some(Ok(line)) = stdout.next() {
-            println!("pre> {line}");
-        }
-    });
-    thread::spawn(move || {
-        while let Some(Ok(line)) = stderr.next() {
-            eprintln!("pre> {line}");
-        }
-    });
     for p in [1, 2] {
         let party_arg = format!("--party={p}");
         let args = vec![

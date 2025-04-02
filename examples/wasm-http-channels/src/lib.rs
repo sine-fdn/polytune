@@ -4,7 +4,7 @@ use gloo_timers::future::TimeoutFuture;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::{compile, literal::Literal, token::SignedNumType},
-    protocol::{mpc, Preprocessor},
+    protocol::mpc,
 };
 use reqwest::StatusCode;
 use url::Url;
@@ -25,10 +25,9 @@ pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Resul
         .literal_arg(party, input_literal)
         .map_err(|e| format!("Invalid i32 input: {e}"))?
         .as_bits();
-    let fpre = Preprocessor::Untrusted;
     let p_out = vec![0, 1, 2];
     let mut channel = HttpChannel::new(url, party).await?;
-    let output = mpc(&mut channel, &prg.circuit, &input, fpre, 0, party, &p_out)
+    let output = mpc(&mut channel, &prg.circuit, &input, 0, party, &p_out)
         .await
         .map_err(|e| format!("MPC computation failed: {e}"))?;
     let output = prg
