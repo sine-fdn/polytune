@@ -124,7 +124,9 @@ async fn main() -> Result<()> {
         let peers = peers.iter().cloned().chain([me]).collect();
         Ticket { topic, peers }
     };
-    println!("> ticket to join us: {ticket}");
+    if let Command::New = args.command {
+        println!("> ticket to join us: {ticket}");
+    }
 
     // setup router
     let router = iroh::protocol::Router::builder(endpoint.clone())
@@ -214,30 +216,30 @@ impl Channel for IrohChannel {
                 return Ok(msg);
             }
         }
-        tracing::info!("could not find stored message, waiting for message instead...");
+        tracing::info!("could not find stored message, waiting for message...");
         while let Some(event) = self.receiver.try_next().await? {
             if let Event::Gossip(GossipEvent::Received(msg)) = event {
-                let message: Message = postcard::from_bytes(&msg.content)?;
-                if message.to_party == self.party {
-                    if message.from_party == p {
-                        tracing::info!("received {} bytes from {p}", message.data.len());
-                        return Ok(message.data);
+                let msg: Message = postcard::from_bytes(&msg.content)?;
+                if msg.to_party == self.party {
+                    if msg.from_party == p {
+                        tracing::info!("received {} bytes from {p}", msg.data.len());
+                        return Ok(msg.data);
                     } else {
                         tracing::debug!(
                             "received {} bytes, storing message from {} for now",
-                            message.data.len(),
-                            message.from_party,
+                            msg.data.len(),
+                            msg.from_party,
                         );
                         self.received_msgs
-                            .entry(message.from_party)
+                            .entry(msg.from_party)
                             .or_default()
-                            .push_back(message.data);
+                            .push_back(msg.data);
                     }
                 } else {
                     tracing::debug!(
                         "Ignoring message from {} to {}",
-                        message.from_party,
-                        message.to_party
+                        msg.from_party,
+                        msg.to_party
                     );
                 }
             } else {
