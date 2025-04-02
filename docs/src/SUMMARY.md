@@ -2,7 +2,6 @@
 
 - [What is Polytune?](./landing.md)
 - [MPC Protocol](./protocol.md)
-- [Installation](./installation.md)
 - [Customizable Channels](./examples/channel.md)
   - [Sync](./examples/sync.md)
   - [HTTP Multi-Server](./examples/http_multi.md)
