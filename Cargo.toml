@@ -35,6 +35,7 @@ scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
+tokio = { version = "1.35.1", features = ["full"] }
 
 [[bench]]
 name = "join"
