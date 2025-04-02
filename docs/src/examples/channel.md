@@ -8,7 +8,6 @@ The `Channel` trait in our MPC engine provides a flexible and extensible abstrac
 
 We provide example implementations for:
 
-- Rust async channels using `tokio::sync::mpsc`
 - Rust sync channels using `std::sync::mpsc`
 - HTTP channels for distributed deployments for servers
 - WebAssembly-compatible HTTP channels for clients
@@ -56,6 +55,7 @@ trait Channel {
 
    - `p`: Index of the target party for send/receive
    - `info`: Various information useful for logging
+   - `msg`: (Optional) message sent to the target party
 
 2. **Connection Management**:
 
