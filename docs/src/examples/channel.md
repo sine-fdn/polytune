@@ -55,7 +55,7 @@ trait Channel {
 
    - `p`: Index of the target party for send/receive
    - `info`: Various information useful for logging
-   - `msg`: (Optional) message sent to the target party
+   - `msg`: Message sent to the target party (only in `send_bytes_to`)
 
 2. **Connection Management**:
 
