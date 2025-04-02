@@ -11,6 +11,18 @@ workspace = { members = [
 name = "polytune"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.65.0"
+description = "Maliciously-Secure Multi-Party Computation (MPC) Engine using Authenticated Garbling"
+repository = "https://github.com/sine-fdn/polytune/"
+license = "MIT"
+categories = ["cryptography"]
+keywords = [
+    "secure-computation",
+    "garbled-circuits",
+    "circuit-description",
+    "smpc",
+    "mpc",
+]
 
 [features]
 is_sync = ["maybe-async/is_sync"]
