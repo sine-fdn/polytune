@@ -124,7 +124,9 @@ async fn main() -> Result<()> {
         let peers = peers.iter().cloned().chain([me]).collect();
         Ticket { topic, peers }
     };
-    println!("> ticket to join us: {ticket}");
+    if let Command::New = args.command {
+        println!("> ticket to join us: {ticket}");
+    }
 
     // setup router
     let router = iroh::protocol::Router::builder(endpoint.clone())
