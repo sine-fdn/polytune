@@ -19,6 +19,7 @@ jobs:
           toolchain: stable
       - run: cargo test --features="serde"
       - run: cargo clippy -- -Dwarnings
+      - run: cargo owner --add github:sine-fdn:staff
       - run: cargo publish --token ${CRATES_TOKEN}
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
