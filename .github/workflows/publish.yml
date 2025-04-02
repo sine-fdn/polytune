@@ -17,7 +17,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - run: cargo test --features="serde"
+      - run: cargo test --release
       - run: cargo clippy -- -Dwarnings
       - run: cargo owner --add github:sine-fdn:staff
       - run: cargo publish --token ${CRATES_TOKEN}
