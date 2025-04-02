@@ -274,6 +274,7 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 #[allow(dead_code)]
+#[doc(hidden)]
 pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
     r: Vec<Option<Receiver<Vec<u8>>>>,
@@ -317,6 +318,7 @@ impl SimpleChannel {
 /// The error raised by `recv` calls of a [`SimpleChannel`].
 #[derive(Debug)]
 #[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
 pub enum AsyncRecvError {
     /// The channel has been closed.
     Closed,

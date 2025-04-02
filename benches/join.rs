@@ -2,11 +2,93 @@ use std::{collections::HashMap, time::Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use garble_lang::{
+    circuit::Circuit,
     compile_with_constants,
     literal::{Literal, VariantLiteral},
     token::UnsignedNumType,
 };
-use polytune::protocol::simulate_mpc_async;
+use polytune::{
+    channel,
+    protocol::{mpc, Error},
+};
+
+/// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
+async fn simulate_mpc_async(
+    circuit: &Circuit,
+    inputs: &[&[bool]],
+    output_parties: &[usize],
+) -> Result<Vec<bool>, Error> {
+    let p_eval = 0;
+
+    let channels = channel::SimpleChannel::channels(inputs.len());
+
+    let mut parties = channels.into_iter().zip(inputs).enumerate();
+    let Some((_, (mut eval_channel, inputs))) = parties.next() else {
+        return Ok(vec![]);
+    };
+
+    let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
+    for (p_own, (mut channel, inputs)) in parties {
+        let circuit = circuit.clone();
+        let inputs = inputs.to_vec();
+        let output_parties = output_parties.to_vec();
+        computation.spawn(async move {
+            match mpc(
+                &mut channel,
+                &circuit,
+                &inputs,
+                p_eval,
+                p_own,
+                &output_parties,
+            )
+            .await
+            {
+                Ok(res) => {
+                    println!(
+                        "Party {p_own} sent {:.2}MB of messages",
+                        channel.bytes_sent as f64 / 1024.0 / 1024.0
+                    );
+                    res
+                }
+                Err(e) => {
+                    eprintln!("SMPC protocol failed for party {p_own}: {:?}", e);
+                    vec![]
+                }
+            }
+        });
+    }
+    let eval_result = mpc(
+        &mut eval_channel,
+        circuit,
+        inputs,
+        p_eval,
+        p_eval,
+        output_parties,
+    )
+    .await;
+    match eval_result {
+        Err(e) => {
+            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+            Ok(vec![])
+        }
+        Ok(res) => {
+            let mut outputs = vec![res];
+            while let Some(output) = computation.join_next().await {
+                if let Ok(output) = output {
+                    outputs.push(output);
+                }
+            }
+            outputs.retain(|o| !o.is_empty());
+            if !outputs.windows(2).all(|w| w[0] == w[1]) {
+                eprintln!("The result does not match for all output parties: {outputs:?}");
+            }
+            let mb = eval_channel.bytes_sent as f64 / 1024.0 / 1024.0;
+            println!("Party {p_eval} sent {mb:.2}MB of messages");
+            println!("MPC simulation finished successfully!");
+            Ok(outputs.pop().unwrap_or_default())
+        }
+    }
+}
 
 fn join_benchmark(c: &mut Criterion) {
     let n_records = 10;
@@ -73,7 +155,7 @@ fn join_benchmark(c: &mut Criterion) {
 
                 let inputs = vec![input0.as_slice(), input1.as_slice()];
 
-                simulate_mpc_async(&prg.circuit, &inputs, &[0], false)
+                simulate_mpc_async(&prg.circuit, &inputs, &[0])
                     .await
                     .unwrap();
                 let elapsed = now.elapsed();
