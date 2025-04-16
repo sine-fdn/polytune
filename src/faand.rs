@@ -671,7 +671,8 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// the XOR of the output values z.
 #[maybe_async(AFIT)]
 async fn flaand(
-    (channel, delta): (&mut impl Channel, Delta),
+    channel: &mut impl Channel,
+    delta: Delta,
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
     i: usize,
     n: usize,
@@ -812,7 +813,7 @@ async fn faand(
     let (yshares, rshares) = rest.split_at(lprime);
 
     // Step 1) Generate all leaky AND triples by calling flaand l' times.
-    let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
+    let zshares = flaand(channel, delta, (xshares, yshares, rshares), i, n, lprime).await?;
     let triples: Vec<(&Share, &Share, &Share)> = (0..lprime)
         .map(|l| (&xshares[l], &yshares[l], &zshares[l]))
         .collect();
