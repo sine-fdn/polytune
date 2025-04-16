@@ -73,7 +73,7 @@ cargo_hax_into = [
 # These will be extracted to F* by hax.
 extraction_targets = [
     "-i",
-    "-** +**::faand::combine_two_leaky_ands"
+    "-** +**::faand::fhaand"
 ]
 
 # For these, hax will generate only interfaces in F*.
