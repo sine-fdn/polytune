@@ -19,3 +19,9 @@ type t_Auth = | Auth : Smallvec.t_SmallVec (t_Array (t_Mac & t_Key) (mk_usize 2)
 /// party holds bit + MAC, with the other holding key + global key for the corresponding half of the
 /// bit.
 type t_Share = | Share : bool -> t_Auth -> t_Share
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val impl_32': Core.Clone.t_Clone t_Share
+
+let impl_32 = impl_32'
