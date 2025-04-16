@@ -161,6 +161,7 @@ pub(crate) async fn broadcast_verification<
 /// for all parties at once, where each party sends its vector to all others.
 /// The function returns the vector received and verified by broadcast.
 #[maybe_async(AFIT)]
+#[cfg_attr(hax, hax_lib::opaque)]
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -188,6 +189,7 @@ pub(crate) async fn broadcast<
 /// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
 /// the vector is broadcasted, the second element is simply sent to all parties.
 #[maybe_async(AFIT)]
+#[cfg_attr(hax, hax_lib::opaque)]
 pub(crate) async fn broadcast_first_send_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
@@ -647,6 +649,7 @@ async fn fhaand(
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
 /// to be the case in all real-world usages of our protocol.
+#[cfg_attr(hax, hax_lib::opaque)]
 fn hash128(input: u128) -> Result<u128, Error> {
     use blake3::Hasher;
     let mut hasher = Hasher::new();
