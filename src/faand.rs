@@ -704,12 +704,12 @@ async fn flaand(
     // Triple Checking.
     // Step 4) Compute phi.
     let mut phi = vec![0; l];
-    for (ll, phi_l) in phi.iter_mut().enumerate().take(l) {
+    for ll in 0..l {
         for k in (0..n).filter(|k| *k != i) {
             let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
-            *phi_l ^= ki_yk.0 ^ mk_yi.0;
+            phi[ll] = phi[ll] ^ ki_yk.0 ^ mk_yi.0;
         }
-        *phi_l ^= yshares[ll].0 as u128 * delta.0;
+        phi[ll] = phi[ll] ^ yshares[ll].0 as u128 * delta.0;
     }
 
     // Step 5) Compute uij and send to all parties along with e from Step 3).
@@ -730,7 +730,8 @@ async fn flaand(
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1 .0[j];
-            ki_xj_phi[j][ll] ^= hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
+            ki_xj_phi[j][ll] =
+                ki_xj_phi[j][ll] ^ hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
             // mi_xj_phi added here
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             let (mac, key) = rshares[ll].1 .0[j];
@@ -748,9 +749,9 @@ async fn flaand(
     for ll in 0..l {
         for k in (0..n).filter(|k| *k != i) {
             let (mk_zi, ki_zk) = zshares[ll].1 .0[k];
-            hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
+            hi[ll] = hi[ll] ^ mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
-        hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
+        hi[ll] = hi[ll] ^ (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
         commhi.push(commit(&hi[ll].to_be_bytes()));
     }
     drop(phi);
@@ -760,15 +761,15 @@ async fn flaand(
     let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi, l).await?;
 
     // Then all parties broadcast Hi.
-    let hi_k = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
+    let hi_k_outer = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
 
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
     for k in (0..n).filter(|k| *k != i) {
-        for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k[k].clone()).enumerate() {
-            if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes()) {
+        for ll in 0..xor_all_hi.len() {
+            if !open_commitment(&commhi_k[k][ll], &hi_k_outer[k][ll].to_be_bytes()) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
-            *xh ^= hi_k;
+            xor_all_hi[ll] = xor_all_hi[ll] ^ hi_k_outer[k][ll];
         }
     }
 
