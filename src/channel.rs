@@ -174,6 +174,7 @@ pub trait Channel {
 
 /// Serializes and sends an MPC message to the other party.
 #[maybe_async(AFIT)]
+#[cfg_attr(hax, hax_lib::opaque)]
 pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
@@ -214,6 +215,7 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
 
 /// Receives and deserializes an MPC message from the other party.
 #[maybe_async(AFIT)]
+#[cfg_attr(hax, hax_lib::opaque)]
 pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
