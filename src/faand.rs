@@ -616,7 +616,7 @@ async fn fhaand(
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
             h0h1[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
             h0h1[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
-            vi[ll] ^= sj;
+            vi[ll] = vi[ll] ^ sj;
         }
         send_to(channel, j, "haand", &h0h1).await?;
     }
@@ -632,7 +632,7 @@ async fn fhaand(
             } else {
                 h0h1_j[ll].0
             };
-            vi[ll] ^= t;
+            vi[ll] = vi[ll] ^ t;
         }
     }
 
