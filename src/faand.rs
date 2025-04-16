@@ -591,7 +591,8 @@ pub(crate) async fn fashare(
 /// authenticated share, i.e., a half-authenticated share.
 #[maybe_async(AFIT)]
 async fn fhaand(
-    (channel, delta): (&mut impl Channel, Delta),
+    channel: &mut impl Channel,
+    delta: Delta,
     i: usize,
     n: usize,
     l: usize,
@@ -681,7 +682,7 @@ async fn flaand(
 
     // Step 2) Run Pi_HaAND to get back some v.
     let y = yshares.iter().take(l).map(|share| share.0).collect();
-    let v = fhaand((channel, delta), i, n, l, xshares, y).await?;
+    let v = fhaand(channel, delta, i, n, l, xshares, y).await?;
 
     // Step 3) Compute z and e AND shares.
     let mut z = vec![false; l];
