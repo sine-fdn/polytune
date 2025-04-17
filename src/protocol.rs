@@ -37,7 +37,6 @@ use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use maybe_async::maybe_async;
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use smallvec::smallvec;
 
 use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel},
@@ -303,7 +302,7 @@ pub(crate) async fn _mpc(
     }
 
     let mut random_shares = random_shares.into_iter();
-    let mut shares = vec![Share(false, Auth(smallvec![])); num_gates];
+    let mut shares = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels = vec![Label(0); num_gates];
 
     for (w, gate) in circuit.wires().iter().enumerate() {
