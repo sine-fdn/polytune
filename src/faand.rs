@@ -1002,6 +1002,12 @@ fn combine_bucket(
 }
 
 /// Combine two leaky ANDs into one non-leaky AND.
+#[hax_lib::requires(
+    x1.1.0.len() >= n &&
+    x2.1.0.len() >= n &&
+    z1.1.0.len() >= n &&
+    z2.1.0.len() >= n
+)]
 fn combine_two_leaky_ands(
     i: usize,
     n: usize,
@@ -1016,6 +1022,7 @@ fn combine_two_leaky_ands(
     let xbit = x1.0 ^ x2.0;
     let mut xauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in 0..n {
+        hax_lib::loop_invariant!(|k: usize| xauth.0.len() == n);
         if k == i {
             continue;
         }
@@ -1028,6 +1035,7 @@ fn combine_two_leaky_ands(
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
     let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in 0..n {
+        hax_lib::loop_invariant!(|k: usize| zauth.0.len() == n);
         if k == i {
             continue;
         }

@@ -29,17 +29,37 @@ type t_Error =
   | Error_InvalidHashLength : t_Error
 
 /// Combine two leaky ANDs into one non-leaky AND.
-let combine_two_leaky_ands
-      (i: usize)
-      (n: usize)
-      (x1, y1, z1:
-          (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share))
-      (x2, _, z2:
-          (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share))
-      (d: bool)
-    : Core.Result.t_Result
-      (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share)
-      t_Error =
+let combine_two_leaky_ands (i n: usize) (x1 y1 z1 x2 z2: Polytune.Data_types.t_Share) (d: bool)
+    : Prims.Pure
+      (Core.Result.t_Result
+          (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share)
+          t_Error)
+      (requires
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            x1.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n &&
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            x2.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n &&
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            z1.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n &&
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            z2.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n)
+      (fun _ -> Prims.l_True) =
   let xbit:bool = Core.Ops.Bit.f_bitxor x1.Polytune.Data_types._0 x2.Polytune.Data_types._0 in
   let xauth:Polytune.Data_types.t_Auth =
     Polytune.Data_types.Auth
@@ -55,10 +75,17 @@ let combine_two_leaky_ands
   let xauth:Polytune.Data_types.t_Auth =
     Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
       n
-      (fun xauth temp_1_ ->
+      (fun xauth k ->
           let xauth:Polytune.Data_types.t_Auth = xauth in
-          let _:usize = temp_1_ in
-          true)
+          let k:usize = k in
+          (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+              #Alloc.Alloc.t_Global
+              xauth.Polytune.Data_types._0
+            <:
+            usize) =.
+          n
+          <:
+          bool)
       xauth
       (fun xauth k ->
           let xauth:Polytune.Data_types.t_Auth = xauth in
@@ -122,10 +149,17 @@ let combine_two_leaky_ands
   let zauth:Polytune.Data_types.t_Auth =
     Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
       n
-      (fun zauth temp_1_ ->
+      (fun zauth k ->
           let zauth:Polytune.Data_types.t_Auth = zauth in
-          let _:usize = temp_1_ in
-          true)
+          let k:usize = k in
+          (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+              #Alloc.Alloc.t_Global
+              zauth.Polytune.Data_types._0
+            <:
+            usize) =.
+          n
+          <:
+          bool)
       zauth
       (fun zauth k ->
           let zauth:Polytune.Data_types.t_Auth = zauth in

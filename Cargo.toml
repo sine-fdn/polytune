@@ -44,6 +44,7 @@ curve25519-dalek = { version = "4.1.3", features = ["rand_core"] }
 
 ocelot = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
 scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
+hax-lib = "0.2.0"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
