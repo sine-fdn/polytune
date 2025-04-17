@@ -459,7 +459,7 @@ async fn fabitn(
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
-        let mut authvec = smallvec![(Mac(0), Key(0)); n];
+        let mut authvec = vec![(Mac(0), Key(0)); n];
         for k in (0..n).filter(|k| *k != i) {
             authvec[k] = (Mac(macs[k][l]), Key(keys[k][l]));
         }
@@ -686,7 +686,7 @@ async fn flaand(
     // Step 3) Compute z and e AND shares.
     let mut z = vec![false; l];
     let mut e = vec![false; l];
-    let mut zshares = vec![Share(false, Auth(smallvec![(Mac(0), Key(0)); n])); l];
+    let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
 
     for ll in 0..l {
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
@@ -1010,8 +1010,11 @@ fn combine_two_leaky_ands(
 ) -> Result<(Share, Share, Share), Error> {
     //Step (b) compute x, y, z.
     let xbit = x1.0 ^ x2.0;
-    let mut xauth = Auth(smallvec![(Mac(0), Key(0)); n]);
-    for k in (0..n).filter(|k| *k != i) {
+    let mut xauth = Auth(vec![(Mac(0), Key(0)); n]);
+    for k in 0..n {
+        if k == i {
+            continue;
+        }
         let (mk_x1, ki_x1) = x1.1 .0[k];
         let (mk_x2, ki_x2) = x2.1 .0[k];
         xauth.0[k] = (mk_x1 ^ mk_x2, ki_x1 ^ ki_x2);
@@ -1019,8 +1022,11 @@ fn combine_two_leaky_ands(
     let xshare = Share(xbit, xauth);
 
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
-    let mut zauth = Auth(smallvec![(Mac(0), Key(0)); n]);
-    for k in (0..n).filter(|k| *k != i) {
+    let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
+    for k in 0..n {
+        if k == i {
+            continue;
+        }
         let (mk_z1, ki_z1) = z1.1 .0[k];
         let (mk_z2, ki_z2) = z2.1 .0[k];
         let (mk_x2, ki_x2) = x2.1 .0[k];

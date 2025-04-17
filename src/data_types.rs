@@ -3,7 +3,6 @@
 use std::ops::{BitAnd, BitXor};
 
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 
 /// The global key known only to a single party that is used to authenticate bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,7 +93,7 @@ impl Share {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Auth(pub(crate) SmallVec<[(Mac, Key); 2]>);
+pub(crate) struct Auth(pub(crate) Vec<(Mac, Key)>);
 
 impl BitXor for &Auth {
     type Output = Auth;
@@ -102,7 +101,7 @@ impl BitXor for &Auth {
     fn bitxor(self, rhs: Self) -> Self::Output {
         let Auth(auth0) = self;
         let Auth(auth1) = rhs;
-        let mut xor = SmallVec::with_capacity(auth0.len());
+        let mut xor = Vec::with_capacity(auth0.len());
         for ((mac1, key1), (mac2, key2)) in auth0.iter().zip(auth1.iter()) {
             xor.push((*mac1 ^ *mac2, *key1 ^ *key2));
         }
