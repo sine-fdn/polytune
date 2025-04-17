@@ -995,7 +995,8 @@ fn combine_bucket(
 
     // Combine elements one by one, starting from the second element.
     for (triple, d) in bucket.zip(d_vec.into_iter()) {
-        result = combine_two_leaky_ands(i, n, result, triple, d)?;
+        result =
+            combine_two_leaky_ands(i, n, x.clone(), y.clone(), z.clone(), triple.0, triple.2, d)?;
     }
     Ok(result)
 }
@@ -1004,8 +1005,11 @@ fn combine_bucket(
 fn combine_two_leaky_ands(
     i: usize,
     n: usize,
-    (x1, y1, z1): (Share, Share, Share),
-    (x2, _, z2): (&Share, &Share, &Share),
+    x1: Share,
+    y1: Share,
+    z1: Share,
+    x2: &Share,
+    z2: &Share,
     d: bool,
 ) -> Result<(Share, Share, Share), Error> {
     //Step (b) compute x, y, z.
