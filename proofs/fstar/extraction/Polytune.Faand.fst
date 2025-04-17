@@ -7,7 +7,6 @@ let _ =
   (* This module has implicit dependencies, here we make them explicit. *)
   (* The implicit dependencies arise from typeclasses instances. *)
   let open Polytune.Data_types in
-  let open Smallvec in
   ()
 
 /// Errors occurring during preprocessing.
@@ -44,8 +43,7 @@ let combine_two_leaky_ands
   let xbit:bool = Core.Ops.Bit.f_bitxor x1.Polytune.Data_types._0 x2.Polytune.Data_types._0 in
   let xauth:Polytune.Data_types.t_Auth =
     Polytune.Data_types.Auth
-    (Smallvec.impl_17__from_elem #(t_Array (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
-            (mk_usize 2))
+    (Alloc.Vec.from_elem #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
         ((Polytune.Data_types.Mac (mk_u128 0) <: Polytune.Data_types.t_Mac),
           (Polytune.Data_types.Key (mk_u128 0) <: Polytune.Data_types.t_Key)
           <:
@@ -55,37 +53,31 @@ let combine_two_leaky_ands
     Polytune.Data_types.t_Auth
   in
   let xauth:Polytune.Data_types.t_Auth =
-    Core.Iter.Traits.Iterator.f_fold (Core.Iter.Traits.Collect.f_into_iter #(Core.Iter.Adapters.Filter.t_Filter
-              (Core.Ops.Range.t_Range usize) (usize -> bool))
-          #FStar.Tactics.Typeclasses.solve
-          (Core.Iter.Traits.Iterator.f_filter #(Core.Ops.Range.t_Range usize)
-              #FStar.Tactics.Typeclasses.solve
-              ({ Core.Ops.Range.f_start = mk_usize 0; Core.Ops.Range.f_end = n }
-                <:
-                Core.Ops.Range.t_Range usize)
-              (fun k ->
-                  let k:usize = k in
-                  k <>. i <: bool)
-            <:
-            Core.Iter.Adapters.Filter.t_Filter (Core.Ops.Range.t_Range usize) (usize -> bool))
-        <:
-        Core.Iter.Adapters.Filter.t_Filter (Core.Ops.Range.t_Range usize) (usize -> bool))
+    Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
+      n
+      (fun xauth temp_1_ ->
+          let xauth:Polytune.Data_types.t_Auth = xauth in
+          let _:usize = temp_1_ in
+          true)
       xauth
       (fun xauth k ->
           let xauth:Polytune.Data_types.t_Auth = xauth in
           let k:usize = k in
-          let mk_x1, ki_x1:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
-            x1.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
-          in
-          let mk_x2, ki_x2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
-            x2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
-          in
-          let xauth:Polytune.Data_types.t_Auth =
+          if k =. i <: bool
+          then xauth
+          else
+            let mk_x1, ki_x1:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              x1.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            let mk_x2, ki_x2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              x2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
             {
               xauth with
               Polytune.Data_types._0
               =
-              Rust_primitives.Hax.update_at xauth.Polytune.Data_types._0
+              Rust_primitives.Hax.Monomorphized_update_at.update_at_usize xauth
+                  .Polytune.Data_types._0
                 k
                 ((Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Mac
                       #Polytune.Data_types.t_Mac
@@ -105,9 +97,7 @@ let combine_two_leaky_ands
                   (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key))
             }
             <:
-            Polytune.Data_types.t_Auth
-          in
-          xauth)
+            Polytune.Data_types.t_Auth)
   in
   let xshare:Polytune.Data_types.t_Share =
     Polytune.Data_types.Share xbit xauth <: Polytune.Data_types.t_Share
@@ -120,8 +110,7 @@ let combine_two_leaky_ands
   in
   let zauth:Polytune.Data_types.t_Auth =
     Polytune.Data_types.Auth
-    (Smallvec.impl_17__from_elem #(t_Array (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
-            (mk_usize 2))
+    (Alloc.Vec.from_elem #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
         ((Polytune.Data_types.Mac (mk_u128 0) <: Polytune.Data_types.t_Mac),
           (Polytune.Data_types.Key (mk_u128 0) <: Polytune.Data_types.t_Key)
           <:
@@ -131,40 +120,34 @@ let combine_two_leaky_ands
     Polytune.Data_types.t_Auth
   in
   let zauth:Polytune.Data_types.t_Auth =
-    Core.Iter.Traits.Iterator.f_fold (Core.Iter.Traits.Collect.f_into_iter #(Core.Iter.Adapters.Filter.t_Filter
-              (Core.Ops.Range.t_Range usize) (usize -> bool))
-          #FStar.Tactics.Typeclasses.solve
-          (Core.Iter.Traits.Iterator.f_filter #(Core.Ops.Range.t_Range usize)
-              #FStar.Tactics.Typeclasses.solve
-              ({ Core.Ops.Range.f_start = mk_usize 0; Core.Ops.Range.f_end = n }
-                <:
-                Core.Ops.Range.t_Range usize)
-              (fun k ->
-                  let k:usize = k in
-                  k <>. i <: bool)
-            <:
-            Core.Iter.Adapters.Filter.t_Filter (Core.Ops.Range.t_Range usize) (usize -> bool))
-        <:
-        Core.Iter.Adapters.Filter.t_Filter (Core.Ops.Range.t_Range usize) (usize -> bool))
+    Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
+      n
+      (fun zauth temp_1_ ->
+          let zauth:Polytune.Data_types.t_Auth = zauth in
+          let _:usize = temp_1_ in
+          true)
       zauth
       (fun zauth k ->
           let zauth:Polytune.Data_types.t_Auth = zauth in
           let k:usize = k in
-          let mk_z1, ki_z1:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
-            z1.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
-          in
-          let mk_z2, ki_z2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
-            z2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
-          in
-          let mk_x2, ki_x2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
-            x2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
-          in
-          let zauth:Polytune.Data_types.t_Auth =
+          if k =. i <: bool
+          then zauth
+          else
+            let mk_z1, ki_z1:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              z1.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            let mk_z2, ki_z2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              z2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            let mk_x2, ki_x2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              x2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
             {
               zauth with
               Polytune.Data_types._0
               =
-              Rust_primitives.Hax.update_at zauth.Polytune.Data_types._0
+              Rust_primitives.Hax.Monomorphized_update_at.update_at_usize zauth
+                  .Polytune.Data_types._0
                 k
                 ((Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Mac
                       #Polytune.Data_types.t_Mac
@@ -202,9 +185,7 @@ let combine_two_leaky_ands
                   (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key))
             }
             <:
-            Polytune.Data_types.t_Auth
-          in
-          zauth)
+            Polytune.Data_types.t_Auth)
   in
   let zshare:Polytune.Data_types.t_Share =
     Polytune.Data_types.Share zbit zauth <: Polytune.Data_types.t_Share
