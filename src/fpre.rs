@@ -196,6 +196,7 @@ pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) ->
     Ok(())
 }
 
+#[cfg(not(feature = "is_sync"))]
 #[cfg(test)]
 mod tests {
     use crate::{
