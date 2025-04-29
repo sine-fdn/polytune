@@ -75,7 +75,8 @@ extraction_targets = [
     "-i",
     " ".join(["-**",
     "+**::faand::fhaand",
-    "+**::faand::flaand",])
+    # "+**::faand::flaand",
+    ])
 ]
 
 # For these, hax will generate only interfaces in F*.
