@@ -714,7 +714,10 @@ async fn flaand(
     // Step 4) Compute phi.
     let mut phi = vec![0; l];
     for ll in 0..l {
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
             phi[ll] = phi[ll] ^ ki_yk.0 ^ mk_yi.0;
         }
@@ -725,7 +728,10 @@ async fn flaand(
     // Receive uij from all parties and compute mi_xj_phi.
     let mut ki_xj_phi = vec![vec![0; l]; n];
     let mut ei_uij = vec![vec![]; n];
-    for j in (0..n).filter(|j| *j != i) {
+    for j in 0..n {
+        if j == i {
+            continue;
+        }
         for (ll, phi_l) in phi.iter().enumerate().take(l) {
             let (_, ki_xj) = xshares[ll].1 .0[j];
             ki_xj_phi[j][ll] = hash128(ki_xj.0)?;
@@ -736,7 +742,10 @@ async fn flaand(
 
     let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij, l).await?;
 
-    for j in (0..n).filter(|j| *j != i) {
+    for j in 0..n {
+        if j == i {
+            continue;
+        }
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1 .0[j];
             ki_xj_phi[j][ll] =
@@ -756,7 +765,10 @@ async fn flaand(
     let mut hi = vec![0; l];
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             let (mk_zi, ki_zk) = zshares[ll].1 .0[k];
             hi[ll] = hi[ll] ^ mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
@@ -771,7 +783,10 @@ async fn flaand(
     let hi_k_outer = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
 
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
-    for k in (0..n).filter(|k| *k != i) {
+    for k in 0..n {
+        if k == i {
+            continue;
+        }
         for ll in 0..xor_all_hi.len() {
             if !open_commitment(&commhi_k[k][ll], &hi_k_outer[k][ll].to_be_bytes()) {
                 return Err(Error::CommitmentCouldNotBeOpened);
