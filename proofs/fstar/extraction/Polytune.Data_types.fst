@@ -19,3 +19,5 @@ type t_Auth = | Auth : Alloc.Vec.t_Vec (t_Mac & t_Key) Alloc.Alloc.t_Global -> t
 /// party holds bit + MAC, with the other holding key + global key for the corresponding half of the
 /// bit.
 type t_Share = | Share : bool -> t_Auth -> t_Share
+
+let impl_32: Core.Clone.t_Clone t_Share = { f_clone = (fun x -> x) }
