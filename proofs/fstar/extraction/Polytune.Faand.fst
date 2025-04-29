@@ -6,7 +6,6 @@ open FStar.Mul
 let _ =
   (* This module has implicit dependencies, here we make them explicit. *)
   (* The implicit dependencies arise from typeclasses instances. *)
-  let open Blake3 in
   let open Polytune.Channel in
   let open Polytune.Data_types in
   let open Serde.De in
@@ -78,14 +77,11 @@ let impl_6 = impl_6'
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
-let commit (value: t_Slice u8) : t_Commitment =
-  Commitment
-  (Core.Convert.f_into #Blake3.t_Hash
-      #(t_Array u8 (mk_usize 32))
-      #FStar.Tactics.Typeclasses.solve
-      (Blake3.hash value <: Blake3.t_Hash))
-  <:
-  t_Commitment
+assume
+val commit': value: t_Slice u8 -> t_Commitment
+
+unfold
+let commit = commit'
 
 /// Verifies if a given value matches a previously generated commitment.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
@@ -587,8 +583,12 @@ let flaand
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i1: Polytune.Channel.t_Channel iimpl_951670863_)
       (channel: iimpl_951670863_)
       (delta: Polytune.Data_types.t_Delta)
-      (xshares yshares rshares: t_Slice Polytune.Data_types.t_Share)
-      (i n l: usize)
+      (xshares, yshares, rshares:
+          (t_Slice Polytune.Data_types.t_Share & t_Slice Polytune.Data_types.t_Share &
+            t_Slice Polytune.Data_types.t_Share))
+      (i: usize)
+      (n: usize)
+      (l: usize)
     : (iimpl_951670863_ &
       Core.Result.t_Result (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global)
         t_Error) =
@@ -743,27 +743,22 @@ let flaand
                   (fun phi k ->
                       let phi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global = phi in
                       let k:usize = k in
-                      let _:Prims.unit =
-                        if k =. i
-                        then
-                          Rust_primitives.Hax.never_to_any (Rust_primitives.Hax.failure "(DropReturnBreakContinue) Fatal error: something we considered as impossible occurred! [1mPlease report this by submitting an issue on GitHub![0m\nDetails: Return/Break/Continue are expected to be gone as this point"
-                                "state_passing_continue!(phi)"
+                      if k =. i <: bool
+                      then phi
+                      else
+                        let mk_yi, ki_yk:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+                          (yshares.[ ll ] <: Polytune.Data_types.t_Share).Polytune.Data_types._1
+                            .Polytune.Data_types._0.[ k ]
+                        in
+                        let phi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global =
+                          Rust_primitives.Hax.Monomorphized_update_at.update_at_usize phi
+                            ll
+                            (((phi.[ ll ] <: u128) ^. ki_yk.Polytune.Data_types._0 <: u128) ^.
+                              mk_yi.Polytune.Data_types._0
                               <:
-                              Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                      in
-                      let mk_yi, ki_yk:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
-                        (yshares.[ ll ] <: Polytune.Data_types.t_Share).Polytune.Data_types._1
-                          .Polytune.Data_types._0.[ k ]
-                      in
-                      let phi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global =
-                        Rust_primitives.Hax.Monomorphized_update_at.update_at_usize phi
-                          ll
-                          (((phi.[ ll ] <: u128) ^. ki_yk.Polytune.Data_types._0 <: u128) ^.
-                            mk_yi.Polytune.Data_types._0
-                            <:
-                            u128)
-                      in
-                      phi)
+                              u128)
+                        in
+                        phi)
               in
               let phi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global =
                 Rust_primitives.Hax.Monomorphized_update_at.update_at_usize phi
@@ -901,7 +896,7 @@ let flaand
                             <:
                             Core.Result.t_Result u128 t_Error
                           with
-                          | Core.Result.Result_Ok hoist10 ->
+                          | Core.Result.Result_Ok hoist9 ->
                             let ki_xj_phi:Alloc.Vec.t_Vec
                               (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
                               Rust_primitives.Hax.Monomorphized_update_at.update_at_usize ki_xj_phi
@@ -911,7 +906,7 @@ let flaand
                                       <:
                                       Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                     ll
-                                    hoist10
+                                    hoist9
                                   <:
                                   Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             in
@@ -923,9 +918,9 @@ let flaand
                                 <:
                                 Core.Result.t_Result u128 t_Error
                               with
-                              | Core.Result.Result_Ok hoist13 ->
+                              | Core.Result.Result_Ok hoist12 ->
                                 let uij:u128 =
-                                  (hoist13 ^.
+                                  (hoist12 ^.
                                     ((ki_xj_phi.[ j ] <: Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global).[
                                         ll ]
                                       <:
@@ -1259,7 +1254,7 @@ let flaand
                                   <:
                                   Core.Result.t_Result u128 t_Error
                                 with
-                                | Core.Result.Result_Ok hoist17 ->
+                                | Core.Result.Result_Ok hoist16 ->
                                   let ki_xj_phi:Alloc.Vec.t_Vec
                                     (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global
                                   =
@@ -1275,7 +1270,7 @@ let flaand
                                                   Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global).[ ll ]
                                                 <:
                                                 u128) ^.
-                                              hoist17
+                                              hoist16
                                               <:
                                               u128) ^.
                                             ((cast (xbit.Polytune.Data_types._0 <: bool) <: u128) *!
@@ -1860,43 +1855,66 @@ let flaand
                         with
                         | Core.Ops.Control_flow.ControlFlow_Break ret -> ret
                         | Core.Ops.Control_flow.ControlFlow_Continue xor_all_hi ->
-                          let _, out:(Core.Iter.Adapters.Take.t_Take (Core.Slice.Iter.t_Iter u128) &
-                            bool) =
-                            Core.Iter.Traits.Iterator.f_any #(Core.Iter.Adapters.Take.t_Take
-                                (Core.Slice.Iter.t_Iter u128))
-                              #FStar.Tactics.Typeclasses.solve
-                              (Core.Iter.Traits.Iterator.f_take #(Core.Slice.Iter.t_Iter u128)
-                                  #FStar.Tactics.Typeclasses.solve
-                                  (Core.Slice.impl__iter #u128
-                                      (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec u128
-                                              Alloc.Alloc.t_Global)
-                                          #FStar.Tactics.Typeclasses.solve
-                                          xor_all_hi
+                          match
+                            Rust_primitives.Hax.Folds.fold_range_return (mk_usize 0)
+                              l
+                              (fun temp_0_ temp_1_ ->
+                                  let _:Prims.unit = temp_0_ in
+                                  let _:usize = temp_1_ in
+                                  true)
+                              ()
+                              (fun temp_0_ i ->
+                                  let _:Prims.unit = temp_0_ in
+                                  let i:usize = i in
+                                  if (xor_all_hi.[ i ] <: u128) <>. mk_u128 0 <: bool
+                                  then
+                                    Core.Ops.Control_flow.ControlFlow_Break
+                                    (Core.Ops.Control_flow.ControlFlow_Break
+                                      (channel,
+                                        (Core.Result.Result_Err (Error_LaANDXorNotZero <: t_Error)
+                                          <:
+                                          Core.Result.t_Result
+                                            (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
+                                                Alloc.Alloc.t_Global) t_Error)
                                         <:
-                                        t_Slice u128)
+                                        (iimpl_951670863_ &
+                                          Core.Result.t_Result
+                                            (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
+                                                Alloc.Alloc.t_Global) t_Error))
+                                      <:
+                                      Core.Ops.Control_flow.t_ControlFlow
+                                        (iimpl_951670863_ &
+                                          Core.Result.t_Result
+                                            (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
+                                                Alloc.Alloc.t_Global) t_Error)
+                                        (Prims.unit & Prims.unit))
                                     <:
-                                    Core.Slice.Iter.t_Iter u128)
-                                  l
-                                <:
-                                Core.Iter.Adapters.Take.t_Take (Core.Slice.Iter.t_Iter u128))
-                              (fun xh ->
-                                  let xh:u128 = xh in
-                                  xh <>. mk_u128 0 <: bool)
-                          in
-                          if out
-                          then
-                            channel,
-                            (Core.Result.Result_Err (Error_LaANDXorNotZero <: t_Error)
-                              <:
-                              Core.Result.t_Result
-                                (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global)
-                                t_Error)
+                                    Core.Ops.Control_flow.t_ControlFlow
+                                      (Core.Ops.Control_flow.t_ControlFlow
+                                          (iimpl_951670863_ &
+                                            Core.Result.t_Result
+                                              (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
+                                                  Alloc.Alloc.t_Global) t_Error)
+                                          (Prims.unit & Prims.unit)) Prims.unit
+                                  else
+                                    Core.Ops.Control_flow.ControlFlow_Continue ()
+                                    <:
+                                    Core.Ops.Control_flow.t_ControlFlow
+                                      (Core.Ops.Control_flow.t_ControlFlow
+                                          (iimpl_951670863_ &
+                                            Core.Result.t_Result
+                                              (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
+                                                  Alloc.Alloc.t_Global) t_Error)
+                                          (Prims.unit & Prims.unit)) Prims.unit)
                             <:
-                            (iimpl_951670863_ &
-                              Core.Result.t_Result
-                                (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global)
-                                t_Error)
-                          else
+                            Core.Ops.Control_flow.t_ControlFlow
+                              (iimpl_951670863_ &
+                                Core.Result.t_Result
+                                  (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global)
+                                  t_Error) Prims.unit
+                          with
+                          | Core.Ops.Control_flow.ControlFlow_Break ret -> ret
+                          | Core.Ops.Control_flow.ControlFlow_Continue _ ->
                             let hax_temp_output:Core.Result.t_Result
                               (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global)
                               t_Error =
