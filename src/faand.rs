@@ -585,6 +585,11 @@ pub(crate) async fn fashare(
     Ok((xishares, multi_shared_rand))
 }
 
+#[hax_lib::opaque]
+fn random_bool() -> bool {
+    random()
+}
+
 /// Protocol Pi_HaAND that performs F_HaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
@@ -612,7 +617,7 @@ async fn fhaand(
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
     for j in (0..n).filter(|j| *j != i) {
         for ll in 0..l {
-            let sj: bool = random();
+            let sj: bool = random_bool();
             let (_, kixj) = xshares[ll].1 .0[j];
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
