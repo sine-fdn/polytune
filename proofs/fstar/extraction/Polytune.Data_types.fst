@@ -12,7 +12,7 @@ type t_Mac = | Mac : u128 -> t_Mac
 /// A key used to authenticate (together with the [Delta] global key) a bit for the other party.
 type t_Key = | Key : u128 -> t_Key
 
-type t_Auth = | Auth : Smallvec.t_SmallVec (t_Array (t_Mac & t_Key) (mk_usize 2)) -> t_Auth
+type t_Auth = | Auth : Alloc.Vec.t_Vec (t_Mac & t_Key) Alloc.Alloc.t_Global -> t_Auth
 
 /// One half of a shared secret consisting of 2 XORed bits `r` and `s`.
 /// Party A holds (`r`, [Mac]_r, [Key]_s) and party B holds (`s`, [Mac]_s, [Key]_r), so that each
