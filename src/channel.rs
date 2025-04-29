@@ -255,6 +255,7 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
 
 /// Receives and deserializes a Vec from the other party (while checking the length).
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
