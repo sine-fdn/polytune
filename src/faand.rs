@@ -797,8 +797,10 @@ async fn flaand(
     }
 
     // Step 7) Check that the xor of all his is zero.
-    if xor_all_hi.iter().take(l).any(|&xh| xh != 0) {
-        return Err(Error::LaANDXorNotZero);
+    for i in 0..l {
+        if xor_all_hi[i] != 0 {
+            return Err(Error::LaANDXorNotZero);
+        }
     }
     Ok(zshares)
 }
