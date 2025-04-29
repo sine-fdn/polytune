@@ -716,10 +716,10 @@ async fn flaand(
     for ll in 0..l {
         for k in 0..n {
             if k == i {
-                continue;
+            } else {
+                let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
+                phi[ll] = phi[ll] ^ ki_yk.0 ^ mk_yi.0;
             }
-            let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
-            phi[ll] = phi[ll] ^ ki_yk.0 ^ mk_yi.0;
         }
         phi[ll] = phi[ll] ^ yshares[ll].0 as u128 * delta.0;
     }
