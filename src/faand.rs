@@ -67,6 +67,7 @@ struct Commitment(pub(crate) [u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
+#[hax_lib::opaque]
 fn commit(value: &[u8]) -> Commitment {
     Commitment(blake3::hash(value).into())
 }
