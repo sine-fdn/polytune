@@ -94,6 +94,7 @@ val send_to':
     msg: t_Slice v_S
   -> (iimpl_951670863_ & Core.Result.t_Result Prims.unit t_Error)
 
+unfold
 let send_to
       (#v_S #iimpl_951670863_: Type0)
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i2: Serde.Ser.t_Serialize v_S)
@@ -101,9 +102,9 @@ let send_to
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i4: t_Channel iimpl_951670863_)
      = send_to' #v_S #iimpl_951670863_ #i2 #i3 #i4
 
-/// Receives and deserializes an MPC message from the other party.
+/// Receives and deserializes a Vec from the other party (while checking the length).
 assume
-val recv_from':
+val recv_vec_from':
     #v_T: Type0 ->
     #iimpl_951670863_: Type0 ->
     {| i2: Serde.De.t_DeserializeOwned v_T |} ->
@@ -111,58 +112,14 @@ val recv_from':
     {| i4: t_Channel iimpl_951670863_ |} ->
     channel: iimpl_951670863_ ->
     party: usize ->
-    phase: string
+    phase: string ->
+    len: usize
   -> (iimpl_951670863_ & Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error)
 
-let recv_from
-      (#v_T #iimpl_951670863_: Type0)
-      (#[FStar.Tactics.Typeclasses.tcresolve ()] i2: Serde.De.t_DeserializeOwned v_T)
-      (#[FStar.Tactics.Typeclasses.tcresolve ()] i3: Core.Fmt.t_Debug v_T)
-      (#[FStar.Tactics.Typeclasses.tcresolve ()] i4: t_Channel iimpl_951670863_)
-     = recv_from' #v_T #iimpl_951670863_ #i2 #i3 #i4
-
-/// Receives and deserializes a Vec from the other party (while checking the length).
+unfold
 let recv_vec_from
       (#v_T #iimpl_951670863_: Type0)
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i2: Serde.De.t_DeserializeOwned v_T)
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i3: Core.Fmt.t_Debug v_T)
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i4: t_Channel iimpl_951670863_)
-      (channel: iimpl_951670863_)
-      (party: usize)
-      (phase: string)
-      (len: usize)
-    : (iimpl_951670863_ & Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error) =
-  let tmp0, out:(iimpl_951670863_ &
-    Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error) =
-    recv_from #v_T #iimpl_951670863_ channel party phase
-  in
-  let channel:iimpl_951670863_ = tmp0 in
-  match out <: Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error with
-  | Core.Result.Result_Ok (v: Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) ->
-    let hax_temp_output:Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error =
-      if (Alloc.Vec.impl_1__len #v_T #Alloc.Alloc.t_Global v <: usize) =. len
-      then
-        Core.Result.Result_Ok v
-        <:
-        Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error
-      else
-        Core.Result.Result_Err
-        ({
-            f_phase = Alloc.String.f_to_string #string #FStar.Tactics.Typeclasses.solve phase;
-            f_reason = ErrorKind_InvalidLength <: t_ErrorKind
-          }
-          <:
-          t_Error)
-        <:
-        Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error
-    in
-    channel, hax_temp_output
-    <:
-    (iimpl_951670863_ & Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error)
-  | Core.Result.Result_Err err ->
-    channel,
-    (Core.Result.Result_Err err
-      <:
-      Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error)
-    <:
-    (iimpl_951670863_ & Core.Result.t_Result (Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global) t_Error)
+     = recv_vec_from' #v_T #iimpl_951670863_ #i2 #i3 #i4
