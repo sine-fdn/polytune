@@ -615,7 +615,10 @@ async fn fhaand(
     let mut vi = vec![false; l];
     let mut h0h1 = vec![(false, false); l];
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
-    for j in (0..n).filter(|j| *j != i) {
+    for j in 0..n {
+        if j == i {
+            continue;
+        }
         for ll in 0..l {
             let sj: bool = random_bool();
             let (_, kixj) = xshares[ll].1 .0[j];
@@ -628,7 +631,10 @@ async fn fhaand(
         send_to(channel, j, "haand", &h0h1).await?;
     }
     // Step 2 b) Receive h0, h1 from all parties and compute t.
-    for j in (0..n).filter(|j| *j != i) {
+    for j in 0..n {
+        if j == i {
+            continue;
+        }
         let h0h1_j = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
         for ll in 0..l {
             let (mixj, _) = xshares[ll].1 .0[j];
