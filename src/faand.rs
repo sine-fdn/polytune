@@ -709,8 +709,6 @@ async fn flaand(
         e[ll] = z[ll] ^ rshares[ll].0;
         zshares[ll].0 = z[ll];
     }
-    drop(v);
-    drop(z);
 
     // Triple Checking.
     // Step 4) Compute phi.
@@ -765,8 +763,6 @@ async fn flaand(
         hi[ll] = hi[ll] ^ (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
         commhi.push(commit(&hi[ll].to_be_bytes()));
     }
-    drop(phi);
-    drop(ki_xj_phi);
 
     // All parties first broadcast the commitment of Hi.
     let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi, l).await?;
