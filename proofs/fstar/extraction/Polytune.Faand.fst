@@ -1297,7 +1297,7 @@ let flaand
                                   if
                                     ((ei_uij_k.[ j ]
                                         <:
-                                        Alloc.Vec.t_Vec (bool & u128) Alloc.Alloc.t_Global).[ ll ])
+                                        Alloc.Vec.t_Vec (bool & u128) Alloc.Alloc.t_Global).[ ll ] <: (bool & u128))
                                       ._1
                                   then
                                     let zshares:Alloc.Vec.t_Vec Polytune.Data_types.t_Share
