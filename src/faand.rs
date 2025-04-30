@@ -1165,3 +1165,183 @@ fn combine_two_leaky_ands(
 
     Ok((xshare, y1, zshare))
 }
+
+/// This module contains a Rust specification for the triple
+/// computation performed by `flaand`.
+mod spec {
+    use super::*;
+
+    struct PartyState<const NUM_PARTIES: usize, const NUM_TRIPLES: usize> {
+        delta: Delta,
+        xshares: [Share; NUM_TRIPLES],
+        yshares: [Share; NUM_TRIPLES],
+        rshares: [Share; NUM_TRIPLES],
+    }
+
+    fn setup() {
+        // Set up party states, such that:
+        //  * every party has three shares
+        //  * shares are authenticated before
+    }
+
+    fn share_is_authenticated(
+        share_at_i: &Share,
+        share_at_j: &Share,
+        i: usize,
+        j: usize,
+        delta_j: &Delta,
+    ) -> bool {
+        let bit = share_at_i.0;
+        let mac = share_at_i.1 .0[j].0;
+        let key = share_at_j.1 .0[i].1;
+        mac.0 == key.0 ^ (bit as u128 * delta_j.0)
+    }
+
+    fn precondition<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
+        state: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    ) -> bool {
+        // Check we have the right number of all things
+        if NUM_PARTIES < 2 || NUM_SHARES % 3 != 0 || NUM_SHARES == 0 {
+            return false;
+        }
+
+        state_is_authenticated(&state)
+    }
+
+    fn state_is_authenticated<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
+        state: &[PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    ) -> bool {
+        // For all parties i, j (i != j):
+        // for all bits b_i held by Pi in xshares||yshares||rshares:
+        // b_i is authenticated by Pj
+        let mut bits_authenticated = true;
+        for i in 0..NUM_PARTIES {
+            for j in 0..NUM_PARTIES {
+                if i == j {
+                    continue;
+                }
+                for k in 0..NUM_SHARES {
+                    let xshare_at_i = &state[i].xshares[k];
+                    let xshare_at_j = &state[j].xshares[k];
+                    bits_authenticated = bits_authenticated
+                        && share_is_authenticated(xshare_at_i, xshare_at_j, i, j, &state[j].delta);
+
+                    let yshare_at_i = &state[i].yshares[k];
+                    let yshare_at_j = &state[j].yshares[k];
+                    bits_authenticated = bits_authenticated
+                        && share_is_authenticated(yshare_at_i, yshare_at_j, i, j, &state[j].delta);
+
+                    let rshare_at_i = &state[i].rshares[k];
+                    let rshare_at_j = &state[j].rshares[k];
+                    bits_authenticated = bits_authenticated
+                        && share_is_authenticated(rshare_at_i, rshare_at_j, i, j, &state[j].delta);
+                }
+            }
+        }
+        bits_authenticated
+    }
+
+    fn states_are_consistent<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
+        state_a: &[PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+        state_b: &[PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    ) -> bool {
+        let mut result = true;
+        for party in 0..NUM_PARTIES {
+            let party_state_a = &state_a[party];
+            let party_state_b = &state_b[party];
+
+            for share in 0..NUM_SHARES {
+                result = result && (party_state_a.xshares[share] == party_state_b.xshares[share]);
+                result = result && (party_state_a.yshares[share] == party_state_b.yshares[share]);
+            }
+        }
+        result
+    }
+
+    fn and_relation<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
+        state: &[PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    ) -> bool {
+        let mut result = true;
+        for share in 0..NUM_SHARES {
+            let mut x_opening = false;
+            let mut y_opening = false;
+            let mut z_opening = false;
+            for party in 0..NUM_PARTIES {
+                x_opening = x_opening ^ state[party].xshares[share].0;
+                y_opening = y_opening ^ state[party].yshares[share].0;
+                z_opening = z_opening ^ state[party].rshares[share].0;
+            }
+            result = result && (x_opening && y_opening == z_opening);
+        }
+        result
+    }
+
+    fn postcondition<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
+        state_before: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+        state_after: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    ) -> bool {
+        if NUM_PARTIES < 2 || NUM_SHARES % 3 != 0 || NUM_SHARES == 0 {
+            return false;
+        }
+
+        let mut result = true;
+        result = result && state_is_authenticated(&state_before);
+        result = result && state_is_authenticated(&state_after);
+        result = result && states_are_consistent(&state_before, &state_after);
+        result = result && and_relation(&state_after);
+
+        result
+    }
+
+    /// This functions is the global reference for the "leaky authenticated AND" protocol. It computes
+    /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
+    /// the XOR of the output values z.
+    fn ideal<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
+        state_before: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    ) -> [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES] {
+        let mut vis = vec![Vec::new(); NUM_PARTIES]; // every party's vis
+        let mut h0h1s = vec![Vec::new(); NUM_PARTIES]; // every party's h0h1s
+
+        // for all parties: fhaand_1
+        for i in 0..NUM_PARTIES {
+            let party = &state_before[i];
+            let yi: Vec<bool> = party.yshares.iter().map(|share| share.0).collect();
+            let (vi, h0h1) = fhaand_1(party.delta, i, NUM_PARTIES, NUM_SHARES, &party.xshares, yi);
+            vis[i] = vi;
+            h0h1s[i] = h0h1;
+        }
+
+        // send/receive
+        let mut h0h1_js = vec![Vec::new(); NUM_PARTIES]; // every party's received h0h1s
+        for i in 0..NUM_PARTIES {
+            for j in 0..NUM_PARTIES {
+                if i == j {
+                    continue;
+                }
+                h0h1_js[i][j] = h0h1s[j][i].clone();
+            }
+        }
+
+        // for all parties: fhaand_2
+        for i in 0..NUM_PARTIES {
+            let party = &state_before[i];
+            fhaand_2(
+                i,
+                NUM_PARTIES,
+                NUM_SHARES,
+                &party.xshares,
+                &mut vis[i],
+                &h0h1_js[i],
+            );
+        }
+
+        // vis should now contain the required vi for every party.
+
+        // TODO:
+        // for all parties fhaand2
+        // for all parties flaand_1
+        // for all parties flaand_2
+        // for all parties flaand_3
+        todo!()
+    }
+}
