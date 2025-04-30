@@ -591,6 +591,63 @@ fn random_bool() -> bool {
     random()
 }
 
+fn fhaand_1(
+    delta: Delta,
+    i: usize,
+    n: usize,
+    l: usize,
+    xshares: &[Share],
+    yi: Vec<bool>,
+) -> (Vec<bool>, Vec<Vec<(bool, bool)>>) {
+    // Step 2) Calculate v.
+    let mut vi = vec![false; l];
+    let mut h0h1 = vec![vec![(false, false); l]; n];
+
+    // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
+    for j in 0..n {
+        if j == i {
+            continue;
+        }
+        for ll in 0..l {
+            let sj: bool = random_bool();
+            let (_, kixj) = xshares[ll].1 .0[j];
+            let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
+            let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
+            h0h1[j][ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
+            h0h1[j][ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
+            vi[ll] = vi[ll] ^ sj;
+        }
+    }
+    (vi, h0h1)
+}
+
+fn fhaand_2(
+    i: usize,
+    n: usize,
+    l: usize,
+    xshares: &[Share],
+    vi: &mut Vec<bool>,
+    h0h1_j: &Vec<Vec<(bool, bool)>>,
+) {
+    // Step 2 b) Receive h0, h1 from all parties and compute t.
+    for j in 0..n {
+        if j == i {
+            continue;
+        }
+        for ll in 0..l {
+            let (mixj, _) = xshares[ll].1 .0[j];
+            let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
+            let mut t = hash_mixj.as_bytes()[31] & 1 != 0;
+            t ^= if xshares[ll].0 {
+                h0h1_j[j][ll].1
+            } else {
+                h0h1_j[j][ll].0
+            };
+            vi[ll] = vi[ll] ^ t;
+        }
+    }
+}
+
 /// Protocol Pi_HaAND that performs F_HaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
@@ -612,43 +669,18 @@ async fn fhaand(
         return Err(Error::InvalidLength);
     }
 
-    // Step 2) Calculate v.
-    let mut vi = vec![false; l];
-    let mut h0h1 = vec![(false, false); l];
-    // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
+    let (mut vi, h0h1) = fhaand_1(delta, i, n, l, xshares, yi);
+
+    let mut h0h1_j = vec![vec![(false, false); l]; n];
     for j in 0..n {
         if j == i {
             continue;
         }
-        for ll in 0..l {
-            let sj: bool = random_bool();
-            let (_, kixj) = xshares[ll].1 .0[j];
-            let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
-            let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
-            h0h1[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
-            h0h1[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
-            vi[ll] = vi[ll] ^ sj;
-        }
-        send_to(channel, j, "haand", &h0h1).await?;
+        send_to(channel, j, "haand", &h0h1[j]).await?;
+        h0h1_j[j] = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
     }
-    // Step 2 b) Receive h0, h1 from all parties and compute t.
-    for j in 0..n {
-        if j == i {
-            continue;
-        }
-        let h0h1_j = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
-        for ll in 0..l {
-            let (mixj, _) = xshares[ll].1 .0[j];
-            let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
-            let mut t = hash_mixj.as_bytes()[31] & 1 != 0;
-            t ^= if xshares[ll].0 {
-                h0h1_j[ll].1
-            } else {
-                h0h1_j[ll].0
-            };
-            vi[ll] = vi[ll] ^ t;
-        }
-    }
+
+    fhaand_2(i, n, l, xshares, &mut vi, &h0h1_j);
 
     // Step 3) Return v.
     Ok(vi)
@@ -675,31 +707,24 @@ fn hash128(input: u128) -> Result<u128, Error> {
     Ok(u128::from_le_bytes(buf))
 }
 
-/// Protocol Pi_LaAND that performs F_LaAND from the paper
-/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
-///
-/// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
-/// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
-/// the XOR of the output values z.
-#[maybe_async(AFIT)]
-async fn flaand(
-    channel: &mut impl Channel,
+fn flaand_1(
     delta: Delta,
-    (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
+    xshares: &[Share],
+    yshares: &[Share],
+    rshares: &[Share],
     i: usize,
     n: usize,
     l: usize,
-) -> Result<Vec<Share>, Error> {
-    // Triple computation.
-    // Step 1) Triple computation [random authenticated shares as input parameters xshares, yshares, rshares].
-    if xshares.len() != l || yshares.len() != l || rshares.len() != l {
-        return Err(Error::InvalidLength);
-    }
-
-    // Step 2) Run Pi_HaAND to get back some v.
-    let y = yshares.iter().take(l).map(|share| share.0).collect();
-    let v = fhaand(channel, delta, i, n, l, xshares, y).await?;
-
+    v: &Vec<bool>,
+) -> Result<
+    (
+        Vec<Vec<u128>>,
+        Vec<Vec<(bool, u128)>>,
+        Vec<Share>,
+        Vec<u128>,
+    ),
+    Error,
+> {
     // Step 3) Compute z and e AND shares.
     let mut z = vec![false; l];
     let mut e = vec![false; l];
@@ -741,8 +766,21 @@ async fn flaand(
         }
     }
 
-    let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij, l).await?;
+    Ok((ki_xj_phi, ei_uij, zshares, phi))
+}
 
+fn flaand_2(
+    delta: Delta,
+    xshares: &[Share],
+    rshares: &[Share],
+    i: usize,
+    n: usize,
+    l: usize,
+    ki_xj_phi: &mut Vec<Vec<u128>>,
+    ei_uij_k: &Vec<Vec<(bool, u128)>>,
+    zshares: &mut Vec<Share>,
+    phi: &Vec<u128>,
+) -> Result<(Vec<Commitment>, Vec<u128>), Error> {
     for j in 0..n {
         if j == i {
             continue;
@@ -776,14 +814,18 @@ async fn flaand(
         hi[ll] = hi[ll] ^ (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
         commhi.push(commit(&hi[ll].to_be_bytes()));
     }
+    Ok((commhi, hi))
+}
 
-    // All parties first broadcast the commitment of Hi.
-    let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi, l).await?;
-
-    // Then all parties broadcast Hi.
-    let hi_k_outer = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
-
-    let mut xor_all_hi = hi; // XOR for all parties, including p_own
+fn flaand_3(
+    i: usize,
+    n: usize,
+    l: usize,
+    hi: &Vec<u128>,
+    commhi_k: &Vec<Vec<Commitment>>,
+    hi_k_outer: &Vec<Vec<u128>>,
+) -> Result<(), Error> {
+    let mut xor_all_hi = hi.clone(); // XOR for all parties, including p_own
     for k in 0..n {
         if k == i {
             continue;
@@ -802,6 +844,59 @@ async fn flaand(
             return Err(Error::LaANDXorNotZero);
         }
     }
+    Ok(())
+}
+/// Protocol Pi_LaAND that performs F_LaAND from the paper
+/// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
+///
+/// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
+/// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
+/// the XOR of the output values z.
+#[maybe_async(AFIT)]
+async fn flaand(
+    channel: &mut impl Channel,
+    delta: Delta,
+    (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
+    i: usize,
+    n: usize,
+    l: usize,
+) -> Result<Vec<Share>, Error> {
+    // Triple computation.
+    // Step 1) Triple computation [random authenticated shares as input parameters xshares, yshares, rshares].
+    if xshares.len() != l || yshares.len() != l || rshares.len() != l {
+        return Err(Error::InvalidLength);
+    }
+
+    // Step 2) Run Pi_HaAND to get back some v.
+    let y = yshares.iter().take(l).map(|share| share.0).collect();
+    let v = fhaand(channel, delta, i, n, l, xshares, y).await?;
+
+    let (mut ki_xj_phi, ei_uij, mut zshares, phi) =
+        flaand_1(delta, xshares, yshares, rshares, i, n, l, &v)?;
+
+    let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij, l).await?;
+
+    let (commhi, hi) = flaand_2(
+        delta,
+        xshares,
+        rshares,
+        i,
+        n,
+        l,
+        &mut ki_xj_phi,
+        &ei_uij_k,
+        &mut zshares,
+        &phi,
+    )?;
+
+    // All parties first broadcast the commitment of Hi.
+    let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi, l).await?;
+
+    // Then all parties broadcast Hi.
+    let hi_k_outer = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
+
+    flaand_3(i, n, l, &hi, &commhi_k, &hi_k_outer)?;
+
     Ok(zshares)
 }
 
