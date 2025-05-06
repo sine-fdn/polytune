@@ -2,7 +2,6 @@
 
 use maybe_async::maybe_async;
 use rand::random;
-use smallvec::smallvec;
 
 use crate::{
     channel::{self, recv_from, send_to, Channel},
@@ -89,7 +88,7 @@ pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) ->
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = smallvec![(Mac(0), Key(0)); parties];
+            let mut mac_and_key = vec![(Mac(0), Key(0)); parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
@@ -179,7 +178,7 @@ pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) ->
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = smallvec![(Mac(0), Key(0)); parties];
+            let mut mac_and_key = vec![(Mac(0), Key(0)); parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
@@ -204,7 +203,6 @@ mod tests {
         protocol::{Preprocessor, _mpc},
     };
     use garble_lang::{circuit::Circuit, compile};
-    use smallvec::smallvec;
 
     #[tokio::test]
     async fn xor_homomorphic_mac() -> Result<(), Error> {
@@ -328,8 +326,7 @@ mod tests {
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted =
-                    Share(!r1, Auth(smallvec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
+                let auth_r1_corrupted = Share(!r1, Auth(vec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
                 send_to(
                     &mut a,
                     fpre_party,
@@ -351,7 +348,7 @@ mod tests {
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
                 let auth_r1_corrupted = Share(
                     !r1,
-                    Auth(smallvec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]),
+                    Auth(vec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]),
                 );
                 send_to(
                     &mut a,
