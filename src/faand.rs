@@ -646,6 +646,27 @@ fn fhaand_1(
     (vi, h0h1)
 }
 
+#[requires(
+    Prop::and(
+        (vi.len() == l).into(),
+
+        Prop::and(
+        Prop::and(
+            (xshares.len() >= l).into(),
+            forall(|ll: usize| implies(
+                                0 <= ll && ll < l && xshares.len() >= l,
+                                xshares[ll].1.0.len() >= n
+            ))
+        ),
+
+        Prop::and(
+            (h0h1_j.len() >= n).into(),
+            forall(|j: usize| implies(
+                                0 <= j && j < n && h0h1_j.len() >= n,
+                                h0h1_j[j].len() >= l
+            ))
+        ))
+    ))]
 fn fhaand_2(
     i: usize,
     n: usize,
@@ -656,10 +677,12 @@ fn fhaand_2(
 ) {
     // Step 2 b) Receive h0, h1 from all parties and compute t.
     for j in 0..n {
+        loop_invariant!(|_: usize| vi.len() == l);
         if j == i {
             continue;
         }
         for ll in 0..l {
+            loop_invariant!(|_: usize| vi.len() == l);
             let (mixj, _) = xshares[ll].1 .0[j];
             let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
             let mut t = hash_mixj.as_bytes()[31] & 1 != 0;
