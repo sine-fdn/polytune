@@ -720,6 +720,7 @@ async fn fhaand(
     let (mut vi, h0h1) = fhaand_1(delta, i, n, l, xshares, yi);
 
     let mut h0h1_j = vec![vec![(false, false); l]; n];
+    // XXX: Would need to avoid the early return here for F* typechecking to succeed.
     for j in 0..n {
         if j == i {
             continue;
@@ -742,19 +743,41 @@ async fn fhaand(
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
 /// to be the case in all real-world usages of our protocol.
 #[cfg_attr(hax, hax_lib::opaque)]
-fn hash128(input: u128) -> Result<u128, Error> {
+fn hash128(input: u128) -> u128 {
+    debug_assert!(
+        RHO > 64,
+        "Digest length is insufficient for target statistical security level."
+    );
     use blake3::Hasher;
     let mut hasher = Hasher::new();
     hasher.update(&input.to_le_bytes());
     let mut xof = hasher.finalize_xof();
-    if RHO > 64 {
-        return Err(Error::InvalidHashLength);
-    }
     let mut buf = [0u8; 16];
     xof.fill(&mut buf);
-    Ok(u128::from_le_bytes(buf))
+    u128::from_le_bytes(buf)
 }
 
+#[requires(
+    Prop::and(
+        (v.len() >= l).into(),
+        Prop::and(
+            (rshares.len() >= l).into(),
+            Prop::and(
+            Prop::and(
+                (xshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                                    0 <= ll && ll < l && xshares.len() >= l,
+                                    xshares[ll].1.0.len() >= n
+                ))
+            ),
+            Prop::and(
+                (yshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                                    0 <= ll && ll < l && yshares.len() >= l,
+                                    yshares[ll].1.0.len() >= n
+                ))
+        )))
+    ))]
 fn flaand_1(
     delta: Delta,
     xshares: &[Share],
@@ -764,31 +787,24 @@ fn flaand_1(
     n: usize,
     l: usize,
     v: &Vec<bool>,
-) -> Result<
-    (
-        Vec<Vec<u128>>,
-        Vec<Vec<(bool, u128)>>,
-        Vec<Share>,
-        Vec<u128>,
-    ),
-    Error,
-> {
+) -> Result<(Vec<Vec<u128>>, Vec<Vec<(bool, u128)>>, Vec<u128>), Error> {
     // Step 3) Compute z and e AND shares.
     let mut z = vec![false; l];
     let mut e = vec![false; l];
-    let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
 
     for ll in 0..l {
+        loop_invariant!(|_: usize| z.len() == l && e.len() == l);
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
-        zshares[ll].0 = z[ll];
     }
 
     // Triple Checking.
     // Step 4) Compute phi.
     let mut phi = vec![0; l];
     for ll in 0..l {
+        loop_invariant!(|_: usize| phi.len() == l);
         for k in 0..n {
+            loop_invariant!(|_: usize| phi.len() == l);
             if k == i {
             } else {
                 let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
@@ -803,20 +819,77 @@ fn flaand_1(
     let mut ki_xj_phi = vec![vec![0; l]; n];
     let mut ei_uij = vec![vec![]; n];
     for j in 0..n {
+        loop_invariant!(|_: usize| Prop::and(
+            (ki_xj_phi.len() == n && ei_uij.len() == n && phi.len() == l).into(),
+            forall(|j: usize| implies(
+                0 <= j && j < n && ki_xj_phi.len() == n,
+                ki_xj_phi[j].len() == l
+            ))
+        ));
         if j == i {
             continue;
         }
-        for (ll, phi_l) in phi.iter().enumerate().take(l) {
+        for ll in 0..l {
+            loop_invariant!(|_: usize| Prop::and(
+                (ki_xj_phi.len() == n && ei_uij.len() == n && phi.len() == l).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < n && ki_xj_phi.len() == n,
+                    ki_xj_phi[j].len() == l
+                ))
+            ));
             let (_, ki_xj) = xshares[ll].1 .0[j];
-            ki_xj_phi[j][ll] = hash128(ki_xj.0)?;
-            let uij = hash128(ki_xj.0 ^ delta.0)? ^ ki_xj_phi[j][ll] ^ *phi_l;
+            ki_xj_phi[j][ll] = hash128(ki_xj.0);
+            let uij = hash128(ki_xj.0 ^ delta.0) ^ ki_xj_phi[j][ll] ^ phi[ll];
             ei_uij[j].push((e[ll], uij));
         }
     }
 
-    Ok((ki_xj_phi, ei_uij, zshares, phi))
+    Ok((ki_xj_phi, ei_uij, phi))
 }
 
+#[requires(
+    Prop::and(
+        (phi.len() >= l).into(),
+        Prop::and(
+        Prop::and(
+            Prop::and(
+                (rshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                                    0 <= ll && ll < l && rshares.len() >= l,
+                                    rshares[ll].1.0.len() >= n
+                ))
+            ),
+            Prop::and(
+            Prop::and(
+                (zshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                                    0 <= ll && ll < l && zshares.len() >= l,
+                                    zshares[ll].1.0.len() >= n
+                ))
+            ),
+            Prop::and(
+                (xshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                                    0 <= ll && ll < l && xshares.len() >= l,
+                                    xshares[ll].1.0.len() >= n
+                ))
+            ))),
+            Prop::and(
+                Prop::and(
+                    (ei_uij_k.len() >= n).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < n && ei_uij_k.len() >= n,
+                        ei_uij_k[j].len() >= l))
+                ),
+                Prop::and(
+                    (ki_xj_phi.len() >= n).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < n && ki_xj_phi.len() >= n,
+                        ki_xj_phi[j].len() >= l))
+                )
+            )
+        )
+    ))]
 fn flaand_2(
     delta: Delta,
     xshares: &[Share],
@@ -830,16 +903,65 @@ fn flaand_2(
     phi: &Vec<u128>,
 ) -> Result<(Vec<Commitment>, Vec<u128>), Error> {
     for j in 0..n {
+        loop_invariant!(|_: usize| Prop::and(
+            Prop::and(
+                (ki_xj_phi.len() >= n).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < n && ki_xj_phi.len() >= n,
+                    ki_xj_phi[j].len() >= l
+                ))
+            ),
+            Prop::and(
+                (zshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                    0 <= ll && ll < l && zshares.len() >= l,
+                    zshares[ll].1 .0.len() >= n
+                ))
+            )
+        ));
+
         if j == i {
             continue;
         }
-        for (ll, xbit) in xshares.iter().enumerate().take(l) {
+        for ll in 0..l {
+            loop_invariant!(|_: usize| Prop::and(
+                Prop::and(
+                    (ki_xj_phi.len() >= n).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < n && ki_xj_phi.len() >= n,
+                        ki_xj_phi[j].len() >= l
+                    ))
+                ),
+                Prop::and(
+                    (zshares.len() >= l).into(),
+                    forall(|ll: usize| implies(
+                        0 <= ll && ll < l && zshares.len() >= l,
+                        zshares[ll].1 .0.len() >= n
+                    ))
+                )
+            ));
             let (mi_xj, _) = xshares[ll].1 .0[j];
             ki_xj_phi[j][ll] =
-                ki_xj_phi[j][ll] ^ hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
+                ki_xj_phi[j][ll] ^ hash128(mi_xj.0) ^ (xshares[ll].0 as u128 * ei_uij_k[j][ll].1);
             // mi_xj_phi added here
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             let (mac, key) = rshares[ll].1 .0[j];
+            // XXX: To resolve the F* error:
+            //
+            // * Error 66 at Polytune.Faand.fst(905,20-906,25):
+            //    - Failed to resolve implicit argument ?572
+            //      of type x: Prims.bool -> Prims.GTot Type
+            //      introduced for Instantiating implicit argument 'b'
+            //
+            // change the offending line
+            //
+            //   ((ei_uij_k.[ j ] <: Alloc.Vec.t_Vec (bool & u128) Alloc.Alloc.t_Global).[ ll ])
+            //
+            // as follows
+            //
+            //   ((ei_uij_k.[ j ] <: Alloc.Vec.t_Vec (bool & u128) Alloc.Alloc.t_Global).[ ll ] <: (bool & u128))
+            //
+            // See https://github.com/cryspen/hax/issues/1434
             if ei_uij_k[j][ll].0 {
                 zshares[ll].1 .0[j] = (mac, Key(key.0 ^ delta.0));
             } else {
@@ -852,7 +974,27 @@ fn flaand_2(
     let mut hi = vec![0; l];
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
+        loop_invariant!(|ll: usize| Prop::and(
+            (hi.len() == l && commhi.len() == ll).into(),
+            Prop::and(
+                (zshares.len() >= l).into(),
+                forall(|ll: usize| implies(
+                    0 <= ll && ll < l && zshares.len() >= l,
+                    zshares[ll].1 .0.len() >= n
+                ))
+            )
+        ));
         for k in 0..n {
+            loop_invariant!(|_: usize| Prop::and(
+                (hi.len() == l && commhi.len() == ll).into(),
+                Prop::and(
+                    (zshares.len() >= l).into(),
+                    forall(|ll: usize| implies(
+                        0 <= ll && ll < l && zshares.len() >= l,
+                        zshares[ll].1 .0.len() >= n
+                    ))
+                )
+            ));
             if k == i {
                 continue;
             }
@@ -865,22 +1007,46 @@ fn flaand_2(
     Ok((commhi, hi))
 }
 
+#[requires(
+    Prop::and(
+        (xor_all_hi.len() == l).into(),
+            Prop::and(
+                Prop::and(
+                    (commhi_k.len() >= n).into(),
+                    forall(|k: usize| implies(
+                        0 <= k &&  k < n && commhi_k.len() >= n,
+                        commhi_k[k].len() >= l))
+                ),
+                Prop::and(
+                    (hi_k_outer.len() >= n).into(),
+                    forall(|k: usize| implies(
+                        0 <= k &&  k < n && hi_k_outer.len() >= n,
+                        hi_k_outer[k].len() >= l))
+                ),
+            )
+    ))
+    ]
 fn flaand_3(
     i: usize,
     n: usize,
     l: usize,
-    hi: &Vec<u128>,
+    mut xor_all_hi: Vec<u128>,
     commhi_k: &Vec<Vec<Commitment>>,
     hi_k_outer: &Vec<Vec<u128>>,
 ) -> Result<(), Error> {
-    let mut xor_all_hi = hi.clone(); // XOR for all parties, including p_own
+    // XXX: This is a workaround, because hax does not support loop
+    // invariants in combination with early returns.
+    let mut commitment_error = false;
+    let mut xor_not_zero_error = false;
     for k in 0..n {
+        loop_invariant!(|_: usize| xor_all_hi.len() == l);
         if k == i {
             continue;
         }
-        for ll in 0..xor_all_hi.len() {
+        for ll in 0..l {
+            loop_invariant!(|_: usize| xor_all_hi.len() == l);
             if !open_commitment(&commhi_k[k][ll], &hi_k_outer[k][ll].to_be_bytes()) {
-                return Err(Error::CommitmentCouldNotBeOpened);
+                commitment_error = true;
             }
             xor_all_hi[ll] = xor_all_hi[ll] ^ hi_k_outer[k][ll];
         }
@@ -888,11 +1054,18 @@ fn flaand_3(
 
     // Step 7) Check that the xor of all his is zero.
     for i in 0..l {
+        loop_invariant!(|_: usize| xor_all_hi.len() == l);
         if xor_all_hi[i] != 0 {
-            return Err(Error::LaANDXorNotZero);
+            xor_not_zero_error = true;
         }
     }
-    Ok(())
+    if commitment_error {
+        Err(Error::CommitmentCouldNotBeOpened)
+    } else if xor_not_zero_error {
+        Err(Error::LaANDXorNotZero)
+    } else {
+        Ok(())
+    }
 }
 /// Protocol Pi_LaAND that performs F_LaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
@@ -918,9 +1091,9 @@ async fn flaand(
     // Step 2) Run Pi_HaAND to get back some v.
     let y = yshares.iter().take(l).map(|share| share.0).collect();
     let v = fhaand(channel, delta, i, n, l, xshares, y).await?;
+    let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
 
-    let (mut ki_xj_phi, ei_uij, mut zshares, phi) =
-        flaand_1(delta, xshares, yshares, rshares, i, n, l, &v)?;
+    let (mut ki_xj_phi, ei_uij, phi) = flaand_1(delta, xshares, yshares, rshares, i, n, l, &v)?;
 
     let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij, l).await?;
 
@@ -943,7 +1116,7 @@ async fn flaand(
     // Then all parties broadcast Hi.
     let hi_k_outer = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
 
-    flaand_3(i, n, l, &hi, &commhi_k, &hi_k_outer)?;
+    flaand_3(i, n, l, hi, &commhi_k, &hi_k_outer)?;
 
     Ok(zshares)
 }
@@ -1224,12 +1397,6 @@ mod spec {
         xshares: [Share; NUM_TRIPLES],
         yshares: [Share; NUM_TRIPLES],
         rshares: [Share; NUM_TRIPLES],
-    }
-
-    fn setup() {
-        // Set up party states, such that:
-        //  * every party has three shares
-        //  * shares are authenticated before
     }
 
     fn share_is_authenticated(

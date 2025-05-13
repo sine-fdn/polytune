@@ -74,8 +74,11 @@ cargo_hax_into = [
 extraction_targets = [
     "-i",
     " ".join(["-**",
-    "+**::faand::fhaand",
-    "+**::faand::flaand",
+    "+**::faand::fhaand_1",
+    "+**::faand::fhaand_2",
+    "+**::faand::flaand_1",
+    "+**::faand::flaand_2",
+    "+**::faand::flaand_3",
     ])
 ]
 
