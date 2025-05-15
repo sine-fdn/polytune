@@ -4,7 +4,6 @@ use std::vec;
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::Block;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 
@@ -12,6 +11,7 @@ use crate::{
     channel::{self, recv_from, recv_vec_from, send_to, Channel},
     data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
+    swankyot,
 };
 
 /// The statistical security parameter `RHO` used for cryptographic operations.
@@ -38,8 +38,6 @@ pub enum Error {
     InvalidLength,
     /// Broadcast not consistent.
     InconsistentBroadcast,
-    /// KOS consistency check failed.
-    KOSConsistencyCheckFailed,
     /// The MAC is not the correct one in aBit.
     ABitWrongMAC,
     /// The xor of MACs is not equal to the XOR of corresponding keys or that XOR delta.
@@ -52,6 +50,8 @@ pub enum Error {
     BeaverWrongMAC,
     /// Too short hash for statistical security parameter.
     InvalidHashLength,
+    /// Error in the OT protocol.
+    OtErr(swankyot::Error),
 }
 
 /// Converts a `channel::Error` into a custom `Error` type.
@@ -61,18 +61,27 @@ impl From<channel::Error> for Error {
     }
 }
 
+/// Converts an `ot::Error` into a custom `Error` type.
+impl From<swankyot::Error> for Error {
+    fn from(e: swankyot::Error) -> Self {
+        Self::OtErr(e)
+    }
+}
+
 /// Represents a cryptographic commitment as a fixed-size 32-byte array (a BLAKE3 hash).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 struct Commitment(pub(crate) [u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
+#[hax_lib::opaque]
 fn commit(value: &[u8]) -> Commitment {
     Commitment(blake3::hash(value).into())
 }
 
 /// Verifies if a given value matches a previously generated commitment.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
+#[hax_lib::opaque]
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
 }
@@ -105,6 +114,7 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
 
 /// Implements the verification step of broadcast with abort based on Goldwasser and Lindell's protocol.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn broadcast_verification<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -161,6 +171,7 @@ pub(crate) async fn broadcast_verification<
 /// for all parties at once, where each party sends its vector to all others.
 /// The function returns the vector received and verified by broadcast.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -188,6 +199,7 @@ pub(crate) async fn broadcast<
 /// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
 /// the vector is broadcasted, the second element is simply sent to all parties.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn broadcast_first_send_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
@@ -225,6 +237,7 @@ pub(crate) async fn broadcast_first_send_second<
 /// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
 /// cryptographically secure random number generator.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn shared_rng(
     channel: &mut impl Channel,
     i: usize,
@@ -280,11 +293,12 @@ pub(crate) async fn shared_rng(
 /// This function generates a shared random number generator (RNG) between every two parties using
 /// two-party coin tossing for the two-party KOS OT protocol.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn shared_rng_pairwise(
     channel: &mut impl Channel,
     i: usize,
     n: usize,
-) -> Result<Vec<Vec<Option<ChaCha20Rng>>>, Error> {
+) -> Result<Vec<ChaCha20Rng>, Error> {
     // Step 1 b) Generate a random 256-bit seed for every other party for the pairwise
     // cointossing and commit to it.
     let bufvec: Vec<[u8; 32]> = (0..n).map(|_| random::<[u8; 32]>()).collect();
@@ -333,15 +347,19 @@ pub(crate) async fn shared_rng_pairwise(
     }
 
     // Step 5) Set up shared RNGs for pairwise cointossing
-    let mut shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>> = vec![vec![None; n]; n];
+    let mut shared_two_by_two: Vec<ChaCha20Rng> =
+        vec![ChaCha20Rng::from_seed(std::array::from_fn(|_| 0)); n];
     for k in (0..n).filter(|&k| k != i) {
-        let (a, b) = if i < k { (i, k) } else { (k, i) };
-        shared_two_by_two[a][b] = Some(ChaCha20Rng::from_seed(std::array::from_fn(|i| {
-            bufvec[k][i] ^ bufs[k][i]
-        })));
+        shared_two_by_two[k] =
+            ChaCha20Rng::from_seed(std::array::from_fn(|i| bufvec[k][i] ^ bufs[k][i]));
     }
 
     Ok(shared_two_by_two)
+}
+
+#[hax_lib::opaque]
+fn zero_rng() -> ChaCha20Rng {
+    ChaCha20Rng::from_seed([0u8; 32])
 }
 
 /// Protocol PI_aBit^n that performs F_aBit^n from the paper
@@ -355,12 +373,14 @@ pub(crate) async fn shared_rng_pairwise(
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 async fn fabitn(
-    (channel, delta): (&mut impl Channel, Delta),
+    channel: &mut impl Channel,
+    delta: Delta,
     i: usize,
     n: usize,
     l: usize,
-    mut shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
+    shared_two_by_two: Vec<ChaCha20Rng>,
 ) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
@@ -372,38 +392,39 @@ async fn fabitn(
     let mut keys = vec![vec![0; lprime]; n];
     let mut macs = vec![vec![0; lprime]; n];
 
-    let deltas = vec![Block::from(delta.0.to_be_bytes()); lprime];
-
     // Step 2: Use the shared RNGs for key and MAC generation
-    if !(shared_two_by_two.len() == n && shared_two_by_two.iter().all(|row| row.len() == n)) {
+    if !(shared_two_by_two.len() == n) {
         return Err(Error::InvalidLength);
     }
 
-    for k in (0..n).filter(|&k| k != i) {
-        let (a, b) = if i < k { (i, k) } else { (k, i) };
-
-        if let Some(shared) = shared_two_by_two[a][b].as_mut() {
-            if i < k {
-                keys[k] = kos_ot_sender(channel, &deltas, k, shared).await?;
-                macs[k] = kos_ot_receiver(channel, &x, k, shared).await?;
-            } else {
-                macs[k] = kos_ot_receiver(channel, &x, k, shared).await?;
-                keys[k] = kos_ot_sender(channel, &deltas, k, shared).await?;
-            }
+    for k in 0..n {
+        if k == i {
+            continue;
+        }
+        let shared = &shared_two_by_two[k];
+        let mut shared_rand: Vec<ChaCha20Rng> = vec![zero_rng(); n];
+        if i < k {
+            (keys[k], shared_rand[k]) = kos_ot_sender(channel, delta.0, lprime, k, shared).await?;
+            (macs[k], shared_rand[k]) = kos_ot_receiver(channel, &x, k, shared).await?;
         } else {
-            return Err(Error::EmptyVector);
+            (macs[k], shared_rand[k]) = kos_ot_receiver(channel, &x, k, shared).await?;
+            (keys[k], shared_rand[k]) = kos_ot_sender(channel, delta.0, lprime, k, shared).await?;
         }
     }
-    drop(deltas);
 
     // Step 2) Run 2-party OTs to compute keys and MACs [input parameters mm and kk].
 
     // Step 3) Verification of MACs and keys.
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
     let mut multi_shared_rand = shared_rng(channel, i, n).await?;
-    let r: Vec<Vec<bool>> = (0..three_rho)
-        .map(|_| (0..lprime).map(|_| multi_shared_rand.gen()).collect())
-        .collect();
+    let mut r = Vec::with_capacity(three_rho);
+    for _ in 0..three_rho {
+        let mut inner = Vec::with_capacity(lprime);
+        for _ in 0..lprime {
+            inner.push(multi_shared_rand.gen());
+        }
+        r.push(inner);
+    }
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
     // We batch messages and send xjmac with xj as well, as from Step 3 d).
@@ -418,7 +439,10 @@ async fn fabitn(
 
     // Step 3 b continued) Send xj and its corresponding MACs to all parties except self.
     let mut xj_xjmac = vec![vec![]; n];
-    for k in (0..n).filter(|k| *k != i) {
+    for k in 0..n {
+        if k == i {
+            continue;
+        }
         for (rbits, xj) in r.iter().zip(xj.iter()) {
             let mut xjmac = 0;
             for (j, &rbit) in rbits.iter().enumerate() {
@@ -435,7 +459,10 @@ async fn fabitn(
 
     // Step 3 c) Compute keys.
     for (j, rbits) in r.iter().enumerate() {
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             let (xj, xjmac) = &xj_xjmac_k[k][j];
             let mut xjkey = 0;
             for (i, rbit) in rbits.iter().enumerate() {
@@ -453,14 +480,20 @@ async fn fabitn(
 
     // Step 4) Return the first l objects.
     x.truncate(l);
-    for k in (0..n).filter(|k| *k != i) {
+    for k in 0..n {
+        if k == i {
+            continue;
+        }
         keys[k].truncate(l);
         macs[k].truncate(l);
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
         let mut authvec = vec![(Mac(0), Key(0)); n];
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             authvec[k] = (Mac(macs[k][l]), Key(keys[k][l]));
         }
         res.push(Share(*xi, Auth(authvec)));
@@ -483,17 +516,18 @@ async fn fabitn(
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 #[maybe_async(AFIT)]
 pub(crate) async fn fashare(
-    (channel, delta): (&mut impl Channel, Delta),
+    channel: &mut impl Channel,
+    delta: Delta,
     i: usize,
     n: usize,
     l: usize,
-    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
+    shared_two_by_two: Vec<ChaCha20Rng>,
 ) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
     // Step 1) Pick random bit-string x (input).
 
     // Step 2) Run Pi_aBit^n to compute shares.
     let (mut xishares, multi_shared_rand) =
-        fabitn((channel, delta), i, n, l + RHO, shared_two_by_two).await?;
+        fabitn(channel, delta, i, n, l + RHO, shared_two_by_two).await?;
 
     // Step 3) Compute commitments and verify consistency.
     // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
@@ -506,9 +540,12 @@ pub(crate) async fn fashare(
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             let (mac, key) = xishare.1 .0[k];
-            d0[r] ^= key.0;
+            d0[r] = key.0 ^ d0[r];
             dm.extend(&mac.0.to_be_bytes());
         }
         d1[r] = d0[r] ^ delta.0;
@@ -529,14 +566,18 @@ pub(crate) async fn fashare(
     dm_k[i] = dmvec;
 
     // 3 c) Compute bi to determine di_bi and send to all parties.
-    let mut bi = [false; RHO];
+    let mut bi: [bool; RHO] = [false; RHO];
     let mut di_bi = vec![0; RHO];
     for r in 0..RHO {
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             if dm_k[k][r][0] > 1 {
                 return Err(Error::InvalidBitValue);
             }
-            bi[r] ^= dm_k[k][r][0] != 0;
+            let cond = dm_k[k][r][0] != 0;
+            bi[r] = bi[r] ^ cond;
         }
         di_bi[r] = if bi[r] { d1[r] } else { d0[r] };
     }
@@ -547,7 +588,10 @@ pub(crate) async fn fashare(
     let mut xor_xk_macs = vec![vec![0; RHO]; n];
     for r in 0..RHO {
         for (k, dmv) in dm_k.iter().enumerate().take(n) {
-            for kk in (0..n).filter(|pp| *pp != k) {
+            for kk in 0..n {
+                if kk == k {
+                    continue;
+                }
                 if dmv.is_empty() {
                     return Err(Error::EmptyVector);
                 }
@@ -560,13 +604,16 @@ pub(crate) async fn fashare(
                 };
                 let end = start + 16;
                 if let Ok(mac) = dm[start..end].try_into().map(u128::from_be_bytes) {
-                    xor_xk_macs[kk][r] ^= mac;
+                    xor_xk_macs[kk][r] = mac ^ xor_xk_macs[kk][r];
                 } else {
                     return Err(Error::ConversionErr);
                 }
             }
         }
-        for k in (0..n).filter(|k| *k != i) {
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
             let d_bj = &di_bi_k[k][r].to_be_bytes();
             let commitments = &c0_c1_cm_k[k][r];
             if !open_commitment(&commitments.0, d_bj) && !open_commitment(&commitments.1, d_bj) {

@@ -8,12 +8,11 @@
 
 use crate::{
     channel::{recv_from, recv_vec_from, send_to, Channel},
-    faand::Error,
     swankyot::{
         alsz::{
             boolvec_to_u8vec, u8vec_to_boolvec, Receiver as AlszReceiver, Sender as AlszSender,
         },
-        CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
+        CorrelatedReceiver, CorrelatedSender, Error, FixedKeyInitializer, Receiver as OtReceiver,
         Sender as OtSender,
     },
 };

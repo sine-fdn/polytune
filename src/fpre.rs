@@ -326,8 +326,7 @@ mod tests {
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted =
-                    Share(!r1, Auth(vec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
+                let auth_r1_corrupted = Share(!r1, Auth(vec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
                 send_to(
                     &mut a,
                     fpre_party,

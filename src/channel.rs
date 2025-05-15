@@ -156,6 +156,7 @@ pub trait Channel {
 
     /// Sends a message to the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
+    #[hax_lib::opaque]
     async fn send_bytes_to(
         &mut self,
         party: usize,
@@ -165,6 +166,7 @@ pub trait Channel {
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
+    #[hax_lib::opaque]
     async fn recv_bytes_from(
         &mut self,
         party: usize,
@@ -174,6 +176,7 @@ pub trait Channel {
 
 /// Serializes and sends an MPC message to the other party.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
@@ -214,6 +217,7 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
 
 /// Receives and deserializes an MPC message from the other party.
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,
@@ -253,6 +257,7 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
 
 /// Receives and deserializes a Vec from the other party (while checking the length).
 #[maybe_async(AFIT)]
+#[hax_lib::opaque]
 pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
     channel: &mut impl Channel,
     party: usize,

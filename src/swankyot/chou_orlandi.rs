@@ -18,8 +18,7 @@
 
 use crate::{
     channel::{recv_vec_from, send_to, Channel},
-    faand::Error,
-    swankyot::{Receiver as OtReceiver, Sender as OtSender},
+    swankyot::{Error, Receiver as OtReceiver, Sender as OtSender},
 };
 
 use curve25519_dalek::{

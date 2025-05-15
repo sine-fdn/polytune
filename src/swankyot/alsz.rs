@@ -10,9 +10,8 @@
 
 use crate::{
     channel::{recv_vec_from, send_to, Channel},
-    faand::Error,
     swankyot::{
-        CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
+        CorrelatedReceiver, CorrelatedSender, Error, FixedKeyInitializer, Receiver as OtReceiver,
         Sender as OtSender,
     },
 };

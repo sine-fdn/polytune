@@ -287,7 +287,8 @@ pub(crate) async fn _mpc(
         let shared_two_by_two = shared_rng_pairwise(channel, p_own, p_max).await?;
 
         let (rand_shares, multi_shared_rand) = fashare(
-            (channel, delta),
+            channel,
+            delta,
             p_own,
             p_max,
             secret_bits + 3 * lprime,
