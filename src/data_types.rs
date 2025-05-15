@@ -40,6 +40,12 @@ impl BitXor for Mac {
     }
 }
 
+impl Mac {
+    pub(crate) fn to_le_bytes(&self) -> [u8; 16] {
+        self.0.to_le_bytes()
+    }
+}
+
 /// A key used to authenticate (together with the [Delta] global key) a bit for the other party.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Key(pub(crate) u128);
@@ -57,6 +63,12 @@ impl BitXor for Key {
 
     fn bitxor(self, rhs: Self) -> Self::Output {
         Key(self.0 ^ rhs.0)
+    }
+}
+
+impl Key {
+    pub(crate) fn to_le_bytes(&self) -> [u8; 16] {
+        self.0.to_le_bytes()
     }
 }
 
@@ -90,6 +102,9 @@ impl Share {
     pub(crate) fn xor_keys(&self) -> Key {
         self.1.xor_keys()
     }
+    pub(crate) fn key_for(&self) -> Vec<Key> {
+        self.1.keys()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +127,10 @@ impl BitXor for &Auth {
 impl Auth {
     pub(crate) fn macs(&self) -> Vec<Mac> {
         self.0.iter().map(|(mac, _)| *mac).collect()
+    }
+
+    pub(crate) fn keys(&self) -> Vec<Key> {
+        self.0.iter().map(|(_, key)| *key).collect()
     }
 
     pub(crate) fn xor_keys(&self) -> Key {

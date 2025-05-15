@@ -45,6 +45,13 @@ val random_bool': Prims.unit -> bool
 unfold
 let random_bool = random_bool'
 
+val fhaand 
+      (deltas: Seq.seq Polytune.Data_types.t_Delta)
+      (n l: usize)
+      (xshares: Seq.seq (t_Slice Polytune.Data_types.t_Share))
+      (yi: Seq.seq (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global))
+    : Prims.Pure (Seq.seq (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global))
+
 let fhaand_1_
       (delta: Polytune.Data_types.t_Delta)
       (i n l: usize)
@@ -1119,7 +1126,7 @@ let flaand_2_
                       .Polytune.Data_types._0.[ j ]
                   in
                   if
-                    ((ei_uij_k.[ j ] <: Alloc.Vec.t_Vec (bool & u128) Alloc.Alloc.t_Global).[ ll ] <: (bool & u128))
+                    ((ei_uij_k.[ j ] <: Alloc.Vec.t_Vec (bool & u128) Alloc.Alloc.t_Global).[ ll ])
                       ._1
                   then
                     let zshares:Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global =

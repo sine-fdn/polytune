@@ -1,7 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use hax_lib::{forall, implies, loop_invariant, requires, Prop};
+use hax_lib::{ensures, forall, implies, loop_invariant, requires, Prop};
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -592,23 +592,27 @@ fn random_bool() -> bool {
     random()
 }
 
+fn lsb(bytes: &[u8]) -> bool {
+    (bytes[bytes.len() - 1] & 1) != 0
+}
+
 #[requires(
-    Prop::and((yi.len() >= l).into(),
+    Prop::and((yi.len() >= l && s.len() >= n).into(),
                         Prop::and((xshares.len() >= l).into(),
                             forall(|ll: usize| implies(
                                 0 <= ll && ll < l && xshares.len() >= l,
                                 xshares[ll].1.0.len() >= n
                             )))))]
-fn fhaand_1(
+fn fhaand_compute_hashes(
     delta: Delta,
     i: usize,
     n: usize,
     l: usize,
     xshares: &[Share],
     yi: Vec<bool>,
-) -> (Vec<bool>, Vec<Vec<(bool, bool)>>) {
+    s: &[bool],
+) -> Vec<Vec<(bool, bool)>> {
     // Step 2) Calculate v.
-    let mut vi = vec![false; l];
     let mut h0h1 = vec![vec![(false, false); l]; n];
 
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
@@ -634,16 +638,14 @@ fn fhaand_1(
                     ))
                 )
             ));
-            let sj: bool = random_bool();
             let (_, kixj) = xshares[ll].1 .0[j];
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
-            h0h1[j][ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
-            h0h1[j][ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
-            vi[ll] = vi[ll] ^ sj;
+            h0h1[j][ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ s[j];
+            h0h1[j][ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ s[j] ^ yi[ll];
         }
     }
-    (vi, h0h1)
+    h0h1
 }
 
 #[requires(
@@ -667,12 +669,12 @@ fn fhaand_1(
             ))
         ))
     ))]
-fn fhaand_2(
+fn fhaand_compute_vi(
     i: usize,
     n: usize,
     l: usize,
     xshares: &[Share],
-    vi: &mut Vec<bool>,
+    vi: &mut [bool],
     h0h1_j: &Vec<Vec<(bool, bool)>>,
 ) {
     // Step 2 b) Receive h0, h1 from all parties and compute t.
@@ -711,13 +713,14 @@ async fn fhaand(
     l: usize,
     xshares: &[Share],
     yi: Vec<bool>,
+    s: &[bool],
 ) -> Result<Vec<bool>, Error> {
     // Step 1) Obtain x shares (input).
     if xshares.len() != l {
         return Err(Error::InvalidLength);
     }
 
-    let (mut vi, h0h1) = fhaand_1(delta, i, n, l, xshares, yi);
+    let h0h1 = fhaand_compute_hashes(delta, i, n, l, xshares, yi, s);
 
     let mut h0h1_j = vec![vec![(false, false); l]; n];
     // XXX: Would need to avoid the early return here for F* typechecking to succeed.
@@ -729,7 +732,9 @@ async fn fhaand(
         h0h1_j[j] = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
     }
 
-    fhaand_2(i, n, l, xshares, &mut vi, &h0h1_j);
+    let mut vi = vec![false; l];
+    vi[0..l].copy_from_slice(s);
+    fhaand_compute_vi(i, n, l, xshares, &mut vi, &h0h1_j);
 
     // Step 3) Return v.
     Ok(vi)
@@ -1081,6 +1086,7 @@ async fn flaand(
     i: usize,
     n: usize,
     l: usize,
+    s: &[bool], // This is the randomness needed in fhaand;
 ) -> Result<Vec<Share>, Error> {
     // Triple computation.
     // Step 1) Triple computation [random authenticated shares as input parameters xshares, yshares, rshares].
@@ -1090,7 +1096,8 @@ async fn flaand(
 
     // Step 2) Run Pi_HaAND to get back some v.
     let y = yshares.iter().take(l).map(|share| share.0).collect();
-    let v = fhaand(channel, delta, i, n, l, xshares, y).await?;
+    let v = fhaand(channel, delta, i, n, l, xshares, y, s).await?;
+
     let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
 
     let (mut ki_xj_phi, ei_uij, phi) = flaand_1(delta, xshares, yshares, rshares, i, n, l, &v)?;
@@ -1155,7 +1162,20 @@ async fn faand(
     let (yshares, rshares) = rest.split_at(lprime);
 
     // Step 1) Generate all leaky AND triples by calling flaand l' times.
-    let zshares = flaand(channel, delta, (xshares, yshares, rshares), i, n, lprime).await?;
+    let mut s = vec![false; l];
+    for i in 0..l {
+        s[i] = random_bool();
+    }
+    let zshares = flaand(
+        channel,
+        delta,
+        (xshares, yshares, rshares),
+        i,
+        n,
+        lprime,
+        &s,
+    )
+    .await?;
     let triples: Vec<(&Share, &Share, &Share)> = (0..lprime)
         .map(|l| (&xshares[l], &yshares[l], &zshares[l]))
         .collect();
@@ -1390,6 +1410,91 @@ fn combine_two_leaky_ands(
 /// This module contains a Rust specification for the triple
 /// computation performed by `flaand`.
 mod spec {
+    /// This function computes step 2a) of Protocol Π_HaAND for a single set of inputs.
+    fn fhaand_compute_hashes(
+        delta: &Delta,
+        i: usize,
+        n: usize,
+        xshare: &Share,
+        yi: &bool,
+        randomness: &[bool],
+    ) -> Vec<(bool, bool)> {
+        let mut hashes = vec![(false, false); n];
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let kixj = xshare.key_for()[j];
+            let hash_kixj = blake3::hash(&kixj.to_le_bytes());
+            let hash_kixj_delta = blake3::hash(&(kixj ^ *delta).to_le_bytes());
+            hashes[j].0 = lsb(hash_kixj.as_bytes()) ^ randomness[j];
+            hashes[j].1 = lsb(hash_kixj_delta.as_bytes()) ^ randomness[j] ^ yi;
+        }
+        hashes
+    }
+
+    fn fhaand_compute_vi(
+        j: usize,
+        n: usize,
+        xshare: &Share,
+        s: &[bool],
+        hashes: &[(bool, bool)],
+    ) -> bool {
+        let mut v = false;
+        for i in 0..n {
+            if i == j {
+                continue;
+            }
+            let mixj = xshare.macs()[i];
+            let unblind_hash = blake3::hash(&mixj.to_le_bytes());
+            let unblinding = lsb(unblind_hash.as_bytes());
+            if xshare.0 {
+                v ^= hashes[i].1 ^ unblinding ^ s[i];
+            } else {
+                v ^= hashes[i].0 ^ unblinding ^ s[i];
+            }
+        }
+        v
+    }
+
+    fn transpose<T: Default + Copy>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
+        debug_assert!(!input.is_empty() && !input[0].is_empty());
+        let column_length = input.len();
+        let row_length = input[0].len();
+
+        let mut output = vec![vec![T::default(); column_length]; row_length];
+        for i in 0..column_length {
+            debug_assert!(input[i].len() == row_length);
+            for j in 0..row_length {
+                output[j][i] = input[i][j]
+            }
+        }
+        output
+    }
+
+    /// This function computes for each party a single authenticated half AND, i.e. v such that
+    fn fhaand_once(
+        delta: Vec<Delta>,
+        n: usize,
+        xshares: &[Share],
+        yis: Vec<bool>,
+        randomness: Vec<Vec<bool>>,
+    ) -> Vec<bool> {
+        let mut hashes = vec![vec![(false, false); n]; n];
+        for i in 0..n {
+            hashes[i] =
+                fhaand_compute_hashes(&delta[i], i, n, &xshares[i], &yis[i], &randomness[i]);
+        }
+
+        let hashes = transpose(hashes);
+
+        let mut vs = vec![false; n];
+        for i in 0..n {
+            vs[i] = fhaand_compute_vi(i, n, &xshares[i], &randomness[i], &hashes[i]);
+        }
+        vs
+    }
+
     use super::*;
 
     struct PartyState<const NUM_PARTIES: usize, const NUM_TRIPLES: usize> {
@@ -1397,6 +1502,7 @@ mod spec {
         xshares: [Share; NUM_TRIPLES],
         yshares: [Share; NUM_TRIPLES],
         rshares: [Share; NUM_TRIPLES],
+        randomness: [bool; NUM_TRIPLES],
     }
 
     fn share_is_authenticated(
@@ -1511,6 +1617,8 @@ mod spec {
     /// This functions is the global reference for the "leaky authenticated AND" protocol. It computes
     /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
     /// the XOR of the output values z.
+    #[requires(precondition(state_before))]
+    #[ensures(|result| postcondition(state_before, result))]
     fn ideal<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
         state_before: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
     ) -> [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES] {
@@ -1521,12 +1629,21 @@ mod spec {
         for i in 0..NUM_PARTIES {
             let party = &state_before[i];
             let yi: Vec<bool> = party.yshares.iter().map(|share| share.0).collect();
-            let (vi, h0h1) = fhaand_1(party.delta, i, NUM_PARTIES, NUM_SHARES, &party.xshares, yi);
-            vis[i] = vi;
+            let h0h1 = super::fhaand_compute_hashes(
+                party.delta,
+                i,
+                NUM_PARTIES,
+                NUM_SHARES,
+                &party.xshares,
+                yi,
+                &party.randomness,
+            );
+            vis[i][..NUM_SHARES].copy_from_slice(&party.randomness);
             h0h1s[i] = h0h1;
         }
 
         // send/receive
+
         let mut h0h1_js = vec![Vec::new(); NUM_PARTIES]; // every party's received h0h1s
         for i in 0..NUM_PARTIES {
             for j in 0..NUM_PARTIES {
@@ -1540,7 +1657,7 @@ mod spec {
         // for all parties: fhaand_2
         for i in 0..NUM_PARTIES {
             let party = &state_before[i];
-            fhaand_2(
+            super::fhaand_compute_vi(
                 i,
                 NUM_PARTIES,
                 NUM_SHARES,
