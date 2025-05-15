@@ -618,25 +618,16 @@ fn fhaand_compute_hashes(
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
     for j in 0..n {
         loop_invariant!(|_: usize| Prop::and(
-            (vi.len() == l).into(),
-            Prop::and(
-                (h0h1.len() == n).into(),
-                forall(|j: usize| implies(0 <= j && j < n && h0h1.len() == n, h0h1[j].len() == l))
-            )
+            (h0h1.len() == n).into(),
+            forall(|j: usize| implies(0 <= j && j < n && h0h1.len() == n, h0h1[j].len() == l))
         ));
         if j == i {
             continue;
         }
         for ll in 0..l {
             loop_invariant!(|_: usize| Prop::and(
-                (vi.len() == l).into(),
-                Prop::and(
-                    (h0h1.len() == n).into(),
-                    forall(|j: usize| implies(
-                        0 <= j && j < n && h0h1.len() == n,
-                        h0h1[j].len() == l
-                    ))
-                )
+                (h0h1.len() == n).into(),
+                forall(|j: usize| implies(0 <= j && j < n && h0h1.len() == n, h0h1[j].len() == l))
             ));
             let (_, kixj) = xshares[ll].1 .0[j];
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
@@ -651,7 +642,6 @@ fn fhaand_compute_hashes(
 #[requires(
     Prop::and(
         (vi.len() == l).into(),
-
         Prop::and(
         Prop::and(
             (xshares.len() >= l).into(),
