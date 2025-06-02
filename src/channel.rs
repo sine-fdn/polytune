@@ -33,6 +33,8 @@ use maybe_async::{async_impl, maybe_async};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+#[cfg(not(target_arch = "wasm32"))]
+use tracing::{trace, Level};
 
 /// Errors related to sending / receiving / (de-)serializing messages.
 #[derive(Debug)]
@@ -332,6 +334,7 @@ impl Channel for SimpleChannel {
     type SendError = tokio::sync::mpsc::error::SendError<Vec<u8>>;
     type RecvError = AsyncRecvError;
 
+    #[tracing::instrument(level = Level::TRACE, skip(self, msg))]
     async fn send_bytes_to(
         &mut self,
         p: usize,
@@ -341,12 +344,10 @@ impl Channel for SimpleChannel {
         self.bytes_sent += msg.len();
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         let i = info.sent();
-        let total = info.total();
-        let phase = info.phase();
         if i == 1 {
-            println!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
+            trace!(size = mb, "Sending msg");
         } else {
-            println!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
+            trace!(size = mb, "  (continued sending msg)");
         }
         self.s[p]
             .as_ref()
@@ -355,6 +356,7 @@ impl Channel for SimpleChannel {
             .await
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), fields(info = ?_info))]
     async fn recv_bytes_from(
         &mut self,
         p: usize,
@@ -365,7 +367,11 @@ impl Channel for SimpleChannel {
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
             .recv();
         match tokio::time::timeout(std::time::Duration::from_secs(10 * 60), chunk).await {
-            Ok(Some(chunk)) => Ok(chunk),
+            Ok(Some(chunk)) => {
+                let mb = chunk.len() as f64 / 1024.0 / 1024.0;
+                trace!(size = mb, "Received chunk");
+                Ok(chunk)
+            }
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),
         }
