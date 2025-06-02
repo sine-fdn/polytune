@@ -80,6 +80,9 @@ pub use garble_lang;
 pub mod channel;
 pub mod protocol;
 
+#[cfg(feature = "__bench")]
+#[doc(hidden)]
+pub mod bench_reexports;
 mod data_types;
 mod faand;
 mod fpre;

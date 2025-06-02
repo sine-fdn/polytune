@@ -57,3 +57,8 @@ tokio = { version = "1.35.1", features = ["full"] }
 [[bench]]
 name = "join"
 harness = false
+
+[[bench]]
+name = "primitives"
+harness = false
+required-features = ["__bench"]
