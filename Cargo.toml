@@ -62,3 +62,7 @@ harness = false
 name = "primitives"
 harness = false
 required-features = ["__bench"]
+
+[[bench]]
+name = "mpc"
+harness = false
