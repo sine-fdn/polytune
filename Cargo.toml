@@ -26,6 +26,12 @@ keywords = [
 
 [features]
 is_sync = ["maybe-async/is_sync"]
+# For internal use only!
+# To work around a limitation in criterion, we define a "private" feature
+# which we use to conditionally expose some otherwise private functions
+# as public for benchmarking. The __ prefix results in docs.rs not listing
+# this feature. 
+__bench = []
 
 [dependencies]
 bincode = "1.3.3"
