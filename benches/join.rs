@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::Instant};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::Criterion;
 use garble_lang::{
     circuit::Circuit,
     compile_with_constants,
@@ -11,6 +11,7 @@ use polytune::{
     channel,
     protocol::{mpc, Error},
 };
+use tracing::{error, info};
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 async fn simulate_mpc_async(
@@ -44,14 +45,14 @@ async fn simulate_mpc_async(
             .await
             {
                 Ok(res) => {
-                    println!(
+                    info!(
                         "Party {p_own} sent {:.2}MB of messages",
                         channel.bytes_sent as f64 / 1024.0 / 1024.0
                     );
                     res
                 }
                 Err(e) => {
-                    eprintln!("SMPC protocol failed for party {p_own}: {:?}", e);
+                    error!("SMPC protocol failed for party {p_own}: {:?}", e);
                     vec![]
                 }
             }
@@ -68,7 +69,7 @@ async fn simulate_mpc_async(
     .await;
     match eval_result {
         Err(e) => {
-            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+            error!("SMPC protocol failed for Evaluator: {:?}", e);
             Ok(vec![])
         }
         Ok(res) => {
@@ -80,17 +81,17 @@ async fn simulate_mpc_async(
             }
             outputs.retain(|o| !o.is_empty());
             if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                eprintln!("The result does not match for all output parties: {outputs:?}");
+                error!("The result does not match for all output parties: {outputs:?}");
             }
             let mb = eval_channel.bytes_sent as f64 / 1024.0 / 1024.0;
-            println!("Party {p_eval} sent {mb:.2}MB of messages");
-            println!("MPC simulation finished successfully!");
+            info!("Party {p_eval} sent {mb:.2}MB of messages");
+            info!("MPC simulation finished successfully!");
             Ok(outputs.pop().unwrap_or_default())
         }
     }
 }
 
-fn join_benchmark(c: &mut Criterion) {
+pub fn join_benchmark(c: &mut Criterion) {
     let n_records = 10;
     let code = include_str!(".join.garble.rs");
 
@@ -99,8 +100,8 @@ fn join_benchmark(c: &mut Criterion) {
         b.to_async(tokio::runtime::Runtime::new().unwrap())
             .iter(|| async {
                 let now = Instant::now();
-                println!("\n\nRUNNING MPC SIMULATION FOR {n_records} RECORDS:\n");
-                println!("Compiling circuit...");
+                info!("\n\nRUNNING MPC SIMULATION FOR {n_records} RECORDS:\n");
+                info!("Compiling circuit...");
                 let consts = HashMap::from_iter(vec![
                     (
                         "PARTY_0".into(),
@@ -118,9 +119,9 @@ fn join_benchmark(c: &mut Criterion) {
                     ),
                 ]);
                 let prg = compile_with_constants(code, consts).unwrap();
-                println!("{}", prg.circuit.report_gates());
+                info!("{}", prg.circuit.report_gates());
                 let elapsed = now.elapsed();
-                println!(
+                info!(
                     "Compilation took {} minute(s), {} second(s)",
                     elapsed.as_secs() / 60,
                     elapsed.as_secs() % 60,
@@ -159,7 +160,7 @@ fn join_benchmark(c: &mut Criterion) {
                     .await
                     .unwrap();
                 let elapsed = now.elapsed();
-                println!(
+                info!(
                     "MPC computation took {} minute(s), {} second(s)",
                     elapsed.as_secs() / 60,
                     elapsed.as_secs() % 60,
@@ -167,10 +168,3 @@ fn join_benchmark(c: &mut Criterion) {
             })
     });
 }
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default().significance_level(0.1).sample_size(10);
-    targets = join_benchmark
-}
-criterion_main!(benches);
