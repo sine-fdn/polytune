@@ -53,6 +53,8 @@ scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 tokio = { version = "1.35.1", features = ["full"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
 
 [[bench]]
 name = "join"
