@@ -3351,6 +3351,7 @@ dependencies = [
  "curve25519-dalek",
  "garble_lang",
  "maybe-async",
+ "pin-project-lite",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "scuttlebutt",
