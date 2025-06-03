@@ -24,7 +24,11 @@ You can run the benchmarks using:
 cargo bench --features __bench
 ```
 
-The logging output of the benchmarks can be configured using the `RUST_LOG` environment variable using an [`EnvFilter` directive](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
+The logging output of the benchmarks can be configured using the `RUST_LOG` environment variable using an [`EnvFilter` directive](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html). For example, to see the output of the [join](./benches/join.rs) benchmark, run:
+```shell
+RUST_LOG=info cargo bench --features __bench
+```
+For the most detailed output, the logging level can be set to `trace`.
 
 ## Funded by
 

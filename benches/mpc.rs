@@ -141,9 +141,9 @@ fn and_chain(gates: usize) -> Circuit {
 /// consecutive inputs an AND is calculated, resulting in inputs / 2
 /// outputs.
 /// # Panics
-/// If inputs is not divisable by 2.
+/// If inputs is not divisible by 2.
 fn large_input_circ(inputs: usize) -> Circuit {
-    assert_eq!(0, inputs % 2, "inputs must be divisable by two");
+    assert_eq!(0, inputs % 2, "inputs must be divisible by two");
     let num_parties = 2;
     let input_gates = vec![inputs / num_parties; num_parties];
     let gates = (0..inputs)
