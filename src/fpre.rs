@@ -196,8 +196,7 @@ pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) ->
     Ok(())
 }
 
-#[cfg(not(feature = "is_sync"))]
-#[cfg(test)]
+#[cfg(all(test, not(feature = "is_sync")))]
 mod tests {
     use crate::{
         channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
