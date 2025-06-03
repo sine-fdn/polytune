@@ -17,31 +17,14 @@ You can see examples for the usage with examples described in Garble, e.g., `ben
 
 ## Benchmarks
 
+Polytune contains multple benchmarks in the [`benches`](./benches/) directory using [criterion](https://bheisler.github.io/criterion.rs/book/criterion_rs.html). These benchmarks require the Polytune-internal cargo feature `__bench`, which is not intended for downstream use.
 
-You can benchmark Polytune with a `join` example that allows for joining two databases with `n_records` records each by running
-
-```
-cargo bench join
-```
-
-To run the `join` benchmark once and produce a flamegraph:
-
-```
-sudo CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench join
+You can run the benchmarks using:
+```shell
+cargo bench --features __bench
 ```
 
-To run the `join` benchmark multiple times, benchmark it, then produce a flamegraph:
-
-```
-sudo CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench join -- --bench
-```
-
-
-To run all the benchmarks you can run:
-
-```
-cargo bench
-```
+The logging output of the benchmarks can be configured using the `RUST_LOG` environment variable using an [`EnvFilter` directive](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
 
 ## Funded by
 
