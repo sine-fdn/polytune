@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::Criterion;
 use polytune::{
     bench_reexports::{kos_ot_receiver, kos_ot_sender},
     channel,
@@ -9,7 +9,7 @@ use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use tokio::runtime::Runtime;
 
-fn primitives_benchmark(c: &mut Criterion) {
+pub fn primitives_benchmark(c: &mut Criterion) {
     let exp = 16;
     let ot_count = 2_usize.pow(exp);
     let bench_id = format!("2^{exp} OTs");
@@ -46,10 +46,3 @@ fn primitives_benchmark(c: &mut Criterion) {
         })
     });
 }
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default().significance_level(0.1);
-    targets = primitives_benchmark
-}
-criterion_main!(benches);

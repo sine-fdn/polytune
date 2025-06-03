@@ -3,14 +3,12 @@ use std::{
     vec,
 };
 
-use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion,
-};
+use criterion::{measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion};
 use garble_lang::circuit::{Circuit, Gate};
 use polytune::{channel, protocol::mpc};
 use tokio::runtime::Runtime;
 
-fn mpc_benchmarks(c: &mut Criterion) {
+pub fn mpc_benchmarks(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     bench_and_chain(c, &rt);
@@ -161,10 +159,3 @@ fn large_input_circ(inputs: usize) -> Circuit {
         output_gates,
     }
 }
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default().significance_level(0.1).sample_size(10);
-    targets = mpc_benchmarks
-}
-criterion_main!(benches);

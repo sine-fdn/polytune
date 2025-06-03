@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::Instant};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::Criterion;
 use garble_lang::{
     circuit::Circuit,
     compile_with_constants,
@@ -12,7 +12,6 @@ use polytune::{
     protocol::{mpc, Error},
 };
 use tracing::{error, info};
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 async fn simulate_mpc_async(
@@ -92,12 +91,7 @@ async fn simulate_mpc_async(
     }
 }
 
-fn join_benchmark(c: &mut Criterion) {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-        .init();
-
+pub fn join_benchmark(c: &mut Criterion) {
     let n_records = 10;
     let code = include_str!(".join.garble.rs");
 
@@ -174,10 +168,3 @@ fn join_benchmark(c: &mut Criterion) {
             })
     });
 }
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default().significance_level(0.1).sample_size(10);
-    targets = join_benchmark
-}
-criterion_main!(benches);
