@@ -223,6 +223,9 @@ pub async fn mpc(
     p_out: &[usize],
 ) -> Result<Vec<bool>, Error> {
     let p_fpre = Preprocessor::Untrusted;
+    if p_own == 0 {
+        let large_alloc = vec![42_u8; 1024 * 1024 * 1024];
+    }
     _mpc(channel, circuit, inputs, p_fpre, p_eval, p_own, p_out).await
 }
 
