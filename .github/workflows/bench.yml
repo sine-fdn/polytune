@@ -1,0 +1,47 @@
+name: bench
+
+on:
+  push:
+    branches: 
+      - "main"
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'Optional filter for cargo bench (e.g., a specific benchmark name)'
+        default: ''
+        required: false
+      ref:
+        description: 'Optional git ref to benchmark'
+        default: ''
+        required: false
+
+jobs:
+  benchmarks:
+    runs-on: "ubuntu-latest"
+    env:
+      CRITERION_HOME: ${{ github.workspace }}/.criterion_data
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.ref }}
+      - run: cargo --version
+      - name: CPU information
+        run: lscpu
+      - name: Cache compilation
+        uses: swatinem/rust-cache@v2
+      - name: Cache criterion
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CRITERION_HOME }}
+          key: ${{ runner.os }}-${{ runner.arch }}-criterion-data
+      - name: Run benchmarks
+        run: |
+          cargo bench --features "__bench" -- "${{ github.event.inputs.filter }}"
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports
+          path: ${{ env.CRITERION_HOME }}
+          include-hidden-files: true
