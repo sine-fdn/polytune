@@ -1,18 +1,23 @@
-use std::{
-    time::{Duration, Instant},
-    vec,
-};
+use std::{fmt::Debug, time::Duration, vec};
 
-use criterion::{measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion};
+use criterion::{
+    measurement::{Measurement, WallTime},
+    BenchmarkGroup, BenchmarkId, Criterion,
+};
 use garble_lang::circuit::{Circuit, Gate};
 use polytune::{channel, protocol::mpc};
 use tokio::runtime::Runtime;
+
+use crate::memory_tracking::{MemoryMeasurement, TrackMemoryForParty};
 
 pub fn mpc_benchmarks(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     bench_and_chain(c, &rt);
     bench_large_input(c, &rt);
+    // Bench memory sets up its own criterion instance
+    // with a custom measurement
+    bench_memory(&rt);
 }
 
 /// Benchmark the evaluation of a long chain of ANDs.
@@ -26,6 +31,7 @@ fn bench_and_chain(c: &mut Criterion, rt: &Runtime) {
 
         bench_circuit_two_parties(
             &mut g,
+            &WallTime,
             rt,
             bench_id,
             circ,
@@ -52,6 +58,7 @@ fn bench_large_input(c: &mut Criterion, rt: &Runtime) {
 
         bench_circuit_two_parties(
             &mut g,
+            &WallTime,
             rt,
             bench_id,
             circ,
@@ -65,14 +72,62 @@ fn bench_large_input(c: &mut Criterion, rt: &Runtime) {
     }
 }
 
-fn bench_circuit_two_parties<'a, F>(
-    g: &mut BenchmarkGroup<'a, WallTime>,
+// Benchmark the memory consumption of party 0 and 1 for the `large_input_circ``
+fn bench_memory(rt: &Runtime) {
+    bench_memory_for_party(rt, 0);
+    bench_memory_for_party(rt, 1);
+}
+
+fn bench_memory_for_party(rt: &Runtime, party: usize) {
+    let measurement = MemoryMeasurement::new(party);
+    // We need to create a new Criterion instance to change the measurement type
+    let mut c = Criterion::default()
+        .significance_level(0.1)
+        // Sadly we can't set the sample size lower than 10, because criterion
+        // enforces this as the minimum, even if it doesn't make sense for
+        // custom measurements...
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(1))
+        .with_measurement(measurement)
+        .warm_up_time(Duration::from_nanos(1))
+        // Plots don't work for the memory measurement for some reason. Plotters fails
+        // on some NaN assertion
+        .without_plots()
+        .configure_from_args();
+
+    let input_sizes = [100, 1_000, 10_000];
+    for inputs in input_sizes {
+        let mut g = c.benchmark_group("mpc");
+        let bench_id = BenchmarkId::new(format!("memory for large inputs (Party {party})"), inputs);
+        let circ = large_input_circ(inputs);
+
+        bench_circuit_two_parties(
+            &mut g,
+            &measurement,
+            rt,
+            bench_id,
+            circ,
+            [vec![true; inputs / 2], vec![true; inputs / 2]],
+            |res1, res2| {
+                // Output should be all true because we compute ANDs of `true` inputs
+                assert!(res1.iter().all(|b| *b));
+                assert!(res2.iter().all(|b| *b));
+            },
+        );
+    }
+}
+
+fn bench_circuit_two_parties<'a, M, F>(
+    g: &mut BenchmarkGroup<'a, M>,
+    m: &M,
     rt: &Runtime,
     bench_id: BenchmarkId,
     circ: Circuit,
     inputs: [Vec<bool>; 2],
     validate_output: F,
 ) where
+    M: Measurement,
+    M::Value: Default + Debug,
     F: FnMut(Vec<bool>, Vec<bool>) + Clone,
 {
     g.bench_function(bench_id, move |b| {
@@ -81,7 +136,7 @@ fn bench_circuit_two_parties<'a, F>(
             let inputs = inputs.clone();
             let mut validate_output = validate_output.clone();
             async move {
-                let mut elapsed = Duration::default();
+                let mut elapsed = M::Value::default();
                 for _ in 0..iters {
                     let [mut ch1, mut ch2] = channel::SimpleChannel::channels(2)
                         .try_into()
@@ -92,25 +147,23 @@ fn bench_circuit_two_parties<'a, F>(
                     let p_out = [0, 1];
                     let [inputs1, inputs2] = inputs.clone();
 
-                    let now = Instant::now();
+                    let now = m.start();
                     // We want to spawn the mpc eval on the runtime so we actually use multiple threads. Unfortunately
                     // this means that we must recreate the SimpleChannel and circ above, because the future needs to
                     // be 'static for spawning.
-                    let jh1 =
-                        tokio::spawn(
-                            async move { mpc(&mut ch1, &circ1, &inputs1, 0, 0, &p_out).await },
-                        );
-                    let jh2 =
-                        tokio::spawn(
-                            async move { mpc(&mut ch2, &circ2, &inputs2, 0, 1, &p_out).await },
-                        );
+                    let fut = async move { mpc(&mut ch1, &circ1, &inputs1, 0, 0, &p_out).await };
+                    let wrapped = TrackMemoryForParty::new(0, fut);
+                    let jh1 = tokio::spawn(wrapped);
+                    let fut = async move { mpc(&mut ch2, &circ2, &inputs2, 0, 1, &p_out).await };
+                    let wrapped = TrackMemoryForParty::new(1, fut);
+                    let jh2 = tokio::spawn(wrapped);
                     let (res1, res2) = match tokio::try_join!(jh1, jh2).expect("join failed") {
                         (_, Err(err)) | (Err(err), _) => {
                             panic!("and_chain eval failed with {err:?}")
                         }
                         (Ok(res1), Ok(res2)) => (res1, res2),
                     };
-                    elapsed += now.elapsed();
+                    elapsed = m.add(&elapsed, &m.end(now));
                     validate_output(res1, res2);
                 }
                 elapsed
