@@ -33,6 +33,6 @@ For the most detailed output, the logging level can be set to `trace`.
 ## Funded by
 
 <p float="left">
-  <img src="/BMBF_Logo.png" height="200" />
-  <img src="/EU_Logo.png" height="200" /> 
+  <img src="BMBF_Logo.jpg" height="200" />
+  <img src="EU_Logo.png" height="200" />
 </p>
