@@ -266,7 +266,7 @@ pub(crate) async fn _mpc(
     let lprime = num_and_gates * b;
 
     let delta: Delta;
-    let mut shared_rand: rand_chacha::ChaCha20Rng = ChaCha20Rng::from_entropy();
+    let mut shared_rand: rand_chacha::ChaCha20Rng = ChaCha20Rng::from_os_rng();
     let random_shares: Vec<Share>;
     let mut xyz_shares = vec![];
 

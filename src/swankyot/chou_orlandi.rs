@@ -17,9 +17,11 @@
 //! messages to reduce the number of communication rounds.
 
 use crate::{
+    block::Block,
     channel::{recv_vec_from, send_to, Channel},
     faand::Error,
-    swankyot::{Receiver as OtReceiver, Sender as OtSender},
+    rand_compat::RngCompat,
+    swankyot::{Malicious, Receiver as OtReceiver, SemiHonest, Sender as OtSender},
 };
 
 use curve25519_dalek::{
@@ -29,7 +31,6 @@ use curve25519_dalek::{
 };
 use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::{Block, Malicious, SemiHonest};
 
 /// Oblivious transfer sender.
 pub(crate) struct Sender {
@@ -43,11 +44,11 @@ impl OtSender for Sender {
 
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
-        mut rng: &mut RNG,
+        rng: &mut RNG,
         p_to: usize,
         _: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
-        let y = Scalar::random(&mut rng);
+        let y = Scalar::random(&mut RngCompat(rng));
         let s = &y * RISTRETTO_BASEPOINT_TABLE;
         send_to(channel, p_to, "CO_OT_s", s.compress().as_bytes().as_ref()).await?;
         Ok(Self { y, s, counter: 0 })
@@ -119,7 +120,7 @@ impl OtReceiver for Receiver {
 
         let mut send_vec_vec = vec![];
         for (i, b) in inputs.iter().enumerate() {
-            let x = Scalar::random(&mut rng);
+            let x = Scalar::random(&mut RngCompat(&mut rng));
             let c = if *b { one } else { zero };
             let r = c + &x * RISTRETTO_BASEPOINT_TABLE;
 

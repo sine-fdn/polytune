@@ -3,10 +3,10 @@ use std::vec;
 
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::Block;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
+    block::Block,
     channel::{self, recv_from, recv_vec_from, send_to, Channel},
     data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
@@ -394,7 +394,7 @@ async fn fabitn(
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
     let mut multi_shared_rand = shared_rng(channel, i, n).await?;
     let r: Vec<Vec<bool>> = (0..three_rho)
-        .map(|_| (0..lprime).map(|_| multi_shared_rand.gen()).collect())
+        .map(|_| (0..lprime).map(|_| multi_shared_rand.random()).collect())
         .collect();
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
@@ -805,7 +805,7 @@ async fn faand(
     let mut buckets: Vec<Bucket> = vec![vec![]; l];
 
     for obj in triples {
-        let mut j = shared_rand.gen_range(0..l);
+        let mut j = shared_rand.random_range(0..l);
         while buckets[j].len() >= b {
             j = (j + 1) % l;
         }

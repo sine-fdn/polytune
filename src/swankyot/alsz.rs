@@ -9,17 +9,20 @@
 #![allow(non_upper_case_globals)]
 
 use crate::{
+    aes_hash::{AesHash, FIXED_KEY_HASH},
+    aes_rng::AesRng,
+    block::Block,
     channel::{recv_vec_from, send_to, Channel},
     faand::Error,
     swankyot::{
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
-        Sender as OtSender,
+        SemiHonest, Sender as OtSender,
     },
+    utils::xor_inplace,
 };
 
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::{utils as scutils, AesHash, AesRng, Block, SemiHonest, AES_HASH};
 use std::marker::PhantomData;
 
 /// Oblivious transfer sender.
@@ -54,7 +57,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
             .collect::<Vec<AesRng>>();
         Ok(Self {
             _ot: PhantomData::<OT>,
-            hash: AES_HASH,
+            hash: FIXED_KEY_HASH.clone(),
             s,
             s_: Block::from(s_),
             rngs,
@@ -79,7 +82,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
             let range = j * ncols / 8..(j + 1) * ncols / 8;
             let q = &mut qs[range];
             rng.fill_bytes(q);
-            scutils::xor_inplace(q, if *b { &uvec[j] } else { &zero });
+            xor_inplace(q, if *b { &uvec[j] } else { &zero });
         }
         Ok(transpose(&qs, nrows, ncols))
     }
@@ -114,9 +117,9 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
             let q = Block::from(q);
-            let y0 = self.hash.cr_hash(Block::from(j as u128), q) ^ input.0;
+            let y0 = self.hash.cr_hash_block(q) ^ input.0;
             let q = q ^ self.s_;
-            let y1 = self.hash.cr_hash(Block::from(j as u128), q) ^ input.1;
+            let y1 = self.hash.cr_hash_block(q) ^ input.1;
             y0y1_vec.push((y0, y1));
         }
         send_to(channel, p_to, "ALSZ_OT_y0y1", &y0y1_vec).await?;
@@ -142,10 +145,10 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
             let q = Block::from(q);
-            let x0 = self.hash.cr_hash(Block::from(j as u128), q);
+            let x0 = self.hash.cr_hash_block(q);
             let x1 = x0 ^ *delta;
             let q = q ^ self.s_;
-            let y = self.hash.cr_hash(Block::from(j as u128), q) ^ x1;
+            let y = self.hash.cr_hash_block(q) ^ x1;
             yvec.push(y);
             out.push((x0, x1));
         }
@@ -173,8 +176,8 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
 
             let mut g = vec![0u8; ncols / 8];
             self.rngs[j].1.fill_bytes(&mut g);
-            scutils::xor_inplace(&mut g, t);
-            scutils::xor_inplace(&mut g, r);
+            xor_inplace(&mut g, t);
+            xor_inplace(&mut g, r);
             gvec.push(g);
         }
         send_to(channel, p_to, "ALSZ_OT_setup", &gvec).await?;
@@ -207,7 +210,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
             .collect::<Vec<(AesRng, AesRng)>>();
         Ok(Self {
             _ot: PhantomData::<OT>,
-            hash: AES_HASH,
+            hash: FIXED_KEY_HASH.clone(),
             rngs,
         })
     }
@@ -230,7 +233,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
             let t: [u8; 16] = t.try_into().unwrap();
             let (y0, y1) = y0y1_vec[j];
             let y = if *b { y1 } else { y0 };
-            let y = y ^ self.hash.cr_hash(Block::from(j as u128), Block::from(t));
+            let y = y ^ self.hash.cr_hash_block(Block::from(t));
             out.push(y);
         }
         Ok(out)
@@ -254,7 +257,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT>
             let t = &ts[j * 16..(j + 1) * 16];
             let t: [u8; 16] = t.try_into().unwrap();
             let y = if *b { yvec[j] } else { Block::default() };
-            let h = self.hash.cr_hash(Block::from(j as u128), Block::from(t));
+            let h = self.hash.cr_hash_block(Block::from(t));
             out.push(y ^ h);
         }
         Ok(out)

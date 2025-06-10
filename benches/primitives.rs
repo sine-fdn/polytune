@@ -5,7 +5,7 @@ use polytune::{
     bench_reexports::{kos_ot_receiver, kos_ot_sender},
     channel,
 };
-use rand::{thread_rng, Rng, SeedableRng};
+use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use tokio::runtime::Runtime;
 
@@ -39,8 +39,8 @@ fn bench_ots<'a>(
                 .expect("parties is 2");
             let mut shared_rand1 = ChaCha20Rng::seed_from_u64(42);
             let mut shared_rand2 = shared_rand1.clone();
-            let deltas = vec![thread_rng().r#gen(); count];
-            let bs = vec![thread_rng().r#gen(); count];
+            let deltas = vec![random(); count];
+            let bs = vec![random(); count];
 
             async move {
                 let now = Instant::now();
