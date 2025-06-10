@@ -239,6 +239,15 @@ pub(crate) async fn _mpc(
     let p_max = circuit.input_gates.len();
     let is_contrib = p_own != p_eval;
 
+    if p_own == 1 {
+        // memory allocation in spawned task will not be tracked correctly
+        // very likely this allocation will be attributed to party 0, because
+        // it is executed on a thread which still has PARTY_IDX set to 0
+        let jh = tokio::spawn(async {
+            vec![0_u8; 1000 * 1000 * 1000];
+        });
+    }
+
     circuit.validate()?;
     let Some(expected_inputs) = circuit.input_gates.get(p_own) else {
         return Err(Error::PartyDoesNotExist);
