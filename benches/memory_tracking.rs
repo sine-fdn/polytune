@@ -1,14 +1,11 @@
 use std::{
     alloc::{GlobalAlloc, System},
     cell::Cell,
-    future::Future,
-    pin::Pin,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-    task::{Context, Poll},
 };
 
 use criterion::measurement::{Measurement, ValueFormatter};
-use pin_project_lite::pin_project;
+use tokio::runtime::Runtime;
 
 use crate::ALLOCATOR;
 
@@ -18,19 +15,20 @@ pub const MAX_PARTIES: usize = 16;
 thread_local! {
     /// The current id of the party executing on this thread.
     ///
-    /// This is set by [`TrackMemoryForParty`] and used by the [`PeakAllocator`].
-    static PARTY_IDX: Cell<usize> = const { Cell::new(0) };
+    /// This is set by [`create_instrumented_runtime`] and used by the [`PeakAllocator`].
+    static PARTY_IDX: Cell<usize> = const { Cell::new(MAX_PARTIES) };
 }
 
 /// A [`GlobalAlloc`] that tracks the peak memory allocation of multiple parties.
 ///
-/// For this to work, the futures executed by the parties need to be wrapped with
-/// the [`TrackMemoryForParty`] future. The wrapped future can then be benchmarked
-/// using criterion with a [`MemoryMeasurement`].
+/// For this to work, the futures executed by the parties need to be executed on
+/// a Criterion [`Runtime`] created by [`create_instrumented_runtime`]. The instrumented
+/// Runtime can be used in combination with the criterion [`MemoryMeasurement`].
 pub struct PeakAllocator {
     enabled: AtomicBool,
-    current: [AtomicUsize; MAX_PARTIES],
-    peak: [AtomicUsize; MAX_PARTIES],
+    // we allocate + 1 slot for allocations not associated with a party (id == MAX_PARTIES)
+    current: [AtomicUsize; MAX_PARTIES + 1],
+    peak: [AtomicUsize; MAX_PARTIES + 1],
 }
 
 impl PeakAllocator {
@@ -38,8 +36,8 @@ impl PeakAllocator {
     pub const fn new() -> Self {
         PeakAllocator {
             enabled: AtomicBool::new(false),
-            current: [const { AtomicUsize::new(0) }; MAX_PARTIES],
-            peak: [const { AtomicUsize::new(0) }; MAX_PARTIES],
+            current: [const { AtomicUsize::new(0) }; MAX_PARTIES + 1],
+            peak: [const { AtomicUsize::new(0) }; MAX_PARTIES + 1],
         }
     }
 
@@ -80,8 +78,9 @@ unsafe impl GlobalAlloc for PeakAllocator {
         // Safety: We forward the layout to the system allocator. The requirements are guaranteed by our caller.
         let ret = unsafe { System.alloc(layout) };
         if !ret.is_null() && self.is_enabled() {
-            let prev = self.current[PARTY_IDX.get()].fetch_add(layout.size(), Ordering::Relaxed);
-            self.peak[PARTY_IDX.get()].fetch_max(prev + layout.size(), Ordering::Relaxed);
+            let party_idx = PARTY_IDX.get();
+            let prev = self.current[party_idx].fetch_add(layout.size(), Ordering::Relaxed);
+            self.peak[party_idx].fetch_max(prev + layout.size(), Ordering::Relaxed);
         }
         ret
     }
@@ -92,41 +91,33 @@ unsafe impl GlobalAlloc for PeakAllocator {
             System.dealloc(ptr, layout);
         }
         if self.is_enabled() {
-            self.current[PARTY_IDX.get()].fetch_sub(layout.size(), Ordering::Relaxed);
+            let party_idx = PARTY_IDX.get();
+
+            self.current[party_idx]
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                    Some(val.saturating_sub(layout.size()))
+                })
+                .expect("unreachable because we don't return None");
         }
     }
 }
 
-pin_project! {
-    /// Intrument a future to track memory allocations for a specific party.
-    pub struct TrackMemoryForParty<F> {
-        #[pin]
-        fut: F,
-        party: usize,
-    }
+/// Create a tokio [`Runtime`] set up for memory tracking with the [`PeakAllocator`].
+pub fn create_instrumented_runtime(party_idx: usize) -> Runtime {
+    assert!(
+        party_idx < MAX_PARTIES,
+        "party_idx must be less than MAX_PARTIES: {MAX_PARTIES}"
+    );
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .on_thread_start(move || {
+            PARTY_IDX.set(party_idx);
+        })
+        .build()
+        .expect("runtime create")
 }
 
-impl<F: Future> Future for TrackMemoryForParty<F> {
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // we set the thread-local PARTY_IDX to out Id so that any allocations
-        // taking place within the poll will be correctly attributed by the
-        // `PeakAllocator`
-        PARTY_IDX.set(self.party);
-        let this = self.project();
-        this.fut.poll(cx)
-    }
-}
-
-impl<F> TrackMemoryForParty<F> {
-    pub fn new(party: usize, fut: F) -> Self {
-        assert!(party < MAX_PARTIES, "Only {MAX_PARTIES} are supported.");
-        Self { fut, party }
-    }
-}
-
-/// Criterion [`Measurement`] to use with [`PeakAllocator`] and [`TrackMemoryForParty`].
+/// Criterion [`Measurement`] to use with [`PeakAllocator`] and [`create_instrumented_runtime`].
 #[derive(Copy, Clone, Debug)]
 pub struct MemoryMeasurement {
     party: usize,
