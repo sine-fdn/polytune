@@ -17,7 +17,6 @@ use crate::{
     },
 };
 
-use maybe_async::maybe_async;
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{utils as scutils, AesHash, AesRng, Block, SemiHonest, AES_HASH};
@@ -38,7 +37,6 @@ pub(crate) struct Receiver<OT: OtSender<Msg = Block> + SemiHonest> {
     rngs: Vec<(AesRng, AesRng)>,
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT> {
     async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
         channel: &mut C,
@@ -64,7 +62,6 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
     }
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
     pub(super) async fn send_setup<C: Channel>(
         &mut self,
@@ -88,7 +85,6 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
     }
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     type Msg = Block;
 
@@ -129,7 +125,6 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     }
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
     async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
@@ -159,7 +154,6 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
     }
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
     pub(super) async fn recv_setup<C: Channel>(
         &mut self,
@@ -188,7 +182,6 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
     }
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     type Msg = Block;
 
@@ -219,7 +212,6 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
         })
     }
 
-    #[maybe_async(AFIT)]
     async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
         channel: &mut C,
@@ -245,7 +237,6 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     }
 }
 
-#[maybe_async(AFIT)]
 impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT> {
     async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,

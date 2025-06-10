@@ -34,7 +34,6 @@
 //! and comprehensive verification of all protocol steps.
 
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use maybe_async::maybe_async;
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
@@ -213,7 +212,6 @@ pub(crate) enum Preprocessor {
 /// 3. Input processing: handles sharing and masking of private inputs
 /// 4. Circuit evaluation: performed by the evaluator party only
 /// 5. Output determination: reveals the computation result to designated output parties
-#[maybe_async(AFIT)]
 pub async fn mpc(
     channel: &mut impl Channel,
     circuit: &Circuit,
@@ -226,7 +224,6 @@ pub async fn mpc(
     _mpc(channel, circuit, inputs, p_fpre, p_eval, p_own, p_out).await
 }
 
-#[maybe_async(AFIT)]
 pub(crate) async fn _mpc(
     channel: &mut impl Channel,
     circuit: &Circuit,

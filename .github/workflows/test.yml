@@ -35,5 +35,3 @@ jobs:
         working-directory: ./examples/sql-integration
       - run: cargo build --release && cargo test --release -- --nocapture
         working-directory: ./examples/api-integration
-      - run: cargo build --features is_sync --release && cargo test --features is_sync --release -- --nocapture
-        working-directory: ./examples/sync-channel

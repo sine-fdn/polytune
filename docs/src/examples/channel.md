@@ -1,9 +1,8 @@
 # Customizable Communication Channels
 
-The `Channel` trait in our MPC engine provides a flexible and extensible abstraction for message-passing between parties. It allows communication to be implemented in various ways, enabling users to choose between synchronous, asynchronous, and even platform-specific implementations. Polytune is deliberately communication-agnostic, while remaining quite flexible, offering the following features:
+The `Channel` trait in our MPC engine provides a flexible and extensible abstraction for message-passing between parties. It allows communication to be implemented in various ways, enabling users to choose between platform-specific implementations. Polytune is deliberately communication-agnostic, while remaining quite flexible, offering the following features:
 
 - **Customizable Transport**: Implement the `Channel` trait using any transport mechanism — HTTP, WebSockets, in-memory queues, or custom networking protocols.
-- **Sync & Async Support**: Thanks to `maybe_async`, our trait seamlessly supports both synchronous and asynchronous implementations.
 - **Serialization-Aware**: The trait ensures that messages can be efficiently serialized and chunked when necessary, making it ideal for large payloads.
 
 We provide example implementations for:

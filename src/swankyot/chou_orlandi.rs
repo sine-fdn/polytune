@@ -27,7 +27,6 @@ use curve25519_dalek::{
     ristretto::{CompressedRistretto, RistrettoBasepointTable, RistrettoPoint},
     scalar::Scalar,
 };
-use maybe_async::maybe_async;
 use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
 use scuttlebutt::{Block, Malicious, SemiHonest};
@@ -39,7 +38,6 @@ pub(crate) struct Sender {
     counter: u128,
 }
 
-#[maybe_async(AFIT)]
 impl OtSender for Sender {
     type Msg = Block;
 
@@ -92,7 +90,6 @@ pub(crate) struct Receiver {
     counter: u128,
 }
 
-#[maybe_async(AFIT)]
 impl OtReceiver for Receiver {
     type Msg = Block;
 

@@ -1,4 +1,3 @@
-#![cfg(not(feature = "is_sync"))]
 use garble_lang::{
     circuit::{Circuit, Gate},
     compile,
