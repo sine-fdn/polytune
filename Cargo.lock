@@ -2531,17 +2531,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "maybe-async"
-version = "0.2.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cf92c10c7e361d6b99666ec1c6f9805b0bea2c3bd8c78dc6fe98ac5bd78db11"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3350,7 +3339,6 @@ dependencies = [
  "criterion",
  "curve25519-dalek",
  "garble_lang",
- "maybe-async",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "scuttlebutt",
@@ -3452,16 +3440,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
-]
-
-[[package]]
-name = "polytune-sync-channel"
-version = "0.1.0"
-dependencies = [
- "garble_lang",
- "maybe-async",
- "polytune",
- "serde",
 ]
 
 [[package]]

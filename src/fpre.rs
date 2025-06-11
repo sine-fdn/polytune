@@ -1,6 +1,5 @@
 //! The FPre preprocessor as a (semi-)trusted party, providing correlated randomness.
 
-use maybe_async::maybe_async;
 use rand::random;
 
 use crate::{
@@ -45,7 +44,6 @@ impl From<channel::Error> for Error {
 }
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
-#[maybe_async(AFIT)]
 #[allow(dead_code)]
 pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
     for p in 0..parties {
@@ -195,7 +193,7 @@ pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) ->
     Ok(())
 }
 
-#[cfg(all(test, not(feature = "is_sync")))]
+#[cfg(test)]
 mod tests {
     use crate::{
         channel::{recv_from, recv_vec_from, send_to, SimpleChannel},

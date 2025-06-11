@@ -17,10 +17,8 @@ pub(crate) mod chou_orlandi;
 pub(crate) mod kos;
 
 use curve25519_dalek::RistrettoPoint;
-use maybe_async::maybe_async;
 use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
-
 use scuttlebutt::Block;
 
 use crate::{channel::Channel, faand::Error};
@@ -40,7 +38,6 @@ pub(crate) type KosSender = kos::Sender<ChouOrlandiReceiver>;
 pub(crate) type KosReceiver = kos::Receiver<ChouOrlandiSender>;
 
 /// Trait for one-out-of-two oblivious transfer from the sender's point-of-view.
-#[maybe_async(AFIT)]
 pub(crate) trait Sender
 where
     Self: Sized,
@@ -68,7 +65,6 @@ where
 }
 
 /// Trait for initializing an oblivious transfer object with a fixed key.
-#[maybe_async(AFIT)]
 pub(crate) trait FixedKeyInitializer
 where
     Self: Sized,
@@ -86,7 +82,6 @@ where
 
 /// Trait for one-out-of-two oblivious transfer from the receiver's
 /// point-of-view.
-#[maybe_async(AFIT)]
 pub(crate) trait Receiver
 where
     Self: Sized,
@@ -116,7 +111,6 @@ where
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the sender's
 /// point-of-view.
 #[allow(clippy::type_complexity)]
-#[maybe_async(AFIT)]
 pub(crate) trait CorrelatedSender: Sender
 where
     Self: Sized,
@@ -135,7 +129,6 @@ where
 
 /// Trait for one-out-of-two _correlated_ oblivious transfer from the receiver's
 /// point-of-view.
-#[maybe_async(AFIT)]
 pub(crate) trait CorrelatedReceiver: Receiver
 where
     Self: Sized,
