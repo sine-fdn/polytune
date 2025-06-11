@@ -48,8 +48,6 @@ rand_chacha = "0.3.1"
 serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["sync", "macros", "rt", "time"] }
 tracing = "0.1.41"
-trait-variant = "0.1.1"
-async-trait = "0.1.77"
 curve25519-dalek = { version = "4.1.3", features = ["rand_core"] }
 
 scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
