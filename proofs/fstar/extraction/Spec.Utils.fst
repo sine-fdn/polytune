@@ -93,11 +93,10 @@ let first_share vec = Seq.Base.index vec 0
 val combine_outputs: Alloc.Vec.t_Vec (vec: Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global{ Seq.Base.length vec > 0 })
       Alloc.Alloc.t_Global -> bool
 let combine_outputs outputs = xor_bits (List.Tot.Base.map (fun vec -> share_bit (first_share vec)) (Rust_primitives.Arrays.to_list outputs))
-  
 
 val lemma_correctness_first_share 
   (#num_parties: usize{ v num_parties >= 3 })
-  (#num_triples: usize{ v num_triples >= 1})
+  (#num_triples: usize{ v num_triples >= 1 })
   (state_before: t_Array (t_PartyState num_parties num_triples) num_parties):
   Lemma (requires True)
         (ensures and_inputs state_before == combine_outputs (ideal num_parties num_triples state_before))

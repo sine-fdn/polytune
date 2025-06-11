@@ -1586,22 +1586,36 @@ mod spec {
     /// This functions is the global reference for the "leaky authenticated AND" protocol. It computes
     /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
     /// the XOR of the output values z.
-    fn ideal<const NUM_PARTIES: usize, const NUM_TRIPLES: usize>(
+    fn ideal_fhaand<const NUM_PARTIES: usize, const NUM_TRIPLES: usize>(
         state_before: [PartyState<NUM_PARTIES, NUM_TRIPLES>; NUM_PARTIES],
-    ) -> Vec<Vec<Share>> {
-        let mut vis = vec![Vec::new(); NUM_PARTIES]; // every party's vis
-        let mut h0h1s = vec![Vec::new(); NUM_PARTIES]; // every party's h0h1s
+    ) -> Vec<Vec<bool>> {
+        let mut vis = vec![vec![false; NUM_TRIPLES]; NUM_PARTIES]; // every party's vis
+        let mut h0h1s = vec![vec![vec![(false, false); NUM_TRIPLES]; NUM_PARTIES]; NUM_PARTIES]; // every party's h0h1s
 
         for i in 0..NUM_PARTIES {
             loop_invariant!(|_: usize| Prop::and(
-                (h0h1s.len() == NUM_PARTIES).into(),
-                forall(|j: usize| implies(
-                    0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
-                    h0h1[j].len() == l
-                ))
+                Prop::and(
+                    (h0h1s.len() == NUM_PARTIES).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
+                        Prop::and(
+                            (h0h1s[j].len() == NUM_PARTIES).into(),
+                            forall(|k: usize| implies(
+                                0 <= k && k < NUM_PARTIES && h0h1s[j].len() == NUM_PARTIES,
+                                h0h1s[j][k].len() == NUM_TRIPLES
+                            ))
+                        )
+                    ))
+                ),
+                Prop::and(
+                    (vis.len() == NUM_PARTIES).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < NUM_PARTIES && vis.len() == NUM_PARTIES,
+                        vis[j].len() == NUM_TRIPLES
+                    ))
+                )
             ));
 
-            loop_invariant!(|_: usize| vis.len() == NUM_PARTIES && h0h1s.len() == NUM_PARTIES);
             let party = &state_before[i];
             let yi: Vec<bool> = party.yshares.iter().map(|share| share.0).collect();
             let h0h1 = super::fhaand_compute_hashes(
@@ -1618,13 +1632,65 @@ mod spec {
         }
 
         // send/receive
-        let mut h0h1_js = vec![Vec::new(); NUM_PARTIES]; // every party's received h0h1s
+        let mut h0h1_js = vec![vec![vec![(false, false); NUM_TRIPLES]; NUM_PARTIES]; NUM_PARTIES]; // every party's h0h1s
         for i in 0..NUM_PARTIES {
-            loop_invariant!(|_: usize| h0h1_js.len() == NUM_PARTIES && h0h1s.len() == NUM_PARTIES);
+            loop_invariant!(|_: usize| Prop::and(
+                Prop::and(
+                    (h0h1s.len() == NUM_PARTIES).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
+                        Prop::and(
+                            (h0h1s[j].len() == NUM_PARTIES).into(),
+                            forall(|k: usize| implies(
+                                0 <= k && k < NUM_PARTIES && h0h1s[j].len() == NUM_PARTIES,
+                                h0h1s[j][k].len() == NUM_TRIPLES
+                            ))
+                        )
+                    ))
+                ),
+                Prop::and(
+                    (h0h1_js.len() == NUM_PARTIES).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < NUM_PARTIES && h0h1_js.len() == NUM_PARTIES,
+                        Prop::and(
+                            (h0h1_js[j].len() == NUM_PARTIES).into(),
+                            forall(|k: usize| implies(
+                                0 <= k && k < NUM_PARTIES && h0h1_js[j].len() == NUM_PARTIES,
+                                h0h1_js[j][k].len() == NUM_TRIPLES
+                            ))
+                        )
+                    ))
+                ),
+            ));
             for j in 0..NUM_PARTIES {
-                loop_invariant!(
-                    |_: usize| h0h1_js.len() == NUM_PARTIES && h0h1s.len() == NUM_PARTIES
-                );
+                loop_invariant!(|_: usize| Prop::and(
+                    Prop::and(
+                        (h0h1s.len() == NUM_PARTIES).into(),
+                        forall(|j: usize| implies(
+                            0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
+                            Prop::and(
+                                (h0h1s[j].len() == NUM_PARTIES).into(),
+                                forall(|k: usize| implies(
+                                    0 <= k && k < NUM_PARTIES && h0h1s[j].len() == NUM_PARTIES,
+                                    h0h1s[j][k].len() == NUM_TRIPLES
+                                ))
+                            )
+                        ))
+                    ),
+                    Prop::and(
+                        (h0h1_js.len() == NUM_PARTIES).into(),
+                        forall(|j: usize| implies(
+                            0 <= j && j < NUM_PARTIES && h0h1_js.len() == NUM_PARTIES,
+                            Prop::and(
+                                (h0h1_js[j].len() == NUM_PARTIES).into(),
+                                forall(|k: usize| implies(
+                                    0 <= k && k < NUM_PARTIES && h0h1_js[j].len() == NUM_PARTIES,
+                                    h0h1_js[j][k].len() == NUM_TRIPLES
+                                ))
+                            )
+                        ))
+                    ),
+                ));
                 if i == j {
                     continue;
                 }
@@ -1634,7 +1700,13 @@ mod spec {
 
         // for all parties: fhaand_2
         for i in 0..NUM_PARTIES {
-            loop_invariant!(|_: usize| vis.len() == NUM_PARTIES);
+            loop_invariant!(|_: usize| Prop::and(
+                (vis.len() == NUM_PARTIES).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < NUM_PARTIES && vis.len() == NUM_PARTIES,
+                    vis[j].len() == NUM_TRIPLES
+                ))
+            ));
             let party = &state_before[i];
             super::fhaand_compute_vi(
                 i,
@@ -1647,11 +1719,6 @@ mod spec {
         }
 
         // vis should now contain the required vi for every party.
-
-        // TODO:
-        // for all parties flaand_1
-        // for all parties flaand_2
-        // for all parties flaand_3
-        todo!()
+        vis
     }
 }

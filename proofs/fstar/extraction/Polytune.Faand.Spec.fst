@@ -14,14 +14,13 @@ type t_PartyState (v_NUM_PARTIES: usize) (v_NUM_TRIPLES: usize) = {
 /// This functions is the global reference for the "leaky authenticated AND" protocol. It computes
 /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
 /// the XOR of the output values z.
-let ideal
+let ideal_fhaand
       (v_NUM_PARTIES v_NUM_TRIPLES: usize)
       (state_before: t_Array (t_PartyState v_NUM_PARTIES v_NUM_TRIPLES) v_NUM_PARTIES)
-    : Alloc.Vec.t_Vec (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global)
-      Alloc.Alloc.t_Global =
+    : Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
   let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
     Alloc.Vec.from_elem #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-      (Alloc.Vec.impl__new #bool () <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+      (Alloc.Vec.from_elem #bool false v_NUM_TRIPLES <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
       v_NUM_PARTIES
   in
   let h0h1s:Alloc.Vec.t_Vec
@@ -29,7 +28,11 @@ let ideal
     Alloc.Alloc.t_Global =
     Alloc.Vec.from_elem #(Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
           Alloc.Alloc.t_Global)
-      (Alloc.Vec.impl__new #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) ()
+      (Alloc.Vec.from_elem #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+          (Alloc.Vec.from_elem #(bool & bool) (false, false <: (bool & bool)) v_NUM_TRIPLES
+            <:
+            Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+          v_NUM_PARTIES
         <:
         Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
       v_NUM_PARTIES
@@ -48,14 +51,7 @@ let ideal
             temp_0_
           in
           let _:usize = temp_1_ in
-          ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-                #Alloc.Alloc.t_Global
-                vis
-              <:
-              usize) =.
-            v_NUM_PARTIES
-            <:
-            bool) &&
+          b2t
           ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
                     (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
                 #Alloc.Alloc.t_Global
@@ -64,7 +60,88 @@ let ideal
               usize) =.
             v_NUM_PARTIES
             <:
-            bool))
+            bool) /\
+          (forall (j: usize).
+              b2t
+              ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+                ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+                      #Alloc.Alloc.t_Global
+                      h0h1s
+                    <:
+                    usize) =.
+                  v_NUM_PARTIES
+                  <:
+                  bool)) ==>
+              b2t
+              ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                    #Alloc.Alloc.t_Global
+                    (h0h1s.[ j ]
+                      <:
+                      Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                        Alloc.Alloc.t_Global)
+                  <:
+                  usize) =.
+                v_NUM_PARTIES
+                <:
+                bool) /\
+              (forall (k: usize).
+                  b2t
+                  ((mk_usize 0 <=. k <: bool) && (k <. v_NUM_PARTIES <: bool) &&
+                    ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                          #Alloc.Alloc.t_Global
+                          (h0h1s.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global)
+                        <:
+                        usize) =.
+                      v_NUM_PARTIES
+                      <:
+                      bool)) ==>
+                  b2t
+                  ((Alloc.Vec.impl_1__len #(bool & bool)
+                        #Alloc.Alloc.t_Global
+                        ((h0h1s.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global).[ k ]
+                          <:
+                          Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                      <:
+                      usize) =.
+                    v_NUM_TRIPLES
+                    <:
+                    bool))) /\
+          b2t
+          ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+                #Alloc.Alloc.t_Global
+                vis
+              <:
+              usize) =.
+            v_NUM_PARTIES
+            <:
+            bool) /\
+          (forall (j: usize).
+              b2t
+              ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+                ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+                      #Alloc.Alloc.t_Global
+                      vis
+                    <:
+                    usize) =.
+                  v_NUM_PARTIES
+                  <:
+                  bool)) ==>
+              b2t
+              ((Alloc.Vec.impl_1__len #bool
+                    #Alloc.Alloc.t_Global
+                    (vis.[ j ] <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+                  <:
+                  usize) =.
+                v_NUM_TRIPLES
+                <:
+                bool)))
       (h0h1s, vis
         <:
         (Alloc.Vec.t_Vec
@@ -149,7 +226,11 @@ let ideal
     Alloc.Alloc.t_Global =
     Alloc.Vec.from_elem #(Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
           Alloc.Alloc.t_Global)
-      (Alloc.Vec.impl__new #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) ()
+      (Alloc.Vec.from_elem #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+          (Alloc.Vec.from_elem #(bool & bool) (false, false <: (bool & bool)) v_NUM_TRIPLES
+            <:
+            Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+          v_NUM_PARTIES
         <:
         Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
       v_NUM_PARTIES
@@ -166,15 +247,7 @@ let ideal
             h0h1_js
           in
           let _:usize = temp_1_ in
-          ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
-                    (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
-                #Alloc.Alloc.t_Global
-                h0h1_js
-              <:
-              usize) =.
-            v_NUM_PARTIES
-            <:
-            bool) &&
+          b2t
           ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
                     (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
                 #Alloc.Alloc.t_Global
@@ -183,7 +256,121 @@ let ideal
               usize) =.
             v_NUM_PARTIES
             <:
-            bool))
+            bool) /\
+          (forall (j: usize).
+              b2t
+              ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+                ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+                      #Alloc.Alloc.t_Global
+                      h0h1s
+                    <:
+                    usize) =.
+                  v_NUM_PARTIES
+                  <:
+                  bool)) ==>
+              b2t
+              ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                    #Alloc.Alloc.t_Global
+                    (h0h1s.[ j ]
+                      <:
+                      Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                        Alloc.Alloc.t_Global)
+                  <:
+                  usize) =.
+                v_NUM_PARTIES
+                <:
+                bool) /\
+              (forall (k: usize).
+                  b2t
+                  ((mk_usize 0 <=. k <: bool) && (k <. v_NUM_PARTIES <: bool) &&
+                    ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                          #Alloc.Alloc.t_Global
+                          (h0h1s.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global)
+                        <:
+                        usize) =.
+                      v_NUM_PARTIES
+                      <:
+                      bool)) ==>
+                  b2t
+                  ((Alloc.Vec.impl_1__len #(bool & bool)
+                        #Alloc.Alloc.t_Global
+                        ((h0h1s.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global).[ k ]
+                          <:
+                          Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                      <:
+                      usize) =.
+                    v_NUM_TRIPLES
+                    <:
+                    bool))) /\
+          b2t
+          ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                    (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+                #Alloc.Alloc.t_Global
+                h0h1_js
+              <:
+              usize) =.
+            v_NUM_PARTIES
+            <:
+            bool) /\
+          (forall (j: usize).
+              b2t
+              ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+                ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+                      #Alloc.Alloc.t_Global
+                      h0h1_js
+                    <:
+                    usize) =.
+                  v_NUM_PARTIES
+                  <:
+                  bool)) ==>
+              b2t
+              ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                    #Alloc.Alloc.t_Global
+                    (h0h1_js.[ j ]
+                      <:
+                      Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                        Alloc.Alloc.t_Global)
+                  <:
+                  usize) =.
+                v_NUM_PARTIES
+                <:
+                bool) /\
+              (forall (k: usize).
+                  b2t
+                  ((mk_usize 0 <=. k <: bool) && (k <. v_NUM_PARTIES <: bool) &&
+                    ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                          #Alloc.Alloc.t_Global
+                          (h0h1_js.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global)
+                        <:
+                        usize) =.
+                      v_NUM_PARTIES
+                      <:
+                      bool)) ==>
+                  b2t
+                  ((Alloc.Vec.impl_1__len #(bool & bool)
+                        #Alloc.Alloc.t_Global
+                        ((h0h1_js.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global).[ k ]
+                          <:
+                          Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                      <:
+                      usize) =.
+                    v_NUM_TRIPLES
+                    <:
+                    bool))))
       h0h1_js
       (fun h0h1_js i ->
           let h0h1_js:Alloc.Vec.t_Vec
@@ -201,15 +388,7 @@ let ideal
                   h0h1_js
                 in
                 let _:usize = temp_1_ in
-                ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
-                          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
-                      #Alloc.Alloc.t_Global
-                      h0h1_js
-                    <:
-                    usize) =.
-                  v_NUM_PARTIES
-                  <:
-                  bool) &&
+                b2t
                 ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
                           (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
                       #Alloc.Alloc.t_Global
@@ -218,7 +397,129 @@ let ideal
                     usize) =.
                   v_NUM_PARTIES
                   <:
-                  bool))
+                  bool) /\
+                (forall (j: usize).
+                    b2t
+                    ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+                      ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                                (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                                Alloc.Alloc.t_Global)
+                            #Alloc.Alloc.t_Global
+                            h0h1s
+                          <:
+                          usize) =.
+                        v_NUM_PARTIES
+                        <:
+                        bool)) ==>
+                    b2t
+                    ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                          #Alloc.Alloc.t_Global
+                          (h0h1s.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global)
+                        <:
+                        usize) =.
+                      v_NUM_PARTIES
+                      <:
+                      bool) /\
+                    (forall (k: usize).
+                        b2t
+                        ((mk_usize 0 <=. k <: bool) && (k <. v_NUM_PARTIES <: bool) &&
+                          ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool)
+                                    Alloc.Alloc.t_Global)
+                                #Alloc.Alloc.t_Global
+                                (h0h1s.[ j ]
+                                  <:
+                                  Alloc.Vec.t_Vec
+                                    (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                                    Alloc.Alloc.t_Global)
+                              <:
+                              usize) =.
+                            v_NUM_PARTIES
+                            <:
+                            bool)) ==>
+                        b2t
+                        ((Alloc.Vec.impl_1__len #(bool & bool)
+                              #Alloc.Alloc.t_Global
+                              ((h0h1s.[ j ]
+                                  <:
+                                  Alloc.Vec.t_Vec
+                                    (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                                    Alloc.Alloc.t_Global).[ k ]
+                                <:
+                                Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                            <:
+                            usize) =.
+                          v_NUM_TRIPLES
+                          <:
+                          bool))) /\
+                b2t
+                ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+                      #Alloc.Alloc.t_Global
+                      h0h1_js
+                    <:
+                    usize) =.
+                  v_NUM_PARTIES
+                  <:
+                  bool) /\
+                (forall (j: usize).
+                    b2t
+                    ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+                      ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec
+                                (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                                Alloc.Alloc.t_Global)
+                            #Alloc.Alloc.t_Global
+                            h0h1_js
+                          <:
+                          usize) =.
+                        v_NUM_PARTIES
+                        <:
+                        bool)) ==>
+                    b2t
+                    ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                          #Alloc.Alloc.t_Global
+                          (h0h1_js.[ j ]
+                            <:
+                            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                              Alloc.Alloc.t_Global)
+                        <:
+                        usize) =.
+                      v_NUM_PARTIES
+                      <:
+                      bool) /\
+                    (forall (k: usize).
+                        b2t
+                        ((mk_usize 0 <=. k <: bool) && (k <. v_NUM_PARTIES <: bool) &&
+                          ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec (bool & bool)
+                                    Alloc.Alloc.t_Global)
+                                #Alloc.Alloc.t_Global
+                                (h0h1_js.[ j ]
+                                  <:
+                                  Alloc.Vec.t_Vec
+                                    (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                                    Alloc.Alloc.t_Global)
+                              <:
+                              usize) =.
+                            v_NUM_PARTIES
+                            <:
+                            bool)) ==>
+                        b2t
+                        ((Alloc.Vec.impl_1__len #(bool & bool)
+                              #Alloc.Alloc.t_Global
+                              ((h0h1_js.[ j ]
+                                  <:
+                                  Alloc.Vec.t_Vec
+                                    (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                                    Alloc.Alloc.t_Global).[ k ]
+                                <:
+                                Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                            <:
+                            usize) =.
+                          v_NUM_TRIPLES
+                          <:
+                          bool))))
             h0h1_js
             (fun h0h1_js j ->
                 let h0h1_js:Alloc.Vec.t_Vec
@@ -259,46 +560,62 @@ let ideal
             (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
                 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
   in
-  let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
-    Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-      v_NUM_PARTIES
-      (fun vis temp_1_ ->
-          let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
-            vis
-          in
-          let _:usize = temp_1_ in
-          (Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+  Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
+    v_NUM_PARTIES
+    (fun vis temp_1_ ->
+        let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
+          vis
+        in
+        let _:usize = temp_1_ in
+        b2t
+        ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
               #Alloc.Alloc.t_Global
               vis
             <:
             usize) =.
           v_NUM_PARTIES
           <:
-          bool)
-      vis
-      (fun vis i ->
-          let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
-            vis
-          in
-          let i:usize = i in
-          let party:t_PartyState v_NUM_PARTIES v_NUM_TRIPLES = state_before.[ i ] in
-          let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
-            Rust_primitives.Hax.Monomorphized_update_at.update_at_usize vis
-              i
-              (Polytune.Faand.fhaand_compute_vi i
-                  v_NUM_PARTIES
-                  v_NUM_TRIPLES
-                  (party.f_xshares <: t_Slice Polytune.Data_types.t_Share)
-                  (vis.[ i ] <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-                  (h0h1_js.[ i ]
-                    <:
-                    Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-                      Alloc.Alloc.t_Global)
+          bool) /\
+        (forall (j: usize).
+            b2t
+            ((mk_usize 0 <=. j <: bool) && (j <. v_NUM_PARTIES <: bool) &&
+              ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+                    #Alloc.Alloc.t_Global
+                    vis
+                  <:
+                  usize) =.
+                v_NUM_PARTIES
                 <:
-                Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-          in
-          vis)
-  in
-  Rust_primitives.Hax.never_to_any (Core.Panicking.panic "not yet implemented"
-      <:
-      Rust_primitives.Hax.t_Never)
+                bool)) ==>
+            b2t
+            ((Alloc.Vec.impl_1__len #bool
+                  #Alloc.Alloc.t_Global
+                  (vis.[ j ] <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+                <:
+                usize) =.
+              v_NUM_TRIPLES
+              <:
+              bool)))
+    vis
+    (fun vis i ->
+        let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
+          vis
+        in
+        let i:usize = i in
+        let party:t_PartyState v_NUM_PARTIES v_NUM_TRIPLES = state_before.[ i ] in
+        let vis:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
+          Rust_primitives.Hax.Monomorphized_update_at.update_at_usize vis
+            i
+            (Polytune.Faand.fhaand_compute_vi i
+                v_NUM_PARTIES
+                v_NUM_TRIPLES
+                (party.f_xshares <: t_Slice Polytune.Data_types.t_Share)
+                (vis.[ i ] <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+                (h0h1_js.[ i ]
+                  <:
+                  Alloc.Vec.t_Vec (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
+                    Alloc.Alloc.t_Global)
+              <:
+              Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+        in
+        vis)

@@ -79,7 +79,7 @@ extraction_targets = [
     "+**::faand::flaand_1",
     "+**::faand::flaand_2",
     "+**::faand::flaand_3",
-    "+**::faand::spec::ideal",
+    "+**::faand::spec::ideal_fhaand",
     ])
 ]
 
