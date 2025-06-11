@@ -8,7 +8,7 @@ Polytune, our MPC engine, aims at fulfilling our vision by providing an easy-to-
 
 Polytune implements the multi-party [[WRK17b]](https://eprint.iacr.org/2017/189.pdf) protocol and will include optimizations from [[YWZ20]](https://eprint.iacr.org/2019/1104.pdf). This protocol achieves the highest level of security an MPC protocol can achieve, i.e., it is secure against malicious adversaries that can control up to all-but-one of the parties. This means that even if all but one of the parties are corrupt and together try to obtain information about the honest party's input while actively deviating from the protocol, they are unable to do so, i.e., the input of the honest party remains private.
 
-> ⚠️ **Note**  
+> ⚠️ **Note**
 > Our MPC engine is being actively developed, so expect breaking changes.
 
 Polytune is directly compatible with [Garble](https://github.com/sine-fdn/garble-lang), our programming language that allows us to describe computations on a high level and translate them to a Boolean circuit format that is required by the [[WRK17b]](https://eprint.iacr.org/2017/189.pdf) MPC protocol.
@@ -19,6 +19,6 @@ You can see examples for the usage with examples described in Garble, e.g., [`be
 ## Funded by
 
 <p float="left">
-  <img src="logos/BMBF_Logo.png" height="200" />
-  <img src="logos/EU_Logo.png" height="200" /> 
+  <img src="logos/BMBF_Logo.jpg" alt="With funding from the: Federal Ministry of Research, Technology and Space" height="200" />
+  <img src="logos/EU_Logo.png" alt="Funded by the European Union (NextGenerationEU)" height="200" style="background: white" />
 </p>

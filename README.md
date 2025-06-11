@@ -34,5 +34,5 @@ For the most detailed output, the logging level can be set to `trace`.
 
 <p float="left">
   <img src="BMBF_Logo.jpg" alt="With funding from the: Federal Ministry of Research, Technology and Space" height="200" />
-  <img src="EU_Logo.png" alt="Funded by the European Union (NextGenerationEU)" height="200" />
+  <img src="EU_Logo.png" alt="Funded by the European Union (NextGenerationEU)" height="200" style="background: white" />
 </p>
