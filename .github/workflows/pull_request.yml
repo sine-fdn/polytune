@@ -1,6 +1,12 @@
-name: Cargo Build/Test/Clippy
+name: Pull Request Checks
 
-on: [push]
+# By using the pull_request event, the workflow is run on
+# the merge commit before it is added to main. This ensures
+# that the pipeline won't break after the merge.
+on:
+  pull_request:
+    branches:
+      - "main"
 
 env:
   CARGO_TERM_COLOR: always
