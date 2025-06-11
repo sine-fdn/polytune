@@ -3332,7 +3332,6 @@ dependencies = [
 name = "polytune"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bincode",
  "blake3",
  "chacha20poly1305",
@@ -3346,7 +3345,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "trait-variant",
 ]
 
 [[package]]
@@ -3360,7 +3358,6 @@ dependencies = [
  "polytune",
  "reqwest 0.11.27",
  "serde",
- "serde_json",
  "tokio",
  "tower",
  "tower-http 0.5.2",
@@ -3404,7 +3401,6 @@ name = "polytune-iroh-p2p"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bincode",
  "bytes",
  "clap",
  "data-encoding",
@@ -3418,7 +3414,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]
@@ -3449,7 +3444,6 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
- "getrandom 0.2.16",
  "gloo-timers",
  "http 1.3.1",
  "polytune",
@@ -3460,7 +3454,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -5366,17 +5359,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "trait-variant"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
 ]
 
 [[package]]
