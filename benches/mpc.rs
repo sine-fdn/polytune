@@ -8,10 +8,7 @@ use garble_lang::circuit::{Circuit, Gate};
 use polytune::{channel, protocol::mpc};
 use tokio::{runtime::Runtime, sync::oneshot};
 
-use crate::{
-    memory_tracking::{create_instrumented_runtime, MemoryMeasurement},
-    ALLOCATOR,
-};
+use crate::memory_tracking::{create_instrumented_runtime, MemoryMeasurement};
 
 pub fn mpc_benchmarks(c: &mut Criterion) {
     let rt0 = create_instrumented_runtime(0);
@@ -110,8 +107,8 @@ fn bench_memory_for_party(rt1: &Runtime, rt2: &Runtime, party: usize) {
         bench_circuit_two_parties(
             &mut g,
             &measurement,
-            &rt1,
-            &rt2,
+            rt1,
+            rt2,
             bench_id,
             circ,
             [vec![true; inputs / 2], vec![true; inputs / 2]],
@@ -127,6 +124,7 @@ fn bench_memory_for_party(rt1: &Runtime, rt2: &Runtime, party: usize) {
 /// Benchmark the provided circuit with the criterion measurement.
 ///
 /// Uses `rt0` for party 0 and `rt1` for party 1.
+#[allow(clippy::too_many_arguments)]
 fn bench_circuit_two_parties<'a, M, F>(
     g: &mut BenchmarkGroup<'a, M>,
     m: &M,
