@@ -6,6 +6,7 @@ open FStar.Mul
 let _ =
   (* This module has implicit dependencies, here we make them explicit. *)
   (* The implicit dependencies arise from typeclasses instances. *)
+  let open Hax_lib.Prop in
   let open Polytune.Channel in
   let open Serde.De in
   let open Serde.De.Impls in
@@ -171,10 +172,13 @@ val fabitn':
     n: usize ->
     l: usize ->
     shared_two_by_two: Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global
-  -> (iimpl_951670863_ &
-      Core.Result.t_Result
-        (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
-          Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
+  -> Prims.Pure
+      (iimpl_951670863_ &
+        Core.Result.t_Result
+          (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
+            Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
+      (requires l <=. Core.Num.impl_usize__MAX)
+      (fun _ -> Prims.l_True)
 
 let fabitn
       (#iimpl_951670863_: Type0)
@@ -199,10 +203,13 @@ let fashare
       (delta: Polytune.Data_types.t_Delta)
       (i n l: usize)
       (shared_two_by_two: Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
-    : (iimpl_951670863_ &
-      Core.Result.t_Result
-        (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
-          Rand_chacha.Chacha.t_ChaCha20Rng) t_Error) =
+    : Prims.Pure
+      (iimpl_951670863_ &
+        Core.Result.t_Result
+          (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
+            Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
+      (requires l <=. (Core.Num.impl_usize__MAX -! v_RHO <: usize))
+      (fun _ -> Prims.l_True) =
   let tmp0, out:(iimpl_951670863_ &
     Core.Result.t_Result
       (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
@@ -231,6 +238,7 @@ let fashare
       Alloc.Alloc.t_Global =
       Alloc.Vec.impl__with_capacity #t_VectorU8 v_RHO
     in
+    let lprime:usize = l +! v_RHO in
     let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &
       Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
       Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
@@ -245,7 +253,52 @@ let fashare
               temp_0_
             in
             let _:usize = temp_1_ in
-            true)
+            Hax_lib.Prop.impl_Prop__and #Hax_lib.Prop.t_Prop
+              (Core.Convert.f_into #bool
+                  #Hax_lib.Prop.t_Prop
+                  #FStar.Tactics.Typeclasses.solve
+                  ((Alloc.Vec.impl_1__len #Polytune.Data_types.t_Share
+                        #Alloc.Alloc.t_Global
+                        xishares
+                      <:
+                      usize) =.
+                    lprime
+                    <:
+                    bool)
+                <:
+                Hax_lib.Prop.t_Prop)
+              (Hax_lib.Prop.v_forall #usize
+                  #Hax_lib.Prop.t_Prop
+                  (fun ll ->
+                      let ll:usize = ll in
+                      Hax_lib.Prop.implies #bool
+                        #bool
+                        ((mk_usize 0 <=. ll <: bool) && (ll <. lprime <: bool) &&
+                          ((Alloc.Vec.impl_1__len #Polytune.Data_types.t_Share
+                                #Alloc.Alloc.t_Global
+                                xishares
+                              <:
+                              usize) =.
+                            lprime
+                            <:
+                            bool))
+                        ((Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac &
+                                Polytune.Data_types.t_Key)
+                              #Alloc.Alloc.t_Global
+                              (xishares.[ ll ] <: Polytune.Data_types.t_Share)
+                                .Polytune.Data_types._1
+                                .Polytune.Data_types._0
+                            <:
+                            usize) =.
+                          n
+                          <:
+                          bool)
+                      <:
+                      Hax_lib.Prop.t_Prop)
+                <:
+                Hax_lib.Prop.t_Prop)
+            <:
+            Hax_lib.Prop.t_Prop)
         (c0_c1_cm, d0, d1, dmvec
           <:
           (Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &

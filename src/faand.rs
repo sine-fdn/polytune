@@ -1,7 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use hax_lib::requires;
+use hax_lib::{forall, implies, loop_invariant, requires, Prop};
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -75,7 +75,11 @@ struct Commitment(pub(crate) [u8; 32]);
 
 /// Represents a triple of commitments, needed for the fashare protocol.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-struct CommitmentTriple(pub(crate) Commitment, pub(crate) Commitment, pub(crate) Commitment);
+struct CommitmentTriple(
+    pub(crate) Commitment,
+    pub(crate) Commitment,
+    pub(crate) Commitment,
+);
 
 /// Represents a vector of `u8` values.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -383,6 +387,7 @@ fn zero_rng() -> ChaCha20Rng {
 /// where RHO is the statistical security parameter.
 #[maybe_async(AFIT)]
 #[hax_lib::opaque]
+#[requires(l <= usize::MAX)]
 async fn fabitn(
     channel: &mut impl Channel,
     delta: Delta,
@@ -525,6 +530,7 @@ async fn fabitn(
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 
 #[maybe_async(AFIT)]
+#[requires(l <= usize::MAX - RHO)]
 pub(crate) async fn fashare(
     channel: &mut impl Channel,
     delta: Delta,
@@ -546,7 +552,15 @@ pub(crate) async fn fashare(
     let mut c0_c1_cm = Vec::with_capacity(RHO); // c0, c1, cm
     let mut dmvec: Vec<VectorU8> = Vec::with_capacity(RHO);
 
+    let lprime = l + RHO;
     for r in 0..RHO {
+        loop_invariant!(|_: usize| Prop::and(
+            (xishares.len() == lprime).into(),
+            forall(|ll: usize| implies(
+                0 <= ll && ll < lprime && xishares.len() == lprime,
+                xishares[ll].1 .0.len() == n
+            ))
+        ));
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
