@@ -1,6 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
+use hax_lib::requires;
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -71,6 +72,14 @@ impl From<swankyot::Error> for Error {
 /// Represents a cryptographic commitment as a fixed-size 32-byte array (a BLAKE3 hash).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 struct Commitment(pub(crate) [u8; 32]);
+
+/// Represents a triple of commitments, needed for the fashare protocol.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+struct CommitmentTriple(pub(crate) Commitment, pub(crate) Commitment, pub(crate) Commitment);
+
+/// Represents a vector of `u8` values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct VectorU8(Vec<u8>);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
@@ -514,6 +523,7 @@ async fn fabitn(
 ///    - They then verify these commitments by performing decommitments and checking the validity of the
 ///      MACs against the commitments.
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
+
 #[maybe_async(AFIT)]
 pub(crate) async fn fashare(
     channel: &mut impl Channel,
@@ -534,7 +544,7 @@ pub(crate) async fn fashare(
     let mut d0 = vec![0; RHO];
     let mut d1 = vec![0; RHO];
     let mut c0_c1_cm = Vec::with_capacity(RHO); // c0, c1, cm
-    let mut dmvec = Vec::with_capacity(RHO);
+    let mut dmvec: Vec<VectorU8> = Vec::with_capacity(RHO);
 
     for r in 0..RHO {
         let xishare = &xishares[l + r];
@@ -553,8 +563,8 @@ pub(crate) async fn fashare(
         let c1 = commit(&d1[r].to_be_bytes());
         let cm = commit(&dm);
 
-        c0_c1_cm.push((c0, c1, cm));
-        dmvec.push(dm);
+        c0_c1_cm.push(CommitmentTriple(c0, c1, cm));
+        dmvec.push(VectorU8(dm));
     }
 
     let mut c0_c1_cm_k = broadcast(channel, i, n, "fashare comm", &c0_c1_cm, RHO).await?;
@@ -566,20 +576,24 @@ pub(crate) async fn fashare(
     dm_k[i] = dmvec;
 
     // 3 c) Compute bi to determine di_bi and send to all parties.
-    let mut bi: [bool; RHO] = [false; RHO];
-    let mut di_bi = vec![0; RHO];
+    let mut bi: [u8; RHO] = [0; RHO];
+    let mut di_bi: Vec<u128> = vec![0; RHO];
     for r in 0..RHO {
         for k in 0..n {
             if k == i {
                 continue;
             }
-            if dm_k[k][r][0] > 1 {
+            if dm_k[k][r].0[0] > 1 {
                 return Err(Error::InvalidBitValue);
             }
-            let cond = dm_k[k][r][0] != 0;
+            let mut cond = 0;
+            if dm_k[k][r].0[0] != 0 {
+                cond = 1;
+            }
+            //let cond = dm_k[k][r][0] != 0;
             bi[r] = bi[r] ^ cond;
         }
-        di_bi[r] = if bi[r] { d1[r] } else { d0[r] };
+        di_bi[r] = if bi[r] == 1 { d1[r] } else { d0[r] };
     }
 
     let di_bi_k = broadcast(channel, i, n, "fashare di_bi", &di_bi, RHO).await?;
@@ -603,7 +617,7 @@ pub(crate) async fn fashare(
                     1 + kk * 16
                 };
                 let end = start + 16;
-                if let Ok(mac) = dm[start..end].try_into().map(u128::from_be_bytes) {
+                if let Ok(mac) = dm.0[start..end].try_into().map(u128::from_be_bytes) {
                     xor_xk_macs[kk][r] = mac ^ xor_xk_macs[kk][r];
                 } else {
                     return Err(Error::ConversionErr);

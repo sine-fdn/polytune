@@ -33,34 +33,77 @@ type t_Error =
   | Error_AANDWrongMAC : t_Error
   | Error_BeaverWrongMAC : t_Error
   | Error_InvalidHashLength : t_Error
-  | Error_OTError : Polytune.Swankyot.t_Error -> t_Error
+  | Error_OtErr : Polytune.Swankyot.t_Error -> t_Error
 
 /// Represents a cryptographic commitment as a fixed-size 32-byte array (a BLAKE3 hash).
 type t_Commitment = | Commitment : t_Array u8 (mk_usize 32) -> t_Commitment
 
-[@@ FStar.Tactics.Typeclasses.tcinstance]
-assume
-val impl_3': Core.Fmt.t_Debug t_Commitment
-
-let impl_3 = impl_3'
+/// Represents a triple of commitments, needed for the fashare protocol.
+type t_CommitmentTriple =
+  | CommitmentTriple : t_Commitment -> t_Commitment -> t_Commitment -> t_CommitmentTriple
 
 [@@ FStar.Tactics.Typeclasses.tcinstance]
 assume
-val e___impl': Serde.Ser.t_Serialize t_Commitment
+val impl_8': Core.Fmt.t_Debug t_CommitmentTriple
 
-let e___impl = e___impl'
-
-[@@ FStar.Tactics.Typeclasses.tcinstance]
-assume
-val e_ee_1__impl': Serde.De.t_Deserialize t_Commitment
-
-let e_ee_1__impl = e_ee_1__impl'
+let impl_8 = impl_8'
 
 [@@ FStar.Tactics.Typeclasses.tcinstance]
 assume
-val impl_7': Core.Cmp.t_PartialEq t_Commitment t_Commitment
+val impl_9': Core.Clone.t_Clone t_CommitmentTriple
 
-let impl_7 = impl_7'
+let impl_9 = impl_9'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val e_ee_2__impl': Serde.Ser.t_Serialize t_CommitmentTriple
+
+let e_ee_2__impl = e_ee_2__impl'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val e_ee_3__impl': Serde.De.t_Deserialize t_CommitmentTriple
+
+let e_ee_3__impl = e_ee_3__impl'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val impl_12': Core.Cmp.t_PartialEq t_CommitmentTriple t_CommitmentTriple
+
+let impl_12 = impl_12'
+
+/// Represents a vector of `u8` values.
+type t_VectorU8 = | VectorU8 : Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global -> t_VectorU8
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val impl_13': Core.Fmt.t_Debug t_VectorU8
+
+let impl_13 = impl_13'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val impl_14': Core.Clone.t_Clone t_VectorU8
+
+let impl_14 = impl_14'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val e_ee_4__impl': Serde.Ser.t_Serialize t_VectorU8
+
+let e_ee_4__impl = e_ee_4__impl'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val e_ee_5__impl': Serde.De.t_Deserialize t_VectorU8
+
+let e_ee_5__impl = e_ee_5__impl'
+
+[@@ FStar.Tactics.Typeclasses.tcinstance]
+assume
+val impl_16': Core.Cmp.t_PartialEq t_VectorU8 t_VectorU8
+
+let impl_16 = impl_16'
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
@@ -181,41 +224,39 @@ let fashare
     let d1:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global =
       Alloc.Vec.from_elem #u128 (mk_u128 0) v_RHO
     in
-    let c0_c1_cm:Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global =
-      Alloc.Vec.impl__with_capacity #(t_Commitment & t_Commitment & t_Commitment) v_RHO
+    let c0_c1_cm:Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global =
+      Alloc.Vec.impl__with_capacity #t_CommitmentTriple v_RHO
     in
-    let dmvec:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global =
-      Alloc.Vec.impl__with_capacity #(Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) v_RHO
+    let (dmvec: Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global):Alloc.Vec.t_Vec t_VectorU8
+      Alloc.Alloc.t_Global =
+      Alloc.Vec.impl__with_capacity #t_VectorU8 v_RHO
     in
-    let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment)
-        Alloc.Alloc.t_Global &
+    let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &
       Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
       Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
-      Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global) =
+      Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global) =
       Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
         v_RHO
         (fun temp_0_ temp_1_ ->
-            let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec
-                (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global &
+            let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &
               Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
               Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
-              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global) =
+              Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global) =
               temp_0_
             in
             let _:usize = temp_1_ in
             true)
         (c0_c1_cm, d0, d1, dmvec
           <:
-          (Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global &
+          (Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &
             Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
             Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
-            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global))
+            Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))
         (fun temp_0_ r ->
-            let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec
-                (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global &
+            let c0_c1_cm, d0, d1, dmvec:(Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &
               Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
               Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
-              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global) =
+              Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global) =
               temp_0_
             in
             let r:usize = r in
@@ -298,44 +339,40 @@ let fashare
                   <:
                   t_Slice u8)
             in
-            let c0_c1_cm:Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment)
-              Alloc.Alloc.t_Global =
-              Alloc.Vec.impl_1__push #(t_Commitment & t_Commitment & t_Commitment)
+            let c0_c1_cm:Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global =
+              Alloc.Vec.impl_1__push #t_CommitmentTriple
                 #Alloc.Alloc.t_Global
                 c0_c1_cm
-                (c0, c1, cm <: (t_Commitment & t_Commitment & t_Commitment))
+                (CommitmentTriple c0 c1 cm <: t_CommitmentTriple)
             in
-            let dmvec:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global
-            =
-              Alloc.Vec.impl_1__push #(Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
+            let dmvec:Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global =
+              Alloc.Vec.impl_1__push #t_VectorU8
                 #Alloc.Alloc.t_Global
                 dmvec
-                dm
+                (VectorU8 dm <: t_VectorU8)
             in
             c0_c1_cm, d0, d1, dmvec
             <:
-            (Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global &
+            (Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global &
               Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
               Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global &
-              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global))
+              Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))
     in
     let tmp0, out:(iimpl_951670863_ &
       Core.Result.t_Result
-        (Alloc.Vec.t_Vec
-            (Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global)
+        (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global)
             Alloc.Alloc.t_Global) t_Error) =
-      broadcast #(t_Commitment & t_Commitment & t_Commitment)
+      broadcast #t_CommitmentTriple
         #iimpl_951670863_
         channel
         i
         n
         "fashare comm"
-        (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment)
-                Alloc.Alloc.t_Global)
+        (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global)
             #FStar.Tactics.Typeclasses.solve
             c0_c1_cm
           <:
-          t_Slice (t_Commitment & t_Commitment & t_Commitment))
+          t_Slice t_CommitmentTriple)
         v_RHO
     in
     let channel:iimpl_951670863_ = tmp0 in
@@ -343,33 +380,29 @@ let fashare
         out
         <:
         Core.Result.t_Result
-          (Alloc.Vec.t_Vec
-              (Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global)
+          (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global)
               Alloc.Alloc.t_Global) t_Error
       with
       | Core.Result.Result_Ok c0_c1_cm_k ->
-        let c0_c1_cm_k:Alloc.Vec.t_Vec
-          (Alloc.Vec.t_Vec (t_Commitment & t_Commitment & t_Commitment) Alloc.Alloc.t_Global)
+        let c0_c1_cm_k:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global)
           Alloc.Alloc.t_Global =
           Rust_primitives.Hax.Monomorphized_update_at.update_at_usize c0_c1_cm_k i c0_c1_cm
         in
         let tmp0, out:(iimpl_951670863_ &
           Core.Result.t_Result
-            (Alloc.Vec.t_Vec
-                (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
-                Alloc.Alloc.t_Global) t_Error) =
-          broadcast #(Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
+            (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+            t_Error) =
+          broadcast #t_VectorU8
             #iimpl_951670863_
             channel
             i
             n
             "fashare ver"
-            (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                    Alloc.Alloc.t_Global)
+            (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global)
                 #FStar.Tactics.Typeclasses.solve
                 dmvec
               <:
-              t_Slice (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global))
+              t_Slice t_VectorU8)
             v_RHO
         in
         let channel:iimpl_951670863_ = tmp0 in
@@ -377,47 +410,54 @@ let fashare
             out
             <:
             Core.Result.t_Result
-              (Alloc.Vec.t_Vec
-                  (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+              (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global)
                   Alloc.Alloc.t_Global) t_Error
           with
           | Core.Result.Result_Ok dm_k ->
-            let dm_k:Alloc.Vec.t_Vec
-              (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+            let dm_k:Alloc.Vec.t_Vec (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global)
               Alloc.Alloc.t_Global =
               Rust_primitives.Hax.Monomorphized_update_at.update_at_usize dm_k i dmvec
             in
-            let (bi: t_Array bool (mk_usize 40)):t_Array bool (mk_usize 40) =
-              Rust_primitives.Hax.repeat false (mk_usize 40)
+            let (bi: t_Array u8 (mk_usize 40)):t_Array u8 (mk_usize 40) =
+              Rust_primitives.Hax.repeat (mk_u8 0) (mk_usize 40)
             in
-            let di_bi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global =
+            let (di_bi: Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global):Alloc.Vec.t_Vec u128
+              Alloc.Alloc.t_Global =
               Alloc.Vec.from_elem #u128 (mk_u128 0) v_RHO
             in
             (match
                 Rust_primitives.Hax.Folds.fold_range_return (mk_usize 0)
                   v_RHO
-                  (fun di_bi temp_1_ ->
-                      let di_bi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global = di_bi in
+                  (fun temp_0_ temp_1_ ->
+                      let bi, di_bi:(t_Array u8 (mk_usize 40) &
+                        Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) =
+                        temp_0_
+                      in
                       let _:usize = temp_1_ in
                       true)
-                  di_bi
-                  (fun di_bi r ->
-                      let di_bi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global = di_bi in
+                  (bi, di_bi
+                    <:
+                    (t_Array u8 (mk_usize 40) & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
+                  (fun temp_0_ r ->
+                      let bi, di_bi:(t_Array u8 (mk_usize 40) &
+                        Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) =
+                        temp_0_
+                      in
                       let r:usize = r in
                       match
                         Rust_primitives.Hax.Folds.fold_range_return (mk_usize 0)
                           n
-                          (fun temp_0_ temp_1_ ->
-                              let _:Prims.unit = temp_0_ in
+                          (fun bi temp_1_ ->
+                              let bi:t_Array u8 (mk_usize 40) = bi in
                               let _:usize = temp_1_ in
                               true)
-                          ()
-                          (fun temp_0_ k ->
-                              let _:Prims.unit = temp_0_ in
+                          bi
+                          (fun bi k ->
+                              let bi:t_Array u8 (mk_usize 40) = bi in
                               let k:usize = k in
                               if k =. i <: bool
                               then
-                                Core.Ops.Control_flow.ControlFlow_Continue (() <: Prims.unit)
+                                Core.Ops.Control_flow.ControlFlow_Continue bi
                                 <:
                                 Core.Ops.Control_flow.t_ControlFlow
                                   (Core.Ops.Control_flow.t_ControlFlow
@@ -426,15 +466,15 @@ let fashare
                                           (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
                                               Alloc.Alloc.t_Global &
                                             Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                                      (Prims.unit & Prims.unit)) Prims.unit
+                                      (Prims.unit & t_Array u8 (mk_usize 40)))
+                                  (t_Array u8 (mk_usize 40))
                               else
                                 if
-                                  (((dm_k.[ k ]
-                                        <:
-                                        Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                          Alloc.Alloc.t_Global).[ r ]
+                                  (((dm_k.[ k ] <: Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global).[
+                                        r ]
                                       <:
-                                      Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global).[ mk_usize 0 ]
+                                      t_VectorU8)
+                                      ._0.[ mk_usize 0 ]
                                     <:
                                     u8) >.
                                   mk_u8 1
@@ -463,7 +503,7 @@ let fashare
                                           (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
                                               Alloc.Alloc.t_Global &
                                             Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                                      (Prims.unit & Prims.unit))
+                                      (Prims.unit & t_Array u8 (mk_usize 40)))
                                   <:
                                   Core.Ops.Control_flow.t_ControlFlow
                                     (Core.Ops.Control_flow.t_ControlFlow
@@ -472,20 +512,30 @@ let fashare
                                             (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
                                                 Alloc.Alloc.t_Global &
                                               Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                                        (Prims.unit & Prims.unit)) Prims.unit
+                                        (Prims.unit & t_Array u8 (mk_usize 40)))
+                                    (t_Array u8 (mk_usize 40))
                                 else
-                                  let cond:bool =
-                                    (((dm_k.[ k ]
+                                  let cond:u8 = mk_u8 0 in
+                                  let cond:u8 =
+                                    if
+                                      (((dm_k.[ k ]
+                                            <:
+                                            Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global).[ r ]
                                           <:
-                                          Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                            Alloc.Alloc.t_Global).[ r ]
+                                          t_VectorU8)
+                                          ._0.[ mk_usize 0 ]
                                         <:
-                                        Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global).[ mk_usize 0 ]
-                                      <:
-                                      u8) <>.
-                                    mk_u8 0
+                                        u8) <>.
+                                      mk_u8 0
+                                    then
+                                      let cond:u8 = mk_u8 1 in
+                                      cond
+                                    else cond
                                   in
-                                  Core.Ops.Control_flow.ControlFlow_Continue ()
+                                  Core.Ops.Control_flow.ControlFlow_Continue
+                                  (Rust_primitives.Hax.Monomorphized_update_at.update_at_usize bi
+                                      r
+                                      ((bi.[ r ] <: u8) ^. cond <: u8))
                                   <:
                                   Core.Ops.Control_flow.t_ControlFlow
                                     (Core.Ops.Control_flow.t_ControlFlow
@@ -494,13 +544,15 @@ let fashare
                                             (Alloc.Vec.t_Vec Polytune.Data_types.t_Share
                                                 Alloc.Alloc.t_Global &
                                               Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                                        (Prims.unit & Prims.unit)) Prims.unit)
+                                        (Prims.unit & t_Array u8 (mk_usize 40)))
+                                    (t_Array u8 (mk_usize 40)))
                         <:
                         Core.Ops.Control_flow.t_ControlFlow
                           (iimpl_951670863_ &
                             Core.Result.t_Result
                               (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
-                                Rand_chacha.Chacha.t_ChaCha20Rng) t_Error) Prims.unit
+                                Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
+                          (t_Array u8 (mk_usize 40))
                       with
                       | Core.Ops.Control_flow.ControlFlow_Break ret ->
                         Core.Ops.Control_flow.ControlFlow_Break
@@ -511,7 +563,9 @@ let fashare
                               Core.Result.t_Result
                                 (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
                                   Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                            (Prims.unit & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
+                            (Prims.unit &
+                              (t_Array u8 (mk_usize 40) & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                            ))
                         <:
                         Core.Ops.Control_flow.t_ControlFlow
                           (Core.Ops.Control_flow.t_ControlFlow
@@ -519,15 +573,22 @@ let fashare
                                 Core.Result.t_Result
                                   (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
                                     Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                              (Prims.unit & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
-                          (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                      | Core.Ops.Control_flow.ControlFlow_Continue _ ->
-                        Core.Ops.Control_flow.ControlFlow_Continue
-                        (Rust_primitives.Hax.Monomorphized_update_at.update_at_usize di_bi
+                              (Prims.unit &
+                                (t_Array u8 (mk_usize 40) &
+                                  Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)))
+                          (t_Array u8 (mk_usize 40) & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                      | Core.Ops.Control_flow.ControlFlow_Continue bi ->
+                        let di_bi:Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global =
+                          Rust_primitives.Hax.Monomorphized_update_at.update_at_usize di_bi
                             r
-                            (if bi.[ r ] <: bool then d1.[ r ] <: u128 else d0.[ r ] <: u128)
+                            (if (bi.[ r ] <: u8) =. mk_u8 1 <: bool
+                              then d1.[ r ] <: u128
+                              else d0.[ r ] <: u128)
+                        in
+                        Core.Ops.Control_flow.ControlFlow_Continue
+                        (bi, di_bi
                           <:
-                          Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                          (t_Array u8 (mk_usize 40) & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
                         <:
                         Core.Ops.Control_flow.t_ControlFlow
                           (Core.Ops.Control_flow.t_ControlFlow
@@ -535,18 +596,20 @@ let fashare
                                 Core.Result.t_Result
                                   (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
                                     Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                              (Prims.unit & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
-                          (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
+                              (Prims.unit &
+                                (t_Array u8 (mk_usize 40) &
+                                  Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)))
+                          (t_Array u8 (mk_usize 40) & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global))
                 <:
                 Core.Ops.Control_flow.t_ControlFlow
                   (iimpl_951670863_ &
                     Core.Result.t_Result
                       (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
                         Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
-                  (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                  (t_Array u8 (mk_usize 40) & Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
               with
               | Core.Ops.Control_flow.ControlFlow_Break ret -> ret
-              | Core.Ops.Control_flow.ControlFlow_Continue di_bi ->
+              | Core.Ops.Control_flow.ControlFlow_Continue (bi, di_bi) ->
                 let tmp0, out:(iimpl_951670863_ &
                   Core.Result.t_Result
                     (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
@@ -603,59 +666,44 @@ let fashare
                                     #(Core.Iter.Adapters.Take.t_Take
                                       (Core.Iter.Adapters.Enumerate.t_Enumerate
                                         (Core.Slice.Iter.t_Iter
-                                          (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                              Alloc.Alloc.t_Global))))
+                                          (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))))
                                     #FStar.Tactics.Typeclasses.solve
                                     (Core.Iter.Traits.Iterator.f_take #(Core.Iter.Adapters.Enumerate.t_Enumerate
                                           (Core.Slice.Iter.t_Iter
-                                            (Alloc.Vec.t_Vec
-                                                (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                                Alloc.Alloc.t_Global)))
+                                            (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global)))
                                         #FStar.Tactics.Typeclasses.solve
                                         (Core.Iter.Traits.Iterator.f_enumerate #(Core.Slice.Iter.t_Iter
-                                              (Alloc.Vec.t_Vec
-                                                  (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                                  Alloc.Alloc.t_Global))
+                                              (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))
                                             #FStar.Tactics.Typeclasses.solve
-                                            (Core.Slice.impl__iter #(Alloc.Vec.t_Vec
-                                                    (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
+                                            (Core.Slice.impl__iter #(Alloc.Vec.t_Vec t_VectorU8
                                                     Alloc.Alloc.t_Global)
                                                 (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec
-                                                        (Alloc.Vec.t_Vec
-                                                            (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global
-                                                            ) Alloc.Alloc.t_Global)
+                                                        (Alloc.Vec.t_Vec t_VectorU8
+                                                            Alloc.Alloc.t_Global)
                                                         Alloc.Alloc.t_Global)
                                                     #FStar.Tactics.Typeclasses.solve
                                                     dm_k
                                                   <:
                                                   t_Slice
-                                                  (Alloc.Vec.t_Vec
-                                                      (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                                      Alloc.Alloc.t_Global))
+                                                  (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))
                                               <:
                                               Core.Slice.Iter.t_Iter
-                                              (Alloc.Vec.t_Vec
-                                                  (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                                  Alloc.Alloc.t_Global))
+                                              (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))
                                           <:
                                           Core.Iter.Adapters.Enumerate.t_Enumerate
                                           (Core.Slice.Iter.t_Iter
-                                            (Alloc.Vec.t_Vec
-                                                (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                                Alloc.Alloc.t_Global)))
+                                            (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global)))
                                         n
                                       <:
                                       Core.Iter.Adapters.Take.t_Take
                                       (Core.Iter.Adapters.Enumerate.t_Enumerate
                                         (Core.Slice.Iter.t_Iter
-                                          (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                              Alloc.Alloc.t_Global))))
+                                          (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))))
                                   <:
                                   Core.Iter.Adapters.Take.t_Take
                                   (Core.Iter.Adapters.Enumerate.t_Enumerate
                                     (Core.Slice.Iter.t_Iter
-                                      (Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                          Alloc.Alloc.t_Global))))
+                                      (Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global))))
                                 xor_xk_macs
                                 (fun xor_xk_macs temp_1_ ->
                                     let xor_xk_macs:Alloc.Vec.t_Vec
@@ -664,8 +712,7 @@ let fashare
                                       xor_xk_macs
                                     in
                                     let k, dmv:(usize &
-                                      Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global)
-                                        Alloc.Alloc.t_Global) =
+                                      Alloc.Vec.t_Vec t_VectorU8 Alloc.Alloc.t_Global) =
                                       temp_1_
                                     in
                                     match
@@ -707,8 +754,7 @@ let fashare
                                                     Alloc.Alloc.t_Global)
                                             else
                                               if
-                                                Alloc.Vec.impl_1__is_empty #(Alloc.Vec.t_Vec u8
-                                                      Alloc.Alloc.t_Global)
+                                                Alloc.Vec.impl_1__is_empty #t_VectorU8
                                                   #Alloc.Alloc.t_Global
                                                   dmv
                                                 <:
@@ -760,9 +806,7 @@ let fashare
                                                       (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                                       Alloc.Alloc.t_Global)
                                               else
-                                                let dm:Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global =
-                                                  dmv.[ r ]
-                                                in
+                                                let dm:t_VectorU8 = dmv.[ r ] in
                                                 let start:usize =
                                                   if kk >. k
                                                   then
@@ -780,7 +824,7 @@ let fashare
                                                     (Core.Convert.f_try_into #(t_Slice u8)
                                                         #(t_Array u8 (mk_usize 16))
                                                         #FStar.Tactics.Typeclasses.solve
-                                                        (dm.[ {
+                                                        (dm._0.[ {
                                                               Core.Ops.Range.f_start = start;
                                                               Core.Ops.Range.f_end = v_end
                                                             }
@@ -1017,19 +1061,17 @@ let fashare
                                               <:
                                               u128)
                                         in
-                                        let commitments:(t_Commitment & t_Commitment & t_Commitment)
-                                        =
+                                        let commitments:t_CommitmentTriple =
                                           (c0_c1_cm_k.[ k ]
                                             <:
-                                            Alloc.Vec.t_Vec
-                                              (t_Commitment & t_Commitment & t_Commitment)
-                                              Alloc.Alloc.t_Global).[ r ]
+                                            Alloc.Vec.t_Vec t_CommitmentTriple Alloc.Alloc.t_Global).[
+                                            r ]
                                         in
                                         if
-                                          ~.(open_commitment commitments._1 (d_bj <: t_Slice u8)
+                                          ~.(open_commitment commitments._0 (d_bj <: t_Slice u8)
                                             <:
                                             bool) &&
-                                          ~.(open_commitment commitments._2 (d_bj <: t_Slice u8)
+                                          ~.(open_commitment commitments._1 (d_bj <: t_Slice u8)
                                             <:
                                             bool)
                                         then
