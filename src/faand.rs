@@ -713,7 +713,6 @@ async fn fhaand(
     let h0h1 = fhaand_compute_hashes(delta, i, n, l, xshares, yi, s);
 
     let mut h0h1_j = vec![vec![(false, false); l]; n];
-    // XXX: Would need to avoid the early return here for F* typechecking to succeed.
     for j in 0..n {
         if j == i {
             continue;
@@ -1400,89 +1399,43 @@ fn combine_two_leaky_ands(
 /// This module contains a Rust specification for the triple
 /// computation performed by `flaand`.
 mod spec {
-    /// This function computes step 2a) of Protocol Π_HaAND for a single set of inputs.
-    fn fhaand_compute_hashes(
-        delta: &Delta,
-        i: usize,
-        n: usize,
-        xshare: &Share,
-        yi: &bool,
-        randomness: &[bool],
-    ) -> Vec<(bool, bool)> {
-        let mut hashes = vec![(false, false); n];
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let kixj = xshare.key_for()[j];
-            let hash_kixj = blake3::hash(&kixj.to_le_bytes());
-            let hash_kixj_delta = blake3::hash(&(kixj ^ *delta).to_le_bytes());
-            hashes[j].0 = lsb(hash_kixj.as_bytes()) ^ randomness[j];
-            hashes[j].1 = lsb(hash_kixj_delta.as_bytes()) ^ randomness[j] ^ yi;
-        }
-        hashes
-    }
+    #[requires(Prop::and(
+        (input.len() > 0).into(),
+        forall( |l: usize|
+            implies(
+                0 <= l && l < input.len(),
+                input[l].len() == input[0].len()
+            )
+        )
+    ))]
 
-    fn fhaand_compute_vi(
-        j: usize,
-        n: usize,
-        xshare: &Share,
-        s: &[bool],
-        hashes: &[(bool, bool)],
-    ) -> bool {
-        let mut v = false;
-        for i in 0..n {
-            if i == j {
-                continue;
-            }
-            let mixj = xshare.macs()[i];
-            let unblind_hash = blake3::hash(&mixj.to_le_bytes());
-            let unblinding = lsb(unblind_hash.as_bytes());
-            if xshare.0 {
-                v ^= hashes[i].1 ^ unblinding ^ s[i];
-            } else {
-                v ^= hashes[i].0 ^ unblinding ^ s[i];
-            }
-        }
-        v
-    }
-
-    fn transpose<T: Default + Copy>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    fn transpose<T: Default + Clone>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
         debug_assert!(!input.is_empty() && !input[0].is_empty());
         let column_length = input.len();
         let row_length = input[0].len();
 
         let mut output = vec![vec![T::default(); column_length]; row_length];
         for i in 0..column_length {
+            loop_invariant!(|_: usize| Prop::and(
+                (output.len() == row_length).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < row_length && output.len() == row_length,
+                    output[j].len() == column_length
+                ))
+            ));
             debug_assert!(input[i].len() == row_length);
             for j in 0..row_length {
-                output[j][i] = input[i][j]
+                loop_invariant!(|_: usize| Prop::and(
+                    (output.len() == row_length).into(),
+                    forall(|j: usize| implies(
+                        0 <= j && j < row_length && output.len() == row_length,
+                        output[j].len() == column_length
+                    ))
+                ));
+                output[j][i] = input[i][j].clone()
             }
         }
         output
-    }
-
-    /// This function computes for each party a single authenticated half AND, i.e. v such that
-    fn fhaand_once(
-        delta: Vec<Delta>,
-        n: usize,
-        xshares: &[Share],
-        yis: Vec<bool>,
-        randomness: Vec<Vec<bool>>,
-    ) -> Vec<bool> {
-        let mut hashes = vec![vec![(false, false); n]; n];
-        for i in 0..n {
-            hashes[i] =
-                fhaand_compute_hashes(&delta[i], i, n, &xshares[i], &yis[i], &randomness[i]);
-        }
-
-        let hashes = transpose(hashes);
-
-        let mut vs = vec![false; n];
-        for i in 0..n {
-            vs[i] = fhaand_compute_vi(i, n, &xshares[i], &randomness[i], &hashes[i]);
-        }
-        vs
     }
 
     use super::*;
@@ -1571,7 +1524,17 @@ mod spec {
 
     fn and_relation<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
         state: &[PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+        outputs: &[&[Share]],
     ) -> bool {
+        if outputs.len() != NUM_PARTIES {
+            return false;
+        }
+        for output in outputs {
+            if output.len() != NUM_SHARES {
+                return false;
+            }
+        }
+
         let mut result = true;
         for share in 0..NUM_SHARES {
             let mut x_opening = false;
@@ -1580,63 +1543,88 @@ mod spec {
             for party in 0..NUM_PARTIES {
                 x_opening = x_opening ^ state[party].xshares[share].0;
                 y_opening = y_opening ^ state[party].yshares[share].0;
-                z_opening = z_opening ^ state[party].rshares[share].0;
+                z_opening = z_opening ^ outputs[party][share].0;
             }
             result = result && (x_opening && y_opening == z_opening);
         }
         result
     }
 
-    fn postcondition<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
-        state_before: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
-        state_after: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
+    fn postcondition<const NUM_PARTIES: usize, const NUM_TRIPLES: usize>(
+        state_before: [PartyState<NUM_PARTIES, NUM_TRIPLES>; NUM_PARTIES],
+        outputs: &[&[Share]],
     ) -> bool {
-        if NUM_PARTIES < 2 || NUM_SHARES % 3 != 0 || NUM_SHARES == 0 {
+        if NUM_PARTIES < 2 || NUM_TRIPLES % 3 != 0 || NUM_TRIPLES == 0 {
             return false;
         }
 
         let mut result = true;
         result = result && state_is_authenticated(&state_before);
-        result = result && state_is_authenticated(&state_after);
-        result = result && states_are_consistent(&state_before, &state_after);
-        result = result && and_relation(&state_after);
-
+        result = result && and_relation(&state_before, outputs);
+        for i in 0..NUM_PARTIES {
+            for j in 0..NUM_PARTIES {
+                if i == j {
+                    continue;
+                }
+                for k in 0..NUM_TRIPLES {
+                    let output_share_at_i = &outputs[i][k];
+                    let output_share_at_j = &outputs[j][k];
+                    result = result
+                        && share_is_authenticated(
+                            output_share_at_i,
+                            output_share_at_j,
+                            i,
+                            j,
+                            &state_before[j].delta,
+                        );
+                }
+            }
+        }
         result
     }
 
     /// This functions is the global reference for the "leaky authenticated AND" protocol. It computes
     /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
     /// the XOR of the output values z.
-    #[requires(precondition(state_before))]
-    #[ensures(|result| postcondition(state_before, result))]
-    fn ideal<const NUM_PARTIES: usize, const NUM_SHARES: usize>(
-        state_before: [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES],
-    ) -> [PartyState<NUM_PARTIES, NUM_SHARES>; NUM_PARTIES] {
+    fn ideal<const NUM_PARTIES: usize, const NUM_TRIPLES: usize>(
+        state_before: [PartyState<NUM_PARTIES, NUM_TRIPLES>; NUM_PARTIES],
+    ) -> Vec<Vec<Share>> {
         let mut vis = vec![Vec::new(); NUM_PARTIES]; // every party's vis
         let mut h0h1s = vec![Vec::new(); NUM_PARTIES]; // every party's h0h1s
 
-        // for all parties: fhaand_1
         for i in 0..NUM_PARTIES {
+            loop_invariant!(|_: usize| Prop::and(
+                (h0h1s.len() == NUM_PARTIES).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
+                    h0h1[j].len() == l
+                ))
+            ));
+
+            loop_invariant!(|_: usize| vis.len() == NUM_PARTIES && h0h1s.len() == NUM_PARTIES);
             let party = &state_before[i];
             let yi: Vec<bool> = party.yshares.iter().map(|share| share.0).collect();
             let h0h1 = super::fhaand_compute_hashes(
                 party.delta,
                 i,
                 NUM_PARTIES,
-                NUM_SHARES,
+                NUM_TRIPLES,
                 &party.xshares,
                 yi,
                 &party.randomness,
             );
-            vis[i][..NUM_SHARES].copy_from_slice(&party.randomness);
+            vis[i][..NUM_TRIPLES].copy_from_slice(&party.randomness);
             h0h1s[i] = h0h1;
         }
 
         // send/receive
-
         let mut h0h1_js = vec![Vec::new(); NUM_PARTIES]; // every party's received h0h1s
         for i in 0..NUM_PARTIES {
+            loop_invariant!(|_: usize| h0h1_js.len() == NUM_PARTIES && h0h1s.len() == NUM_PARTIES);
             for j in 0..NUM_PARTIES {
+                loop_invariant!(
+                    |_: usize| h0h1_js.len() == NUM_PARTIES && h0h1s.len() == NUM_PARTIES
+                );
                 if i == j {
                     continue;
                 }
@@ -1646,11 +1634,12 @@ mod spec {
 
         // for all parties: fhaand_2
         for i in 0..NUM_PARTIES {
+            loop_invariant!(|_: usize| vis.len() == NUM_PARTIES);
             let party = &state_before[i];
             super::fhaand_compute_vi(
                 i,
                 NUM_PARTIES,
-                NUM_SHARES,
+                NUM_TRIPLES,
                 &party.xshares,
                 &mut vis[i],
                 &h0h1_js[i],
@@ -1660,7 +1649,6 @@ mod spec {
         // vis should now contain the required vi for every party.
 
         // TODO:
-        // for all parties fhaand2
         // for all parties flaand_1
         // for all parties flaand_2
         // for all parties flaand_3
