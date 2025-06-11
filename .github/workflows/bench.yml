@@ -2,7 +2,7 @@ name: bench
 
 on:
   push:
-    branches: 
+    branches:
       - "main"
   workflow_dispatch:
     inputs:
@@ -17,7 +17,8 @@ on:
 
 jobs:
   benchmarks:
-    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    runs-on: "ubicloud-standard-4-ubuntu-2404"
     env:
       CRITERION_HOME: ${{ github.workspace }}/.criterion_data
     steps:
@@ -30,9 +31,9 @@ jobs:
       - name: CPU information
         run: lscpu
       - name: Cache compilation
-        uses: swatinem/rust-cache@v2
+        uses: ubicloud/rust-cache@v2
       - name: Cache criterion
-        uses: actions/cache@v4
+        uses: ubicloud/cache@v4
         with:
           path: ${{ env.CRITERION_HOME }}
           key: ${{ runner.os }}-${{ runner.arch }}-criterion-data
