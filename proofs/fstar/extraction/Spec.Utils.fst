@@ -1,7 +1,6 @@
 module Spec.Utils
 #set-options "--fuel 0 --ifuel 1 --z3rlimit 15"
 open Core
-open FStar.Mul
 open Polytune.Data_types
 open Polytune.Faand.Spec
 
@@ -94,9 +93,42 @@ val combine_outputs: Alloc.Vec.t_Vec (vec: Alloc.Vec.t_Vec Polytune.Data_types.t
       Alloc.Alloc.t_Global -> bool
 let combine_outputs outputs = xor_bits (List.Tot.Base.map (fun vec -> share_bit (first_share vec)) (Rust_primitives.Arrays.to_list outputs))
 
-val lemma_correctness_first_share 
-  (#num_parties: usize{ v num_parties >= 3 })
-  (#num_triples: usize{ v num_triples >= 1 })
-  (state_before: t_Array (t_PartyState num_parties num_triples) num_parties):
-  Lemma (requires True)
-        (ensures and_inputs state_before == combine_outputs (ideal num_parties num_triples state_before))
+let add_component_wise (x: bool) (ys: list bool) = List.Tot.Base.map (fun y -> x <> y) ys
+
+let rec drop (#a : Type) (l: list a) (n: nat) : list a =
+  match l with
+  | Nil -> Nil
+  | Cons hd tl -> 
+    if n = 0 then tl else Cons hd (drop tl (n-1))
+
+
+let half_and_row (x: bool) (i: nat) (ys: list bool) = add_component_wise x (drop ys i)
+
+let rec count_down (n: nat) =
+  if n = 0 then
+    [0]
+  else
+    Cons n (count_down (n-1))
+
+let count_up n = List.Tot.Base.rev (count_down n)
+
+val half_and_share:
+    (#num_parties: usize{ v num_parties >= 3 })
+    -> (#num_triples: usize{ v num_triples >= 1})
+    -> t_Array (t_PartyState num_parties num_triples) num_parties
+    -> nat
+    -> bool
+
+let half_and_share state party =
+  let x_shares = x_bits state in
+  let y_shares = y_bits state in
+  let enumerated_xshares: list (nat & bool) = map (fun (n: nat) -> (n,  (nth x_shares n))) (count_up (length x_shares)) in
+  enumerated_xshares
+  
+// assume
+// val lemma_fhaand_correctness_first_share 
+//   (#num_parties: usize{ v num_parties >= 3 })
+//   (#num_triples: usize{ v num_triples >= 1 })
+//   (state_before: t_Array (t_PartyState num_parties num_triples) num_parties):
+//   Lemma (requires True)
+//         (ensures and_inputs state_before == combine_outputs (ideal_fhaand num_parties num_triples state_before))

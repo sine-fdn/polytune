@@ -603,6 +603,15 @@ fn lsb(bytes: &[u8]) -> bool {
                                 0 <= ll && ll < l && xshares.len() >= l,
                                 xshares[ll].1.0.len() >= n
                             )))))]
+#[ensures(|result|
+    Prop::and(
+        (result.len() == n).into(),
+        forall(|ll: usize| implies(
+            0 <= ll && ll < n && result.len() == n,
+            result[ll].len() == l
+        )
+        )
+    ))]
 fn fhaand_compute_hashes(
     delta: Delta,
     i: usize,
@@ -1594,31 +1603,36 @@ mod spec {
 
         for i in 0..NUM_PARTIES {
             loop_invariant!(|_: usize| Prop::and(
-                Prop::and(
-                    (h0h1s.len() == NUM_PARTIES).into(),
-                    forall(|j: usize| implies(
-                        0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
-                        Prop::and(
-                            (h0h1s[j].len() == NUM_PARTIES).into(),
-                            forall(|k: usize| implies(
-                                0 <= k && k < NUM_PARTIES && h0h1s[j].len() == NUM_PARTIES,
-                                h0h1s[j][k].len() == NUM_TRIPLES
-                            ))
-                        )
-                    ))
-                ),
-                Prop::and(
-                    (vis.len() == NUM_PARTIES).into(),
-                    forall(|j: usize| implies(
-                        0 <= j && j < NUM_PARTIES && vis.len() == NUM_PARTIES,
-                        vis[j].len() == NUM_TRIPLES
-                    ))
-                )
+                (vis.len() == NUM_PARTIES).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < NUM_PARTIES && vis.len() == NUM_PARTIES,
+                    vis[j].len() == NUM_TRIPLES
+                ))
+            ));
+
+            let party = &state_before[i];
+            vis[i][..NUM_TRIPLES].copy_from_slice(&party.randomness);
+        }
+
+        for i in 0..NUM_PARTIES {
+            loop_invariant!(|_: usize| Prop::and(
+                (h0h1s.len() == NUM_PARTIES).into(),
+                forall(|j: usize| implies(
+                    0 <= j && j < NUM_PARTIES && h0h1s.len() == NUM_PARTIES,
+                    Prop::and(
+                        (h0h1s[j].len() == NUM_PARTIES).into(),
+                        forall(|k: usize| implies(
+                            0 <= k && k < NUM_PARTIES && h0h1s[j].len() == NUM_PARTIES,
+                            h0h1s[j][k].len() == NUM_TRIPLES
+                        ))
+                    )
+                ))
             ));
 
             let party = &state_before[i];
             let yi: Vec<bool> = party.yshares.iter().map(|share| share.0).collect();
-            let h0h1 = super::fhaand_compute_hashes(
+            let h0h1 = vec![vec![(true, true); NUM_TRIPLES]; NUM_PARTIES];
+            super::fhaand_compute_hashes(
                 party.delta,
                 i,
                 NUM_PARTIES,
@@ -1627,11 +1641,9 @@ mod spec {
                 yi,
                 &party.randomness,
             );
-            vis[i][..NUM_TRIPLES].copy_from_slice(&party.randomness);
             h0h1s[i] = h0h1;
         }
 
-        // send/receive
         let mut h0h1_js = vec![vec![vec![(false, false); NUM_TRIPLES]; NUM_PARTIES]; NUM_PARTIES]; // every party's h0h1s
         for i in 0..NUM_PARTIES {
             loop_invariant!(|_: usize| Prop::and(
@@ -1698,7 +1710,6 @@ mod spec {
             }
         }
 
-        // for all parties: fhaand_2
         for i in 0..NUM_PARTIES {
             loop_invariant!(|_: usize| Prop::and(
                 (vis.len() == NUM_PARTIES).into(),
@@ -1720,5 +1731,11 @@ mod spec {
 
         // vis should now contain the required vi for every party.
         vis
+    }
+
+    fn ideal_flaand<const NUM_PARTIES: usize, const NUM_TRIPLES: usize>(
+        state_before: [PartyState<NUM_PARTIES, NUM_TRIPLES>; NUM_PARTIES],
+    ) -> Vec<Vec<Share>> {
+        todo!()
     }
 }
