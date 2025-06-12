@@ -1,10 +1,9 @@
 //! KOS OT extension implementation.
 use crate::swankyot::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender};
 
-use crate::{channel::Channel, faand::Error};
+use crate::{aes_rng::AesRng, block::Block, channel::Channel, faand::Error};
 
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::{AesRng, Block};
 
 /// Transform Block to u128
 pub(crate) fn block_to_u128(inp: Block) -> u128 {

@@ -71,21 +71,35 @@
 //! This implementation provides security against malicious adversaries. The protocol ensures that
 //! no party learns anything beyond what can be inferred from their own inputs and the output of the
 //! computation.
-#![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
+#![deny(clippy::undocumented_unsafe_blocks)]
 
 pub use garble_lang;
 
 pub mod channel;
 pub mod protocol;
 
+// TODO remove this once OT implementations are refactored and we know
+// what parts we need and which not
+#[allow(dead_code)]
+mod aes_hash;
+// TODO remove this once OT implementations are refactored and we know
+// what parts we need and which not
+#[allow(dead_code)]
+mod aes_rng;
 #[cfg(feature = "__bench")]
 #[doc(hidden)]
 pub mod bench_reexports;
+mod block;
 mod data_types;
 mod faand;
 mod fpre;
 mod garble;
 mod ot;
+mod rand_compat;
 mod swankyot;
+// TODO remove this once OT implementations are refactored and we know
+// what parts we need and which not
+#[allow(dead_code)]
+mod utils;
