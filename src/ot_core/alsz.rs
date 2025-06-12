@@ -18,6 +18,7 @@ use crate::{
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
         SemiHonest, Sender as OtSender,
     },
+    transpose,
     utils::xor_inplace,
 };
 
@@ -290,49 +291,11 @@ pub(crate) fn boolvec_to_u8vec(bv: &[bool]) -> Vec<u8> {
     v
 }
 
-#[inline]
-fn get_bit(src: &[u8], i: usize) -> u8 {
-    let byte = src[i / 8];
-    let bit_pos = i % 8;
-    (byte & (1 << bit_pos) != 0) as u8
-}
-
-#[inline]
-fn set_bit(dst: &mut [u8], i: usize, b: u8) {
-    let bit_pos = i % 8;
-    if b == 1 {
-        dst[i / 8] |= 1 << bit_pos;
-    } else {
-        dst[i / 8] &= !(1 << bit_pos);
-    }
-}
-
-#[inline]
-fn transpose_naive_inplace(dst: &mut [u8], src: &[u8], m: usize) {
-    assert_eq!(src.len() % m, 0);
-    let l = src.len() * 8;
-    let n = l / m;
-
-    for i in 0..l {
-        let bit = get_bit(src, i);
-        let (row, col) = (i / m, i % m);
-        set_bit(dst, col * n + row, bit);
-    }
-}
-
-#[inline]
-fn transpose_naive(input: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
-    assert_eq!(nrows % 8, 0);
-    assert_eq!(ncols % 8, 0);
-    assert_eq!(nrows * ncols, input.len() * 8);
-    let mut output = vec![0u8; nrows * ncols / 8];
-
-    transpose_naive_inplace(&mut output, input, ncols);
-    output
-}
-
 /// transpose a matrix of bits
 #[inline]
 pub(crate) fn transpose(m: &[u8], nrows: usize, ncols: usize) -> Vec<u8> {
-    transpose_naive(m, nrows, ncols)
+    let mut output = vec![0; nrows * ncols / 8];
+
+    transpose::transpose_bitmatrix(m, &mut output, nrows);
+    output
 }

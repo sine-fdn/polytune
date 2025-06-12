@@ -2,3 +2,5 @@
 
 heaptrack*.zst
 *.tmp
+# samply output
+*.json.gz
