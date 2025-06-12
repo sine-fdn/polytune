@@ -99,6 +99,7 @@ mod garble;
 mod ot;
 mod ot_core;
 mod rand_compat;
+mod transpose;
 // TODO remove this once OT implementations are refactored and we know
 // what parts we need and which not
 #[allow(dead_code)]

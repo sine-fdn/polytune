@@ -49,6 +49,7 @@ rand = "0.9.1"
 rand_core_0_6 = { package = "rand_core", version = "0.6" }
 rand_chacha = "0.9.0"
 serde = { version = "1.0.195", features = ["derive"] }
+seq-macro = "0.3.6"
 subtle = "2.6.1"
 thiserror = "2.0.12"
 tokio = { version = "1.35.1", features = ["sync", "macros", "rt", "time"] }
@@ -73,6 +74,7 @@ cpufeatures = "0.2.17"
 
 [dev-dependencies]
 criterion = { version = "0.6.0", features = ["async_tokio"] }
+proptest = "1.7.0"
 tokio = { version = "1.35.1", features = ["full"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
@@ -84,3 +86,8 @@ required-features = ["__bench"]
 [package.metadata.cargo-machete]
 # we need the hybrid-array dependency to enable the serde and bytemuck features
 ignored = ["hybrid-array"]
+
+# Use this profile when profiling polytune with e.g. samply or perf
+[profile.debug-release]
+debug = true
+inherits = "release"
