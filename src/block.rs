@@ -312,7 +312,6 @@ impl From<Block> for [u64; 2] {
 impl From<Block> for u128 {
     #[inline]
     fn from(value: Block) -> Self {
-        // todo correct endianness?
         u128::from_ne_bytes(*value.as_bytes())
     }
 }
@@ -320,7 +319,6 @@ impl From<Block> for u128 {
 impl From<&Block> for u128 {
     #[inline]
     fn from(value: &Block) -> Self {
-        // todo correct endianness?
         u128::from_ne_bytes(*value.as_bytes())
     }
 }
