@@ -40,7 +40,7 @@ impl AesHash {
 
     /// Compute the correlation robust hashes of multiple blocks.
     ///
-    /// Calculates `π(x) ^ x`.
+    /// Calculates `π(x) ^ x` and returns the hash.
     ///
     /// Warning: only secure in semi-honest setting!
     /// See <https://eprint.iacr.org/2019/074> for details.
@@ -58,19 +58,19 @@ impl AesHash {
 
     /// Compute the correlation robust hashes of multiple blocks.
     ///
-    /// Calculates `π(x) ^ x`.
+    /// Calculates `π(x) ^ x` and places the result in `out`.
     ///
     /// Warning: only secure in semi-honest setting!
     /// See <https://eprint.iacr.org/2019/074> for details.
     ///
     /// # Panics
-    /// If N != out.len()
+    /// If `N != out.len()`.
     pub fn cr_hash_blocks_b2b<const N: usize>(&self, inp: &[Block; N], out: &mut [Block])
     where
         [Block; N]: Pod,
         [aes::Block; N]: Pod,
     {
-        assert_eq!(N, out.len());
+        assert_eq!(N, out.len(), "inp.len() must be equal to out.len()");
         let inp_aes: &[aes::Block; N] = bytemuck::cast_ref(inp);
         let out_aes: &mut [aes::Block] = bytemuck::cast_slice_mut(out);
         self.aes
@@ -81,13 +81,13 @@ impl AesHash {
 
     /// Correlation robust hash of a slice of blocks.
     ///
-    /// Calculates `π(x) ^ x`.
+    /// Calculates `π(x) ^ x` in-place.
     ///
     /// Warning: only secure in semi-honest setting!
     /// See <https://eprint.iacr.org/2019/074> for details.
     ///
     /// In most cases, this method will be the most performant, as it can make
-    /// use of AES instruction level parallelism.
+    /// use of AES instruction-level parallelism.
     pub fn cr_hash_slice_mut(&self, x: &mut [Block]) {
         let mut tmp = [aes::Block::default(); AES_PAR_BLOCKS];
 
@@ -104,7 +104,7 @@ impl AesHash {
 
     /// Tweakable circular correlation robust hash function.
     ///
-    /// Calculates `π(π(x) ^ tweak) ^ π(x)`.
+    /// Calculates `π(π(x) ^ tweak) ^ π(x)` for a single block.
     ///
     /// See <https://eprint.iacr.org/2019/074> for details. This is the TMMO function.
     pub fn tccr_hash_block(&self, tweak: Block, x: Block) -> Block {
@@ -118,9 +118,12 @@ impl AesHash {
 
     /// Tweakable circular correlation robust hash function.
     ///
-    /// Calculates `π(π(x) ^ tweak(i)) ^ π(x)` where i is the index of the block in x.
+    /// Calculates `π(π(x) ^ tweak(i)) ^ π(x)` in-place where i is the index of the block in x.
     ///
     /// See <https://eprint.iacr.org/2019/074> for details. This is the TMMO function.
+    ///
+    /// This function will likely be more performant than the [`AesHash::tccr_hash_block`]
+    /// as it can make use of AES instruction-level parallelism.
     pub fn tccr_hash_slice_mut(&self, x: &mut [Block], mut tweak_fn: impl FnMut(usize) -> Block) {
         let mut tmp = [aes::Block::default(); AES_PAR_BLOCKS];
         for (chunk_idx, chunk) in x.chunks_mut(AES_PAR_BLOCKS).enumerate() {
@@ -149,6 +152,7 @@ impl AesHash {
 
 /// An `AesHash` with a fixed key.
 pub static FIXED_KEY_HASH: LazyLock<AesHash> = LazyLock::new(|| {
+    // The key was randomly chosen. Any key would be okay.
     let key = 193502124791825095790518994062991136444_u128
         .to_le_bytes()
         .into();
