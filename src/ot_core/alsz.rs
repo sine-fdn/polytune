@@ -14,7 +14,7 @@ use crate::{
     block::Block,
     channel::{recv_vec_from, send_to, Channel},
     faand::Error,
-    swankyot::{
+    ot_core::{
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
         SemiHonest, Sender as OtSender,
     },
