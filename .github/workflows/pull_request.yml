@@ -32,7 +32,7 @@ jobs:
       - run: cargo clippy --all-targets -F __bench -- -Dwarnings
       - run: cargo fmt --check
       - name: Detect unused dependencies
-        uses: bnjbvr/cargo-machete@main
+        uses: bnjbvr/cargo-machete@b54422fa3319b3cac180f6030b663fe57af51635
       - run: cargo build --release && cargo test --release -- --nocapture
         working-directory: ./examples/http-multi-server-channels
       - run: cargo build --release && cargo test --release -- --nocapture
