@@ -41,17 +41,23 @@ impl RngCore for AesRng {
 
     #[inline]
     fn fill_bytes(&mut self, dest: &mut [u8]) {
-        let block_size = mem::size_of::<aes::Block>();
-        let block_len = dest.len() / block_size * block_size;
-        let (block_bytes, rest_bytes) = dest.split_at_mut(block_len);
+        // This method is optimized by first filling dest with whole `aes::Block`s and then delegating
+        // to the BlockRng<AesRngCore>::fill_bytes method which is less efficient as it writes to
+        // dest as u32's
+        const BLOCK_SIZE: usize = mem::size_of::<aes::Block>();
+        let whole_blocks = dest.len() / BLOCK_SIZE;
+        let (block_bytes, rest_bytes) = dest.split_at_mut(whole_blocks * BLOCK_SIZE);
         // fast path so we don't unnecessarily copy u32 from BlockRngCore::generate into
         // dest
         let blocks = bytemuck::cast_slice_mut::<_, aes::Block>(block_bytes);
+        // Chunk the blocks to make use of AES ILP
         for chunk in blocks.chunks_mut(AES_PAR_BLOCKS) {
+            // Write the counter to the block chunks
             for block in chunk.iter_mut() {
                 *block = aes::cipher::Array(self.0.core.state.to_le_bytes());
                 self.0.core.state += 1;
             }
+            // and encrypt it
             self.0.core.aes.encrypt_blocks(chunk);
         }
         // handle the tail
@@ -112,7 +118,9 @@ impl BlockRngCore for AesRngCore {
     // This is equivalent to `[Block; AES_PAR_BLOCKS]`
     type Results = hidden::ParBlockWrapper;
 
-    // Compute `E(state)` nine times, where `state` is a counter.
+    /// Implement the PRG using AES in CTR mode.
+    ///
+    /// Computes `AES_K(state)` nine times, where `state` is an increasing counter.
     #[inline]
     fn generate(&mut self, results: &mut Self::Results) {
         let blocks = bytemuck::cast_slice_mut::<_, aes::Block>(results.as_mut());
@@ -204,7 +212,8 @@ pub const AES_PAR_BLOCKS: usize = 9;
 // https://github.com/RustCrypto/block-ciphers/blob/4da9b802de52a3326fdc74d559caddd57042fed2/aes/src/armv8.rs#L32
 pub const AES_PAR_BLOCKS: usize = 21;
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
-// TODO what should the fallback be?
+// When no AES ILP is available, setting this constant to something higher than 1 might still provide a
+// small performance boost when other code uses this constant to chunk some data (e.g. in the hash_blocks methods).
 pub const AES_PAR_BLOCKS: usize = 4;
 
 #[cfg(all(test, not(miri), target_feature = "aes"))]
