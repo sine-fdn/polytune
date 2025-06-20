@@ -19,9 +19,8 @@ pub(crate) mod kos;
 use curve25519_dalek::RistrettoPoint;
 use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::Block;
 
-use crate::{channel::Channel, faand::Error};
+use crate::{block::Block, channel::Channel, faand::Error};
 
 pub(crate) fn hash_pt(tweak: u128, pt: &RistrettoPoint) -> Block {
     let h = blake3::keyed_hash(pt.compress().as_bytes(), &tweak.to_le_bytes());
@@ -143,3 +142,6 @@ where
         shared_rand: &mut ChaCha20Rng,
     ) -> Result<Vec<Self::Msg>, Error>;
 }
+
+pub(crate) trait SemiHonest {}
+pub(crate) trait Malicious: SemiHonest {}
