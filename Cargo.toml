@@ -52,6 +52,17 @@ curve25519-dalek = { version = "4.1.3", features = ["rand_core"] }
 
 scuttlebutt = { git = "https://github.com/GaloisInc/swanky", rev = "154fa34" }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# For wasm compatibility, we need to enable the getrandom js features
+# currently both of these versions are present in the dependency tree
+# Furthermore RUSTFLAGS needs to be set to
+# RUSTFLAGS='--cfg getrandom_backend="wasm_js"'
+# when compiling for wasm32-unknown-unknown
+getrandom_0_2 = { package = "getrandom", version = "0.2.16", features = ["js"] }
+getrandom_0_3 = { package = "getrandom", version = "0.3", features = [
+    "wasm_js",
+] }
+
 [dev-dependencies]
 criterion = { version = "0.6.0", features = ["async_tokio"] }
 tokio = { version = "1.35.1", features = ["full"] }

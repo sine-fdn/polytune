@@ -21,7 +21,7 @@
 //! data. The channel primarily works with byte vectors, while higher-level send/receive functions
 //! handle serialization and deserialization of application-level messages.
 
-use std::{fmt, future::Future};
+use std::fmt;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
@@ -145,19 +145,24 @@ pub trait Channel {
     type RecvError: fmt::Debug;
 
     /// Sends a message to the party with the given index (must be between `0..participants`).
-    fn send_bytes_to(
+    // We allow the async_fn_in_trait lint because we don't need to place additional bounds on
+    // the returned future. We don't want to enforce returning Send futures as that is not
+    // compatible with the `examples/wasm-http-channels` implementation.
+    #[allow(async_fn_in_trait)]
+    async fn send_bytes_to(
         &mut self,
         party: usize,
         chunk: Vec<u8>,
         info: SendInfo,
-    ) -> impl Future<Output = Result<(), Self::SendError>> + Send;
+    ) -> Result<(), Self::SendError>;
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
-    fn recv_bytes_from(
+    #[allow(async_fn_in_trait)]
+    async fn recv_bytes_from(
         &mut self,
         party: usize,
         info: RecvInfo,
-    ) -> impl Future<Output = Result<Vec<u8>, Self::RecvError>> + Send;
+    ) -> Result<Vec<u8>, Self::RecvError>;
 }
 
 /// Serializes and sends an MPC message to the other party.

@@ -3322,6 +3322,8 @@ dependencies = [
  "criterion",
  "curve25519-dalek",
  "garble_lang",
+ "getrandom 0.2.16",
+ "getrandom 0.3.3",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "scuttlebutt",
@@ -3438,6 +3440,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

@@ -56,6 +56,12 @@ polytune = { path = "../../", version = "0.1.0" }
 reqwest = "0.12.12"
 url = "2.5.4"
 wasm-bindgen = "0.2.100"
+wasm-bindgen-futures = "0.4.50"
+
+[package.metadata.cargo-machete]
+# needed by wasm-bindgen
+ignored = ["wasm-bindgen-futures"]
+
 #
 # to make working on the server a bit less tedious:
 #

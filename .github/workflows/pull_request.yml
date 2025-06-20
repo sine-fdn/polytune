@@ -47,3 +47,11 @@ jobs:
         working-directory: ./examples/sql-integration
       - run: cargo build --release && cargo test --release -- --nocapture
         working-directory: ./examples/api-integration
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@cfe1303741c2e620e5f7daa667105e0da1316db9
+        with:
+          tool: wasm-pack@0.13.1 # install-action will download from github releases and verify the SHA of the binary
+      - run: wasm-pack build --target web
+        working-directory: ./examples/wasm-http-channels
+        env:
+          RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
