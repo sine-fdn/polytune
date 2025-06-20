@@ -43,7 +43,7 @@ impl Block {
     /// Depending on the (runtime) availability of the "pclmulqdq" feature,
     /// this method uses SIMD instructions or a scalar implementation.
     ///
-    /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1.
+    /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1`.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[inline]
     pub fn gf_mul(&self, rhs: &Self) -> Self {
