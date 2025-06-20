@@ -32,7 +32,7 @@ jobs:
       - run: cargo clippy --all-targets -F __bench -- -Dwarnings
       - run: cargo fmt --check
       - name: Install cargo-machete
-        uses: taiki-e/install-action@dd154fff2f898f480894c915c12aa8782e93c71b
+        uses: taiki-e/install-action@d12e869b89167df346dd0ff65da342d1fb1202fb
         with:
           tool: cargo-machete@0.8.0 # install-action checks sha for the binary
       - name: Detect unused dependencies
@@ -48,7 +48,7 @@ jobs:
       - run: cargo build --release && cargo test --release -- --nocapture
         working-directory: ./examples/api-integration
       - name: Install wasm-pack
-        uses: taiki-e/install-action@cfe1303741c2e620e5f7daa667105e0da1316db9
+        uses: taiki-e/install-action@d12e869b89167df346dd0ff65da342d1fb1202fb
         with:
           tool: wasm-pack@0.13.1 # install-action will download from github releases and verify the SHA of the binary
       - run: wasm-pack build --target web
