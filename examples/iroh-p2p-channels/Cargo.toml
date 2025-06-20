@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1.0.79"
 bytes = { version = "1.7", features = ["serde"] }
 clap = { version = "4.4.18", features = ["derive"] }
-iroh = "0.34.0"
+iroh = "0.35.0"
 iroh-gossip = "0.34.1"
 polytune = { path = "../../", version = "0.1.0" }
 serde = { version = "1.0.195", features = ["derive"] }
