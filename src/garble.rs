@@ -75,22 +75,32 @@ fn key_and_nonce(
     (key.into(), nonce.into())
 }
 
-#[test]
-fn encrypt_decrypt() {
-    use rand::random;
+#[cfg(test)]
+mod tests {
+    use rand::random_range;
 
-    let key = GarblingKey {
-        label_x: Label(random()),
-        label_y: Label(random()),
-        w: random(),
-        row: random(),
+    use crate::{
+        data_types::{Label, Mac},
+        garble::{decrypt, encrypt, GarblingKey},
     };
-    let triple = (
-        random(),
-        vec![Mac(random()), Mac(0), Mac(random())],
-        Label(random()),
-    );
-    let encrypted = encrypt(&key, triple.clone()).unwrap();
-    let decrypted = decrypt(&key, &encrypted).unwrap();
-    assert_eq!(triple, decrypted);
+
+    #[test]
+    fn encrypt_decrypt() {
+        use rand::random;
+
+        let key = GarblingKey {
+            label_x: Label(random()),
+            label_y: Label(random()),
+            w: random_range(0..=usize::MAX),
+            row: random(),
+        };
+        let triple = (
+            random(),
+            vec![Mac(random()), Mac(0), Mac(random())],
+            Label(random()),
+        );
+        let encrypted = encrypt(&key, triple.clone()).unwrap();
+        let decrypted = decrypt(&key, &encrypted).unwrap();
+        assert_eq!(triple, decrypted);
+    }
 }

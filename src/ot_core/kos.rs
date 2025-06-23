@@ -7,20 +7,20 @@
 //! messages to reduce the number of communication rounds.
 
 use crate::{
+    block::Block,
     channel::{recv_from, recv_vec_from, send_to, Channel},
     faand::Error,
-    swankyot::{
+    ot_core::{
         alsz::{
             boolvec_to_u8vec, u8vec_to_boolvec, Receiver as AlszReceiver, Sender as AlszSender,
         },
-        CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
-        Sender as OtSender,
+        CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Malicious,
+        Receiver as OtReceiver, SemiHonest, Sender as OtSender,
     },
 };
 
 use rand::{CryptoRng, Rng, RngCore};
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::{Block, Malicious, SemiHonest};
 
 // The statistical security parameter.
 const SSP: usize = 40;
@@ -54,14 +54,14 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
             let q: [u8; 16] = q.try_into().unwrap();
             let q = Block::from(q);
             shared_rand.fill_bytes(chi.as_mut());
-            let [lo, hi] = q.carryless_mul_wide(chi);
+            let (lo, hi) = q.clmul(&chi);
             check = xor_two_blocks(&check, &(lo, hi));
         }
         let (x, t0, t1) = recv_from::<(Block, Block, Block)>(channel, p_to, "KOS_OT_x_t0_t1")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        let [lo, hi] = x.carryless_mul_wide(self.ot.s_);
+        let (lo, hi) = x.clmul(&self.ot.s_);
         let check = xor_two_blocks(&check, &(lo, hi));
         if check != (t0, t1) {
             return Err(Error::KOSConsistencyCheckFailed);
@@ -112,9 +112,9 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> OtSender for Sender<OT> {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
             let q = Block::from(q);
-            let y0 = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ input.0;
+            let y0 = self.ot.hash.tccr_hash_block(Block::from(j as u128), q) ^ input.0;
             let q = q ^ self.ot.s_;
-            let y1 = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ input.1;
+            let y1 = self.ot.hash.tccr_hash_block(Block::from(j as u128), q) ^ input.1;
             y0y1_vec.push((y0, y1));
         }
         send_to(channel, p_to, "KOS_OT_send", &y0y1_vec).await?;
@@ -140,10 +140,10 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> CorrelatedSender for Sender<OT> {
             let q = &qs[j * 16..(j + 1) * 16];
             let q: [u8; 16] = q.try_into().unwrap();
             let q = Block::from(q);
-            let x0 = self.ot.hash.tccr_hash(Block::from(j as u128), q);
+            let x0 = self.ot.hash.tccr_hash_block(Block::from(j as u128), q);
             let x1 = x0 ^ *delta;
             let q = q ^ self.ot.s_;
-            let y = self.ot.hash.tccr_hash(Block::from(j as u128), q) ^ x1;
+            let y = self.ot.hash.tccr_hash_block(Block::from(j as u128), q) ^ x1;
             ys.push(y);
             out.push((x0, x1));
         }
@@ -178,7 +178,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
             let tj = Block::from(tj);
             shared_rand.fill_bytes(chi.as_mut());
             x ^= if xj { chi } else { Block::default() };
-            let [lo, hi] = tj.carryless_mul_wide(chi);
+            let (lo, hi) = tj.clmul(&chi);
             t = xor_two_blocks(&t, &(lo, hi));
         }
         send_to(channel, p_to, "KOS_OT_x_t0_t1", &[(x, t.0, t.1)]).await?;
@@ -222,7 +222,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> OtReceiver for Receiver<OT> {
             let y = y ^ self
                 .ot
                 .hash
-                .tccr_hash(Block::from(j as u128), Block::from(t));
+                .tccr_hash_block(Block::from(j as u128), Block::from(t));
             out.push(y);
         }
         Ok(out)
@@ -251,7 +251,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> CorrelatedReceiver for Receiver<OT> 
             let h = self
                 .ot
                 .hash
-                .tccr_hash(Block::from(j as u128), Block::from(t));
+                .tccr_hash_block(Block::from(j as u128), Block::from(t));
             out.push(y ^ h);
         }
         Ok(out)

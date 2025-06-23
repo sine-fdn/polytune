@@ -1,10 +1,9 @@
 //! KOS OT extension implementation.
-use crate::swankyot::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender};
+use crate::ot_core::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender};
 
-use crate::{channel::Channel, faand::Error};
+use crate::{aes_rng::AesRng, block::Block, channel::Channel, faand::Error};
 
 use rand_chacha::ChaCha20Rng;
-use scuttlebutt::{AesRng, Block};
 
 /// Transform Block to u128
 pub(crate) fn block_to_u128(inp: Block) -> u128 {
@@ -23,7 +22,7 @@ pub(crate) async fn kos_ot_sender(
     shared_rand: &mut ChaCha20Rng,
 ) -> Result<Vec<u128>, Error> {
     let mut rng = AesRng::new();
-    let mut ot = swankyot::KosSender::init(channel, &mut rng, p_to, shared_rand).await?;
+    let mut ot = ot_core::KosSender::init(channel, &mut rng, p_to, shared_rand).await?;
 
     let sender_out_block = ot
         .send_correlated(channel, deltas, &mut rng, p_to, shared_rand)
@@ -42,7 +41,7 @@ pub(crate) async fn kos_ot_receiver(
     shared_rand: &mut ChaCha20Rng,
 ) -> Result<Vec<u128>, Error> {
     let mut rng = AesRng::new();
-    let mut ot = swankyot::KosReceiver::init(channel, &mut rng, p_to, shared_rand).await?;
+    let mut ot = ot_core::KosReceiver::init(channel, &mut rng, p_to, shared_rand).await?;
 
     let recver_out_block = ot
         .recv_correlated(channel, bs, &mut rng, p_to, shared_rand)
