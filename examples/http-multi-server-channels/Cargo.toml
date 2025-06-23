@@ -8,7 +8,7 @@ anyhow = "1.0.79"
 axum = "0.7.4"
 clap = { version = "4.4.18", features = ["derive"] }
 polytune = { path = "../../", version = "0.1.0" }
-reqwest = "0.11.23"
+reqwest = "0.12.20"
 tokio = { version = "1.35.1", features = ["macros", "rt", "rt-multi-thread"] }
 tower-http = { version = "0.5.1", features = ["fs", "trace"] }
 tracing = "0.1.40"
