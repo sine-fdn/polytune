@@ -53,7 +53,7 @@ clap = { version = "4.5.31", features = ["derive"], optional = true }
 # for the client:
 #
 polytune = { path = "../../", version = "0.1.0" }
-reqwest = "0.12.12"
+reqwest = "0.12.20"
 url = "2.5.4"
 wasm-bindgen = "0.2.100"
 wasm-bindgen-futures = "0.4.50"
