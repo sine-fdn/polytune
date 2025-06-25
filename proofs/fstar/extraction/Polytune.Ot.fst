@@ -23,6 +23,7 @@ val kos_ot_sender':
         (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global & Rand_chacha.Chacha.t_ChaCha20Rng)
         Polytune.Swankyot.t_Error)
 
+unfold
 let kos_ot_sender
       (#iimpl_951670863_: Type0)
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i1: Polytune.Channel.t_Channel iimpl_951670863_)
@@ -41,6 +42,7 @@ val kos_ot_receiver':
         (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global & Rand_chacha.Chacha.t_ChaCha20Rng)
         Polytune.Swankyot.t_Error)
 
+unfold
 let kos_ot_receiver
       (#iimpl_951670863_: Type0)
       (#[FStar.Tactics.Typeclasses.tcresolve ()] i1: Polytune.Channel.t_Channel iimpl_951670863_)

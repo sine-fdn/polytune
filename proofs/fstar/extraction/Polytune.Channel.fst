@@ -39,9 +39,9 @@ type t_RecvInfo = {
 /// implementations can be created by enabling the `is_sync` feature.
 class t_Channel (v_Self: Type0) = {
   f_SendError:Type0;
-  f_SendError_5441305247376290671:Core.Fmt.t_Debug f_SendError;
+  f_SendError_4200989935222668608:Core.Fmt.t_Debug f_SendError;
   f_RecvError:Type0;
-  f_RecvError_13876390609517116600:Core.Fmt.t_Debug f_RecvError;
+  f_RecvError_9730327992082288296:Core.Fmt.t_Debug f_RecvError;
   f_send_bytes_to_pre:v_Self -> usize -> Alloc.Vec.t_Vec u8 Alloc.Alloc.t_Global -> t_SendInfo
     -> Type0;
   f_send_bytes_to_post:

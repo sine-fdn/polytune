@@ -3,5 +3,5 @@ module Serde.Ser
 
 class t_Serialize (t_Self:Type) = {
   serialize: t_Self -> t_Self
-  }
+}
 

@@ -1,7 +1,6 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use hax_lib::{forall, implies, loop_invariant, requires, Prop};
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -386,8 +385,15 @@ fn zero_rng() -> ChaCha20Rng {
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
 #[maybe_async(AFIT)]
-#[hax_lib::opaque]
-#[requires(l <= usize::MAX)]
+/*#[hax_lib::ensures(|result: (Vec<Share>, ChaCha20Rng)| 
+    hax_lib::Prop::and(
+        (result.0.len() == l).into(),
+        hax_lib::forall(|ll: usize| hax_lib::implies(
+            ll < l,
+            result.0[ll].1.0.len() == n
+        ))
+    )
+)]*/
 async fn fabitn(
     channel: &mut impl Channel,
     delta: Delta,
@@ -530,7 +536,7 @@ async fn fabitn(
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 
 #[maybe_async(AFIT)]
-#[requires(l <= usize::MAX - RHO)]
+#[hax_lib::requires(l <= usize::MAX - RHO)]
 pub(crate) async fn fashare(
     channel: &mut impl Channel,
     delta: Delta,
@@ -552,12 +558,11 @@ pub(crate) async fn fashare(
     let mut c0_c1_cm = Vec::with_capacity(RHO); // c0, c1, cm
     let mut dmvec: Vec<VectorU8> = Vec::with_capacity(RHO);
 
-    let lprime = l + RHO;
     for r in 0..RHO {
-        loop_invariant!(|_: usize| Prop::and(
-            (xishares.len() == lprime).into(),
-            forall(|ll: usize| implies(
-                0 <= ll && ll < lprime && xishares.len() == lprime,
+        hax_lib::loop_invariant!(|_: usize| hax_lib::Prop::and(
+            (xishares.len() == l + RHO).into(),
+            hax_lib::forall(|ll: usize| hax_lib::implies(
+                l <= ll && ll < l + RHO,
                 xishares[ll].1 .0.len() == n
             ))
         ));
@@ -565,6 +570,14 @@ pub(crate) async fn fashare(
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
         for k in 0..n {
+            hax_lib::loop_invariant!(|_: usize| hax_lib::Prop::and(
+                (xishares.len() == l + RHO).into(),
+                hax_lib::forall(|ll: usize| hax_lib::implies(
+                    l <= ll && ll < l + RHO,
+                    xishares[ll].1 .0.len() == n
+                ))
+            ));
+            //hax_lib::loop_invariant!(|_: usize| xishare.1 .0.len() == n);
             if k == i {
                 continue;
             }
