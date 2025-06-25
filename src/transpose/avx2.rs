@@ -128,7 +128,7 @@ pub fn avx_transpose128x128(in_out: &mut [__m256i; 64]) {
         }
     });
 
-    // Phase 6: swap 64x64 bit-matrices therfore completing the 128x128 bit
+    // Phase 6: swap 64x64 bit-matrices therefore completing the 128x128 bit
     // transpose
     const SHIFT_6: usize = 6;
     const OFFSET_6: usize = 1 << (SHIFT_6 - 1); // 32
@@ -257,9 +257,9 @@ pub fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
             let buf_as_bytes: &[u8] = must_cast_slice(&buf);
 
             if out_stride == 16 {
-                // if the out_stride is 16 bytes, the transposed sub-matrices are in contigous
+                // if the out_stride is 16 bytes, the transposed sub-matrices are in contiguous
                 // memory in the output, so we can use a single copy_from_slice. This is
-                // especially helpfule for the case of transposing a 128xl matrix as done in OT
+                // especially helpful for the case of transposing a 128xl matrix as done in OT
                 // extension.
                 let dst_slice = &mut output
                     [output_offset..output_offset + 16 * 128 * remaining_blocks_in_cache_line];
@@ -286,7 +286,14 @@ pub fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
     }
 }
 
-// Inline never to reduce code size of main method.
+// Inline never to reduce code size of `transpose_bitmatrix` method. This is method is only
+// called once row block if the columns are not divisble by 128. Since this is only rarely
+// executed opposed to the core loop of `transpose_bitmatrix` we annotate it with inline(never)
+// to ensure the optimizer doesn't inline it which could negatively impact performance
+// due to larger code size and potentially more instruction cache misses. This is an assumption
+// and not verified by a benchmark, but even if it were wrong, it shouldn't negatively impact
+// runtime because this method is called rarely in our use cases where we have 128 rows and many
+// columns.
 #[inline(never)]
 #[target_feature(enable = "avx2")]
 #[allow(clippy::too_many_arguments)]
