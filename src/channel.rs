@@ -22,6 +22,8 @@
 //! handle serialization and deserialization of application-level messages.
 
 use std::fmt;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
@@ -150,7 +152,7 @@ pub trait Channel {
     // compatible with the `examples/wasm-http-channels` implementation.
     #[allow(async_fn_in_trait)]
     async fn send_bytes_to(
-        &mut self,
+        &self,
         party: usize,
         chunk: Vec<u8>,
         info: SendInfo,
@@ -269,7 +271,7 @@ pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
     r: Vec<Option<Receiver<Vec<u8>>>>,
     /// The total number of bytes sent over the channel.
-    pub bytes_sent: usize,
+    bytes_sent: AtomicU64,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -285,7 +287,7 @@ impl SimpleChannel {
                 s.push(None);
                 r.push(None);
             }
-            let bytes_sent = 0;
+            let bytes_sent = AtomicU64::new(0);
             channels.push(SimpleChannel { s, r, bytes_sent });
         }
         for a in 0..parties {
@@ -302,6 +304,11 @@ impl SimpleChannel {
             }
         }
         channels
+    }
+
+    /// Returns the total number of bytes sent on this channel.
+    pub fn bytes_sent(&self) -> u64 {
+        self.bytes_sent.load(Ordering::Relaxed)
     }
 }
 
@@ -323,12 +330,13 @@ impl Channel for SimpleChannel {
 
     #[tracing::instrument(level = Level::TRACE, skip(self, msg))]
     async fn send_bytes_to(
-        &mut self,
+        &self,
         p: usize,
         msg: Vec<u8>,
         info: SendInfo,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<Vec<u8>>> {
-        self.bytes_sent += msg.len();
+        self.bytes_sent
+            .fetch_add(msg.len() as u64, Ordering::Relaxed);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         let i = info.sent();
         if i == 1 {

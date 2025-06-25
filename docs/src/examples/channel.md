@@ -34,7 +34,7 @@ trait Channel {
     type RecvError;
 
     async fn send_bytes_to(
-        &mut self,
+        &self,
         p: usize,
         msg: Vec<u8>,
         info: SendInfo,

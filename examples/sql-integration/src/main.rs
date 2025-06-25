@@ -677,7 +677,7 @@ impl Channel for HttpChannel {
     type RecvError = anyhow::Error;
 
     async fn send_bytes_to(
-        &mut self,
+        &self,
         p: usize,
         msg: Vec<u8>,
         info: SendInfo,

@@ -14,7 +14,7 @@ The `SimpleSyncChannel` implements the `Channel` trait from Polytune with the fo
 
 ```rust
 fn send_bytes_to(
-    &mut self,
+    &self,
     p: usize,
     msg: Vec<u8>
     info: SendInfo,

@@ -47,7 +47,7 @@ async fn simulate_mpc_async(
                 Ok(res) => {
                     info!(
                         "Party {p_own} sent {:.2}MB of messages",
-                        channel.bytes_sent as f64 / 1024.0 / 1024.0
+                        channel.bytes_sent() as f64 / 1024.0 / 1024.0
                     );
                     res
                 }
@@ -83,7 +83,7 @@ async fn simulate_mpc_async(
             if !outputs.windows(2).all(|w| w[0] == w[1]) {
                 error!("The result does not match for all output parties: {outputs:?}");
             }
-            let mb = eval_channel.bytes_sent as f64 / 1024.0 / 1024.0;
+            let mb = eval_channel.bytes_sent() as f64 / 1024.0 / 1024.0;
             info!("Party {p_eval} sent {mb:.2}MB of messages");
             info!("MPC simulation finished successfully!");
             Ok(outputs.pop().unwrap_or_default())
