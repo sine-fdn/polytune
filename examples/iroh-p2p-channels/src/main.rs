@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
 
     // configure our relay map
     let relay_mode = match args.relay {
-        Some(url) => RelayMode::Custom(RelayMap::from_url(url)),
+        Some(url) => RelayMode::Custom(RelayMap::from(url)),
         None => RelayMode::Default,
     };
 
@@ -131,8 +131,7 @@ async fn main() -> Result<()> {
     // setup router
     let router = iroh::protocol::Router::builder(endpoint.clone())
         .accept(GOSSIP_ALPN, gossip.clone())
-        .spawn()
-        .await?;
+        .spawn();
 
     // join the gossip topic by connecting to known peers, if any
     let peer_ids = peers.iter().map(|p| p.node_id).collect();
