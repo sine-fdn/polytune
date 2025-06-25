@@ -25,23 +25,59 @@ pub fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
         "Number of bitmatrix columns must be divisable by 8. columns: {cols}"
     );
 
+    // Transpose a matrix by splitting it into 16x8 blocks (=16 bytes which can be one SSE2 128
+    // bit vector depending on target support), write transposed block into output at the transposed
+    // position and continue with next block.
+
     let mut row: usize = 0;
     while row <= rows - 16 {
         let mut col = 0;
         while col < cols {
+            // Load 16x8 sub-block by loading (row + 0, col) .. (row + 15, col)
             let mut v = load_bytes(input, row, col, cols);
-            // reverse iterator because we start writing the msb of each byte, then shift
-            // left for i = 0, we write the previous lsb
-            for i in (0..8).rev() {
+            // The ideas is to take the most significant bit of each row of the sub-block (msb of each byte)
+            // and write these 16 bits coming from 16 rows and one column in the input to the correct row and
+            // columns in the output. Because the `move_mask` instruction gives us the `msb` of each byte (=row)
+            // in our input, we iterate the output_row_offset from large to small. After each iteration, we
+            // shift each byte in the sub-block one bit to the left and then again get the msb of each byte and
+            // write it to the next row.
+            // Visualization done by Claude 4 Sonnet:
+            // ┌─────────────────────────────────────────────────────────────┐
+            // │              BIT MATRIX TRANSPOSE: 16x8 BLOCK               │
+            // ├─────────────────────────────────────────────────────────────┤
+            // │                                                             │
+            // │  INPUT (16×8)              OUTPUT (8×16)                    │
+            // │                                                             │
+            // │    0 1 ⋯ 6 7                 0 1 ⋯ E F                      │
+            // │  0 ◆|◇|⋯|▲|△               0 ◆|◆|⋯|◆|◆                      │
+            // │  1 ◆|◇|⋯|▲|△               1 ◇|◇|⋯|◇|◇                      │
+            // │  ⋮                         ⋮                              │
+            // │  E ◆|◇|⋯|▲|△               6 ▲|▲|⋯|▲|▲                      │
+            // │  F ◆|◇|⋯|▲|△               7 △|△|⋯|△|△                      │
+            // │                                                             │
+            // │  MOVE_MASK: Extract column bits → Write as rows             │
+            // │                                                             │
+            // │  Iter 0: MSB column 7 → output row 7                        │
+            // │  Iter 1: << 1, MSB → output row 6                           │
+            // │  ⋮                                                         │
+            // │  Iter 7: << 7, MSB → output row 0                           │
+            // │                                                             │
+            // │  INPUT[row,col] → OUTPUT[col,row]                           │
+            // │                                                             │
+            // └─────────────────────────────────────────────────────────────┘
+            for output_row_offset in (0..8).rev() {
                 // get msb of each byte
                 let msbs = v.move_mask().to_le_bytes();
                 // write msbs to output at transposed position
-                let idx = out(row, col + i, rows) as isize;
+                let idx = out(row, col + output_row_offset, rows) as isize;
                 // This should result in only one bounds check for the output
                 let out_bytes = &mut output[idx as usize..idx as usize + 2];
                 out_bytes[0] = msbs[0];
                 out_bytes[1] = msbs[1];
 
+                // There is no shift impl for i8x16 so we cast to i64x2 and shift these.
+                // The bits shifted to neighbouring bytes are ignored because we iterate
+                // and call move_mask 8 times.
                 let v: &mut i64x2 = bytemuck::must_cast_mut(&mut v);
                 // shift each byte by one to the left (by shifting it as two i64)
                 *v = *v << 1;
