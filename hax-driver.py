@@ -74,12 +74,9 @@ cargo_hax_into = [
 extraction_targets = [
     "-i",
     " ".join(["-**",
-    "+**::faand::fhaand_1",
-    "+**::faand::fhaand_2",
-    "+**::faand::flaand_1",
-    "+**::faand::flaand_2",
-    "+**::faand::flaand_3",
-    "+**::faand::spec::ideal_fhaand",
+    "+**::faand::spec::share_is_authenticated",
+    "+**::faand::lemma_compute_ts_pointwise",
+    "+**::data::lemma_compute_ts_pointwise",
     ])
 ]
 

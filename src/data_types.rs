@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Delta(pub(crate) u128);
 
+impl From<Delta> for u128 {
+    fn from(value: Delta) -> Self {
+        value.0
+    }
+}
+
 impl BitAnd<Delta> for bool {
     type Output = Delta;
 
@@ -40,9 +46,9 @@ impl BitXor for Mac {
     }
 }
 
-impl Mac {
-    pub(crate) fn to_le_bytes(&self) -> [u8; 16] {
-        self.0.to_le_bytes()
+impl From<Mac> for u128 {
+    fn from(value: Mac) -> Self {
+        value.0
     }
 }
 
@@ -50,6 +56,11 @@ impl Mac {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Key(pub(crate) u128);
 
+impl From<Key> for u128 {
+    fn from(value: Key) -> Self {
+        value.0
+    }
+}
 impl BitXor<Delta> for Key {
     type Output = Mac;
 
@@ -90,6 +101,16 @@ impl BitXor for &Share {
     }
 }
 
+#[hax_lib::requires(share.1.keys().len() > party)]
+pub(crate) fn key_for(share: &Share, party: usize) -> Key {
+    share.1.keys()[party]
+}
+
+#[hax_lib::requires(share.1.macs().len() > party)]
+pub(crate) fn mac_by(share: &Share, party: usize) -> Mac {
+    share.1.macs()[party]
+}
+
 impl Share {
     pub(crate) fn bit(&self) -> bool {
         self.0
@@ -101,9 +122,6 @@ impl Share {
 
     pub(crate) fn xor_keys(&self) -> Key {
         self.1.xor_keys()
-    }
-    pub(crate) fn key_for(&self) -> Vec<Key> {
-        self.1.keys()
     }
 }
 
