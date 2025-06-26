@@ -374,6 +374,12 @@ fn zero_rng() -> ChaCha20Rng {
     ChaCha20Rng::from_seed([0u8; 32])
 }
 
+#[hax_lib::opaque]
+#[inline]
+fn query_shared_rng(rng: &mut ChaCha20Rng) -> bool {
+    rng.gen()
+}
+
 /// Protocol PI_aBit^n that performs F_aBit^n from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
@@ -441,7 +447,7 @@ async fn fabitn(
     for _ in 0..three_rho {
         let mut inner = Vec::with_capacity(lprime);
         for _ in 0..lprime {
-            inner.push(multi_shared_rand.gen());
+            inner.push(query_shared_rng(&mut multi_shared_rand));
         }
         r.push(inner);
     }
