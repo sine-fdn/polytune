@@ -19,7 +19,7 @@ The following example shows how to implement a `Channel` trait using HTTP commun
 struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
-    recv: Vec<Receiver<Vec<u8>>>,
+    recv: Vec<Mutex<Receiver<Vec<u8>>>>,
 }
 
 impl HttpChannel {
@@ -59,15 +59,13 @@ impl Channel for HttpChannel {
         }
     }
 
-    async fn recv_bytes_from(
-        &mut self,
-        p: usize,
-        _info: RecvInfo,
-    ) -> Result<Vec<u8>, Self::RecvError> {
-        Ok(timeout(Duration::from_secs(1), self.recv[p].recv())
+    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
+        let mut r = self.recv[p].lock().await;
+        Ok(timeout(Duration::from_secs(1), r.recv())
             .await
             .context("recv_bytes_from({p})")?
             .unwrap_or_default())
     }
 }
+
 ```
