@@ -397,7 +397,7 @@ fn random_bool() -> bool {
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
 #[maybe_async(AFIT)]
-/*#[hax_lib::ensures(|result: (Vec<Share>, ChaCha20Rng)| 
+/*#[hax_lib::ensures(|result: (Vec<Share>, ChaCha20Rng)|
     hax_lib::Prop::and(
         (result.0.len() == l).into(),
         hax_lib::forall(|ll: usize| hax_lib::implies(
@@ -508,7 +508,6 @@ async fn fabitn(
             }
         }
     }
-    drop(r);
 
     // Step 4) Return the first l objects.
     x.truncate(l);
