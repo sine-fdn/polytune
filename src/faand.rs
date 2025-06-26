@@ -380,6 +380,12 @@ fn query_shared_rng(rng: &mut ChaCha20Rng) -> bool {
     rng.gen()
 }
 
+#[hax_lib::opaque]
+#[inline]
+fn random_bool() -> bool {
+    random()
+}
+
 /// Protocol PI_aBit^n that performs F_aBit^n from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
@@ -412,7 +418,7 @@ async fn fabitn(
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
 
-    let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
+    let mut x: Vec<bool> = (0..lprime).map(|_| random_bool()).collect();
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
     let mut keys = vec![vec![0; lprime]; n];
