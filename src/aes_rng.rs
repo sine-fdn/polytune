@@ -183,19 +183,6 @@ impl From<AesRngCore> for AesRng {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_generate() {
-        let mut rng = AesRng::new();
-        let a = rng.random::<[Block; 8]>();
-        let b = rng.random::<[Block; 8]>();
-        assert_ne!(a, b);
-    }
-}
-
 /// Number of Blocks for which hardware accelerated AES can make use of ILP.
 ///
 /// This corresponds to `ParBlocksSize` in [`aes::cipher::ParBlocksSizeUser`]
@@ -215,6 +202,19 @@ pub const AES_PAR_BLOCKS: usize = 21;
 // When no AES ILP is available, setting this constant to something higher than 1 might still provide a
 // small performance boost when other code uses this constant to chunk some data (e.g. in the hash_blocks methods).
 pub const AES_PAR_BLOCKS: usize = 4;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate() {
+        let mut rng = AesRng::new();
+        let a = rng.random::<[Block; 8]>();
+        let b = rng.random::<[Block; 8]>();
+        assert_ne!(a, b);
+    }
+}
 
 #[cfg(all(test, not(miri), target_feature = "aes"))]
 mod aes_par_blocks_tests {
