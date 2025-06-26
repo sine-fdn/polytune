@@ -15,7 +15,10 @@ use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
 use tokio::{
     fs,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Mutex,
+    },
     time::{sleep, timeout},
 };
 use tower_http::trace::TraceLayer;
@@ -59,7 +62,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn serve(port: u16, parties: usize) -> Result<Vec<Receiver<Vec<u8>>>, Error> {
+async fn serve(port: u16, parties: usize) -> Result<Vec<Mutex<Receiver<Vec<u8>>>>, Error> {
     tracing_subscriber::fmt::init();
 
     let mut senders = vec![];
@@ -67,7 +70,7 @@ async fn serve(port: u16, parties: usize) -> Result<Vec<Receiver<Vec<u8>>>, Erro
     for _ in 0..parties {
         let (s, r) = channel(1);
         senders.push(s);
-        receivers.push(r);
+        receivers.push(Mutex::new(r));
     }
 
     let app = Router::new()
@@ -90,7 +93,7 @@ async fn msg(State(senders): State<Vec<Sender<Vec<u8>>>>, Path(from): Path<u32>,
 struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
-    recv: Vec<Receiver<Vec<u8>>>,
+    recv: Vec<Mutex<Receiver<Vec<u8>>>>,
 }
 
 impl HttpChannel {
@@ -131,7 +134,8 @@ impl Channel for HttpChannel {
     }
 
     async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
-        Ok(timeout(Duration::from_secs(1), self.recv[p].recv())
+        let mut r = self.recv[p].lock().await;
+        Ok(timeout(Duration::from_secs(1), r.recv())
             .await
             .context("recv_bytes_from({p})")?
             .unwrap_or_default())
