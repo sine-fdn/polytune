@@ -26,7 +26,7 @@ impl Channel for PollingHttpChannel {
     type RecvError = HttpChannelError;
 
     async fn send_bytes_to(
-        &mut self,
+        &self,
         p: usize,
         msg: Vec<u8>,
         _info: SendInfo,
