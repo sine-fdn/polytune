@@ -27,7 +27,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Mutex,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use tracing::{trace, Level};
 
@@ -269,7 +272,7 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
 #[doc(hidden)]
 pub struct SimpleChannel {
     s: Vec<Option<Sender<Vec<u8>>>>,
-    r: Vec<Option<Receiver<Vec<u8>>>>,
+    r: Vec<Option<Mutex<Receiver<Vec<u8>>>>>,
     /// The total number of bytes sent over the channel.
     bytes_sent: AtomicU64,
 }
@@ -299,8 +302,8 @@ impl SimpleChannel {
                 let (send_b_to_a, recv_b_to_a) = channel(buffer_capacity);
                 channels[a].s[b] = Some(send_a_to_b);
                 channels[b].s[a] = Some(send_b_to_a);
-                channels[a].r[b] = Some(recv_b_to_a);
-                channels[b].r[a] = Some(recv_a_to_b);
+                channels[a].r[b] = Some(Mutex::new(recv_b_to_a));
+                channels[b].r[a] = Some(Mutex::new(recv_a_to_b));
             }
         }
         channels
@@ -353,10 +356,12 @@ impl Channel for SimpleChannel {
 
     #[tracing::instrument(level = Level::TRACE, skip(self), fields(info = ?_info))]
     async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, AsyncRecvError> {
-        let chunk = self.r[p]
-            .as_mut()
+        let mut r = self.r[p]
+            .as_ref()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
-            .recv();
+            .lock()
+            .await;
+        let chunk = r.recv();
         match tokio::time::timeout(std::time::Duration::from_secs(10 * 60), chunk).await {
             Ok(Some(chunk)) => {
                 let mb = chunk.len() as f64 / 1024.0 / 1024.0;
