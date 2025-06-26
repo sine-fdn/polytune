@@ -203,11 +203,7 @@ impl Channel for IrohChannel {
         Ok(())
     }
 
-    async fn recv_bytes_from(
-        &mut self,
-        p: usize,
-        _info: RecvInfo,
-    ) -> Result<Vec<u8>, Self::RecvError> {
+    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
         tracing::info!("receiving message from {p}");
         if let Some(msgs) = self.received_msgs.get_mut(&p) {
             if let Some(msg) = msgs.pop_front() {

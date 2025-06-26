@@ -74,7 +74,7 @@ impl Channel for PollingHttpChannel {
     }
 
     async fn recv_bytes_from(
-        &mut self,
+        &self,
         p: usize,
         _info: RecvInfo,
     ) -> Result<Vec<u8>, HttpChannelError> {

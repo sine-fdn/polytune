@@ -161,7 +161,7 @@ pub trait Channel {
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
     async fn recv_bytes_from(
-        &mut self,
+        &self,
         party: usize,
         info: RecvInfo,
     ) -> Result<Vec<u8>, Self::RecvError>;
@@ -352,11 +352,7 @@ impl Channel for SimpleChannel {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), fields(info = ?_info))]
-    async fn recv_bytes_from(
-        &mut self,
-        p: usize,
-        _info: RecvInfo,
-    ) -> Result<Vec<u8>, AsyncRecvError> {
+    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, AsyncRecvError> {
         let chunk = self.r[p]
             .as_mut()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))

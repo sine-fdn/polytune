@@ -83,11 +83,7 @@ impl Channel for HttpChannel {
         return Err(format!("Could not reach {url}"));
     }
 
-    async fn recv_bytes_from(
-        &mut self,
-        p: usize,
-        _info: RecvInfo,
-    ) -> Result<Vec<u8>, Self::RecvError> {
+    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
         let client = reqwest::Client::new();
         let url = format!("{}recv/{}/{}", self.url, self.party, p);
         for _ in 0..50 {

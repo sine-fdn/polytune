@@ -41,7 +41,7 @@ trait Channel {
     ) -> Result<(), Self::SendError>;
 
     async fn recv_bytes_from(
-        &mut self,
+        &self,
         p: usize,
         info: RecvInfo,
     ) -> Result<Vec<u8>, Self::RecvError>;
