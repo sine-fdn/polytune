@@ -545,7 +545,7 @@ async fn execute_mpc(
         for _ in 0..policy.participants.len() {
             let (s, r) = channel(1);
             state.senders.push(s);
-            receivers.push(r);
+            receivers.push(Mutex::new(r));
         }
 
         HttpChannel {
@@ -669,7 +669,7 @@ async fn msg(State((_, state)): State<(Policy, MpcState)>, Path(from): Path<u32>
 struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
-    recv: Vec<Receiver<Vec<u8>>>,
+    recv: Vec<Mutex<Receiver<Vec<u8>>>>,
 }
 
 impl Channel for HttpChannel {
@@ -716,7 +716,8 @@ impl Channel for HttpChannel {
     }
 
     async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
-        timeout(Duration::from_secs(30 * 60), self.recv[p].recv())
+        let mut r = self.recv[p].lock().await;
+        timeout(Duration::from_secs(30 * 60), r.recv())
             .await
             .context(format!("recv_bytes_from(p = {p})"))?
             .ok_or_else(|| anyhow!("Expected a message, but received `None`!"))
