@@ -11,8 +11,8 @@ The core part of the example is the `IrohChannel`, which implements Polytune's `
 ```rust
 struct IrohChannel {
     sender: GossipSender,
-    receiver: GossipReceiver,
-    received_msgs: HashMap<usize, VecDeque<Vec<u8>>>,
+    receiver: tokio::sync::Mutex<GossipReceiver>,
+    received_msgs: Mutex<HashMap<usize, VecDeque<Vec<u8>>>>,
     party: usize,
 }
 
@@ -37,20 +37,22 @@ impl Channel for IrohChannel {
         Ok(())
     }
 
-    async fn recv_bytes_from(
-        &mut self,
-        p: usize,
-        _info: RecvInfo,
-    ) -> Result<Vec<u8>, Self::RecvError> {
+    // TODO this implementation seems really dubious to me... I'm really not sure if it behaves
+    //  correctly in edge-cases
+    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
         tracing::info!("receiving message from {p}");
-        if let Some(msgs) = self.received_msgs.get_mut(&p) {
-            if let Some(msg) = msgs.pop_front() {
-                tracing::info!("found stored message from {p}");
-                return Ok(msg);
+        {
+            let mut msgs_lock = self.received_msgs.lock().expect("poisoned");
+            if let Some(msgs) = msgs_lock.get_mut(&p) {
+                if let Some(msg) = msgs.pop_front() {
+                    tracing::info!("found stored message from {p}");
+                    return Ok(msg);
+                }
             }
         }
         tracing::info!("could not find stored message, waiting for message...");
-        while let Some(event) = self.receiver.try_next().await? {
+        let mut receiver = self.receiver.lock().await;
+        while let Some(event) = receiver.try_next().await? {
             if let Event::Gossip(GossipEvent::Received(msg)) = event {
                 let msg: Message = postcard::from_bytes(&msg.content)?;
                 if msg.to_party == self.party {
@@ -64,6 +66,8 @@ impl Channel for IrohChannel {
                             msg.from_party,
                         );
                         self.received_msgs
+                            .lock()
+                            .expect("poisoned")
                             .entry(msg.from_party)
                             .or_default()
                             .push_back(msg.data);

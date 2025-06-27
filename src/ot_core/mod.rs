@@ -47,7 +47,7 @@ where
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
@@ -55,7 +55,7 @@ where
     /// Sends messages.
     async fn send<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[(Self::Msg, Self::Msg)],
         rng: &mut RNG,
         p_to: usize,
@@ -71,7 +71,7 @@ where
     /// Runs any one-time initialization to create the oblivious transfer
     /// object with a fixed key.
     async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         s_: [u8; 16],
         rng: &mut RNG,
         p_to: usize,
@@ -91,7 +91,7 @@ where
     /// Runs any one-time initialization to create the oblivious transfer
     /// object.
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
@@ -99,7 +99,7 @@ where
     /// Receives messages.
     async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
@@ -118,7 +118,7 @@ where
     /// which specifies the offset between the zero and one message.
     async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         deltas: &[Self::Msg],
         rng: &mut RNG,
         p_to: usize,
@@ -135,7 +135,7 @@ where
     /// Correlated oblivious transfer receive.
     async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[bool],
         rng: &mut RNG,
         p_to: usize,
