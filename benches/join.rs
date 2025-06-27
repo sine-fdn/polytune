@@ -24,18 +24,18 @@ async fn simulate_mpc_async(
     let channels = channel::SimpleChannel::channels(inputs.len());
 
     let mut parties = channels.into_iter().zip(inputs).enumerate();
-    let Some((_, (mut eval_channel, inputs))) = parties.next() else {
+    let Some((_, (eval_channel, inputs))) = parties.next() else {
         return Ok(vec![]);
     };
 
     let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
-    for (p_own, (mut channel, inputs)) in parties {
+    for (p_own, (channel, inputs)) in parties {
         let circuit = circuit.clone();
         let inputs = inputs.to_vec();
         let output_parties = output_parties.to_vec();
         computation.spawn(async move {
             match mpc(
-                &mut channel,
+                &channel,
                 &circuit,
                 &inputs,
                 p_eval,
@@ -59,7 +59,7 @@ async fn simulate_mpc_async(
         });
     }
     let eval_result = mpc(
-        &mut eval_channel,
+        &eval_channel,
         circuit,
         inputs,
         p_eval,

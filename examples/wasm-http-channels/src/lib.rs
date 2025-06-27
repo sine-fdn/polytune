@@ -26,8 +26,8 @@ pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Resul
         .map_err(|e| format!("Invalid i32 input: {e}"))?
         .as_bits();
     let p_out = vec![0, 1, 2];
-    let mut channel = HttpChannel::new(url, party).await?;
-    let output = mpc(&mut channel, &prg.circuit, &input, 0, party, &p_out)
+    let channel = HttpChannel::new(url, party).await?;
+    let output = mpc(&channel, &prg.circuit, &input, 0, party, &p_out)
         .await
         .map_err(|e| format!("MPC computation failed: {e}"))?;
     let output = prg

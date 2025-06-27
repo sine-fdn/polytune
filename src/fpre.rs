@@ -45,7 +45,7 @@ impl From<channel::Error> for Error {
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
 #[allow(dead_code)]
-pub(crate) async fn fpre(channel: &mut (impl Channel + Send), parties: usize) -> Result<(), Error> {
+pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Result<(), Error> {
     for p in 0..parties {
         recv_from::<()>(channel, p, "delta (fpre)").await?;
     }
@@ -206,32 +206,32 @@ mod tests {
     async fn xor_homomorphic_mac() -> Result<(), Error> {
         let parties = 2;
         let mut channels = SimpleChannel::channels(parties + 1);
-        let mut channel = channels.pop().unwrap();
-        tokio::spawn(async move { fpre(&mut channel, parties).await });
+        let channel = channels.pop().unwrap();
+        tokio::spawn(async move { fpre(&channel, parties).await });
         let fpre_party = parties;
-        let mut b = channels.pop().unwrap();
-        let mut a = channels.pop().unwrap();
+        let b = channels.pop().unwrap();
+        let a = channels.pop().unwrap();
 
         // init:
-        send_to::<()>(&mut a, fpre_party, "delta", &[]).await?;
-        send_to::<()>(&mut b, fpre_party, "delta", &[]).await?;
-        let delta_a: Delta = recv_from(&mut a, fpre_party, "delta")
+        send_to::<()>(&a, fpre_party, "delta", &[]).await?;
+        send_to::<()>(&b, fpre_party, "delta", &[]).await?;
+        let delta_a: Delta = recv_from(&a, fpre_party, "delta")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
-        let delta_b: Delta = recv_from(&mut b, fpre_party, "delta")
+        let delta_b: Delta = recv_from(&b, fpre_party, "delta")
             .await?
             .pop()
             .ok_or(Error::EmptyMsg)?;
 
         // random r1, r2, s1, s2:
-        send_to(&mut a, fpre_party, "random shares", &[2_u32]).await?;
-        send_to(&mut b, fpre_party, "random shares", &[2_u32]).await?;
+        send_to(&a, fpre_party, "random shares", &[2_u32]).await?;
+        send_to(&b, fpre_party, "random shares", &[2_u32]).await?;
 
-        let mut r = recv_vec_from(&mut a, fpre_party, "random shares", 2)
+        let mut r = recv_vec_from(&a, fpre_party, "random shares", 2)
             .await?
             .into_iter();
-        let mut s = recv_vec_from(&mut b, fpre_party, "random shares", 2)
+        let mut s = recv_vec_from(&b, fpre_party, "random shares", 2)
             .await?
             .into_iter();
 
@@ -267,32 +267,32 @@ mod tests {
         for i in 0..3 {
             let parties = 2;
             let mut channels = SimpleChannel::channels(parties + 1);
-            let mut channel = channels.pop().unwrap();
-            tokio::spawn(async move { fpre(&mut channel, parties).await });
+            let channel = channels.pop().unwrap();
+            tokio::spawn(async move { fpre(&channel, parties).await });
             let fpre_party = parties;
-            let mut b = channels.pop().unwrap();
-            let mut a = channels.pop().unwrap();
+            let b = channels.pop().unwrap();
+            let a = channels.pop().unwrap();
 
             // init:
-            send_to::<()>(&mut a, fpre_party, "delta", &[]).await?;
-            send_to::<()>(&mut b, fpre_party, "delta", &[]).await?;
-            let delta_a: Delta = recv_from(&mut a, fpre_party, "delta")
+            send_to::<()>(&a, fpre_party, "delta", &[]).await?;
+            send_to::<()>(&b, fpre_party, "delta", &[]).await?;
+            let delta_a: Delta = recv_from(&a, fpre_party, "delta")
                 .await?
                 .pop()
                 .ok_or(Error::EmptyMsg)?;
-            let delta_b: Delta = recv_from(&mut b, fpre_party, "delta")
+            let delta_b: Delta = recv_from(&b, fpre_party, "delta")
                 .await?
                 .pop()
                 .ok_or(Error::EmptyMsg)?;
 
             // random r1, r2, s1, s2:
-            send_to(&mut a, fpre_party, "random shares", &[2_u32]).await?;
-            send_to(&mut b, fpre_party, "random shares", &[2_u32]).await?;
+            send_to(&a, fpre_party, "random shares", &[2_u32]).await?;
+            send_to(&b, fpre_party, "random shares", &[2_u32]).await?;
 
-            let mut r = recv_vec_from::<Share>(&mut a, fpre_party, "random shares", 2)
+            let mut r = recv_vec_from::<Share>(&a, fpre_party, "random shares", 2)
                 .await?
                 .into_iter();
-            let mut s = recv_vec_from::<Share>(&mut b, fpre_party, "random shares", 2)
+            let mut s = recv_vec_from::<Share>(&b, fpre_party, "random shares", 2)
                 .await?
                 .into_iter();
 
@@ -305,15 +305,15 @@ mod tests {
 
             if i == 0 {
                 // uncorrupted authenticated (r1 XOR s1) AND (r2 XOR s2):
-                send_to(&mut a, fpre_party, "AND shares", &[(auth_r1, auth_r2)]).await?;
-                send_to(&mut b, fpre_party, "AND shares", &[(auth_s1, auth_s2)]).await?;
+                send_to(&a, fpre_party, "AND shares", &[(auth_r1, auth_r2)]).await?;
+                send_to(&b, fpre_party, "AND shares", &[(auth_s1, auth_s2)]).await?;
                 let Share(r3, Auth(mac_r3_key_s3)) =
-                    recv_from::<Share>(&mut a, fpre_party, "AND shares")
+                    recv_from::<Share>(&a, fpre_party, "AND shares")
                         .await?
                         .pop()
                         .unwrap();
                 let Share(s3, Auth(mac_s3_key_r3)) =
-                    recv_from::<Share>(&mut b, fpre_party, "AND shares")
+                    recv_from::<Share>(&b, fpre_party, "AND shares")
                         .await?
                         .pop()
                         .unwrap();
@@ -326,19 +326,19 @@ mod tests {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
                 let auth_r1_corrupted = Share(!r1, Auth(vec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
                 send_to(
-                    &mut a,
+                    &a,
                     fpre_party,
                     "AND shares",
                     &[(auth_r1_corrupted, auth_r2)],
                 )
                 .await?;
-                send_to(&mut b, fpre_party, "AND shares", &[(auth_s1, auth_s2)]).await?;
+                send_to(&b, fpre_party, "AND shares", &[(auth_s1, auth_s2)]).await?;
                 assert_eq!(
-                    recv_from::<String>(&mut a, fpre_party, "AND shares").await?,
+                    recv_from::<String>(&a, fpre_party, "AND shares").await?,
                     vec!["CheatingDetected".to_string()]
                 );
                 assert_eq!(
-                    recv_from::<String>(&mut b, fpre_party, "AND shares").await?,
+                    recv_from::<String>(&b, fpre_party, "AND shares").await?,
                     vec!["CheatingDetected".to_string()]
                 );
             } else if i == 2 {
@@ -349,21 +349,21 @@ mod tests {
                     Auth(vec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]),
                 );
                 send_to(
-                    &mut a,
+                    &a,
                     fpre_party,
                     "AND shares",
                     &[(auth_r1_corrupted, auth_r2)],
                 )
                 .await?;
-                send_to(&mut b, fpre_party, "AND shares", &[(auth_s1, auth_s2)]).await?;
+                send_to(&b, fpre_party, "AND shares", &[(auth_s1, auth_s2)]).await?;
                 assert_eq!(
-                    recv_from::<Share>(&mut a, fpre_party, "AND shares")
+                    recv_from::<Share>(&a, fpre_party, "AND shares")
                         .await?
                         .len(),
                     1
                 );
                 assert_eq!(
-                    recv_from::<Share>(&mut b, fpre_party, "AND shares")
+                    recv_from::<Share>(&b, fpre_party, "AND shares")
                         .await?
                         .len(),
                     1
@@ -414,24 +414,24 @@ mod tests {
 
         let mut channels: Vec<SimpleChannel>;
         channels = SimpleChannel::channels(inputs.len() + 1);
-        let mut channel = channels.pop().unwrap();
+        let channel = channels.pop().unwrap();
         let parties = inputs.len();
-        tokio::spawn(async move { crate::fpre::fpre(&mut channel, parties).await });
+        tokio::spawn(async move { crate::fpre::fpre(&channel, parties).await });
 
         let mut parties = channels.into_iter().zip(inputs).enumerate();
-        let Some((_, (mut eval_channel, inputs))) = parties.next() else {
+        let Some((_, (eval_channel, inputs))) = parties.next() else {
             return Ok(vec![]);
         };
         let p_fpre = Preprocessor::TrustedDealer(p_pre);
 
         let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
-        for (p_own, (mut channel, inputs)) in parties {
+        for (p_own, (channel, inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
             let output_parties = output_parties.to_vec();
             computation.spawn(async move {
                 match _mpc(
-                    &mut channel,
+                    &channel,
                     &circuit,
                     &inputs,
                     p_fpre,
@@ -456,7 +456,7 @@ mod tests {
             });
         }
         let eval_result = _mpc(
-            &mut eval_channel,
+            &eval_channel,
             circuit,
             inputs,
             p_fpre,
