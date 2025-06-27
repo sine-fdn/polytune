@@ -449,7 +449,7 @@ mod tests {
                         res
                     }
                     Err(e) => {
-                        eprintln!("SMPC protocol failed for party {p_own}: {:?}", e);
+                        eprintln!("SMPC protocol failed for party {p_own}: {e:?}");
                         vec![]
                     }
                 }
@@ -467,7 +467,7 @@ mod tests {
         .await;
         match eval_result {
             Err(e) => {
-                eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+                eprintln!("SMPC protocol failed for Evaluator: {e:?}");
                 Ok(vec![])
             }
             Ok(res) => {
