@@ -172,7 +172,7 @@ pub trait Channel {
 
 /// Serializes and sends an MPC message to the other party.
 pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     party: usize,
     phase: &str,
     msg: &[S],
@@ -211,7 +211,7 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
 
 /// Receives and deserializes an MPC message from the other party.
 pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     party: usize,
     phase: &str,
 ) -> Result<Vec<T>, Error> {
@@ -249,7 +249,7 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
 
 /// Receives and deserializes a Vec from the other party (while checking the length).
 pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     party: usize,
     phase: &str,
     len: usize,

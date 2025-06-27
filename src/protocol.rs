@@ -213,7 +213,7 @@ pub(crate) enum Preprocessor {
 /// 4. Circuit evaluation: performed by the evaluator party only
 /// 5. Output determination: reveals the computation result to designated output parties
 pub async fn mpc(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     circuit: &Circuit,
     inputs: &[bool],
     p_eval: usize,
@@ -225,7 +225,7 @@ pub async fn mpc(
 }
 
 pub(crate) async fn _mpc(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     circuit: &Circuit,
     inputs: &[bool],
     p_fpre: Preprocessor,

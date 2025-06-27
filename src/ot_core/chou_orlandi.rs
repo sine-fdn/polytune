@@ -43,7 +43,7 @@ impl OtSender for Sender {
     type Msg = Block;
 
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         rng: &mut RNG,
         p_to: usize,
         _: &mut ChaCha20Rng,
@@ -56,7 +56,7 @@ impl OtSender for Sender {
 
     async fn send<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[(Block, Block)],
         _: &mut RNG,
         p_to: usize,
@@ -95,7 +95,7 @@ impl OtReceiver for Receiver {
     type Msg = Block;
 
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         _: &mut RNG,
         p_to: usize,
         _: &mut ChaCha20Rng,
@@ -108,7 +108,7 @@ impl OtReceiver for Receiver {
 
     async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[bool],
         mut rng: &mut RNG,
         p_to: usize,
