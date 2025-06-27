@@ -3163,6 +3163,7 @@ dependencies = [
  "cpufeatures",
  "criterion",
  "curve25519-dalek",
+ "futures",
  "garble_lang",
  "getrandom 0.2.16",
  "getrandom 0.3.3",

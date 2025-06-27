@@ -34,16 +34,7 @@ async fn simulate_mpc_async(
         let inputs = inputs.to_vec();
         let output_parties = output_parties.to_vec();
         computation.spawn(async move {
-            match mpc(
-                &channel,
-                &circuit,
-                &inputs,
-                p_eval,
-                p_own,
-                &output_parties,
-            )
-            .await
-            {
+            match mpc(&channel, &circuit, &inputs, p_eval, p_own, &output_parties).await {
                 Ok(res) => {
                     info!(
                         "Party {p_own} sent {:.2}MB of messages",

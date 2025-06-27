@@ -33,6 +33,9 @@
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
 
+use std::sync::Mutex;
+
+use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::{random, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -336,8 +339,11 @@ pub(crate) async fn _mpc(
 
     let mut auth_bits: Vec<Share> = vec![];
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
-        send_to(channel, p_fpre, "AND shares", &and_shares).await?;
-        auth_bits = recv_vec_from(channel, p_fpre, "AND shares", num_and_gates).await?;
+        (_, auth_bits) = try_join(
+            send_to(channel, p_fpre, "AND shares", &and_shares),
+            recv_vec_from(channel, p_fpre, "AND shares", num_and_gates),
+        )
+        .await?;
     } else if !xyz_shares.is_empty() {
         auth_bits = beaver_aand(
             (channel, delta),
@@ -353,7 +359,7 @@ pub(crate) async fn _mpc(
 
     let mut auth_bits = auth_bits.into_iter();
     let mut table_shares = vec![None; num_gates];
-    let mut garbled_gates = vec![vec![None; num_gates]; p_max];
+    let mut garbled_gates = vec![];
     if is_contrib {
         let mut preprocessed_gates = vec![None; num_gates];
         for (w, gate) in circuit.wires().iter().enumerate() {
@@ -403,9 +409,14 @@ pub(crate) async fn _mpc(
 
         send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
     } else {
-        for p in (0..p_max).filter(|p| *p != p_eval) {
-            garbled_gates[p] = recv_vec_from(channel, p, "preprocessed gates", num_gates).await?
-        }
+        garbled_gates = try_join_all((0..p_max).map(async |p| {
+            if p != p_eval {
+                recv_vec_from(channel, p, "preprocessed gates", num_gates).await
+            } else {
+                Ok(vec![])
+            }
+        }))
+        .await?;
         for (w, gate) in circuit.wires().iter().enumerate() {
             if let Wire::And(x, y) = gate {
                 let x = shares[*x].clone();
@@ -444,15 +455,22 @@ pub(crate) async fn _mpc(
             }
         }
     }
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        send_to(channel, p, "wire shares", &wire_shares_for_others[p]).await?;
-    }
 
-    let mut wire_shares_from_others = vec![vec![None; num_gates]; p_max];
-    for p in (0..p_max).filter(|p| *p != p_own) {
-        wire_shares_from_others[p] =
-            recv_vec_from::<Option<(bool, Mac)>>(channel, p, "wire shares", num_gates).await?;
-    }
+    let send_fut = try_join_all(
+        (0..p_max)
+            .filter(|p| *p != p_own)
+            .map(|p| send_to(channel, p, "wire shares", &wire_shares_for_others[p])),
+    );
+
+    let recv_fut = try_join_all((0..p_max).map(async |p| {
+        if p != p_own {
+            recv_vec_from::<Option<(bool, Mac)>>(channel, p, "wire shares", num_gates).await
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, wire_shares_from_others) = try_join(send_fut, recv_fut).await?;
 
     let mut inputs = inputs.iter();
     let mut masked_inputs = vec![None; num_gates];
@@ -507,7 +525,7 @@ pub(crate) async fn _mpc(
         }
     }
 
-    let mut input_labels = vec![None; num_gates];
+    let input_labels = Mutex::new(vec![None; num_gates]);
     if is_contrib {
         let labels_of_other_inputs: Vec<Option<Label>> = masked_inputs
             .iter()
@@ -516,17 +534,21 @@ pub(crate) async fn _mpc(
             .collect();
         send_to(channel, p_eval, "labels", &labels_of_other_inputs).await?;
     } else {
-        for p in (0..p_max).filter(|p| *p != p_own) {
+        try_join_all((0..p_max).filter(|p| *p != p_own).map(async |p| {
             let labels_of_own_inputs =
                 recv_vec_from::<Option<Label>>(channel, p, "labels", num_gates).await?;
+            let mut input_labels = input_labels.lock().expect("poison");
             for (w, label) in labels_of_own_inputs.iter().enumerate() {
                 if let Some(label) = label {
                     let labels = input_labels[w].get_or_insert(vec![Label(0); p_max]);
                     labels[p] = *label;
                 }
             }
-        }
+            Ok::<_, channel::Error>(())
+        }))
+        .await?;
     }
+    let input_labels = input_labels.into_inner().expect("poison");
 
     // circuit evaluation:
 
@@ -580,7 +602,7 @@ pub(crate) async fn _mpc(
                         if *key_r == Key(0) {
                             continue;
                         }
-                        let Some(GarbledGate(garbled_gate)) = &garbled_gates[p][w] else {
+                        let Some(Some(GarbledGate(garbled_gate))) = &garbled_gates[p].get(w) else {
                             return Err(MpcError::MissingGarbledGate(w).into());
                         };
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
@@ -615,32 +637,56 @@ pub(crate) async fn _mpc(
 
     // output determination:
 
-    let mut outputs = vec![None; num_gates];
-    for p_out in p_out.iter().copied().filter(|p| *p != p_own) {
-        for w in circuit.output_gates.iter().copied() {
-            let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
-            if let Some((mac, _)) = macs_and_keys.get(p_out).copied() {
-                outputs[w] = Some((bit, mac));
-            }
-        }
-        send_to(channel, p_out, "output wire shares", &outputs).await?;
-    }
-    let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![vec![]; p_max];
+    try_join_all(
+        p_out
+            .iter()
+            .copied()
+            .filter(|p| *p != p_own)
+            .map(async |p_out| {
+                // TODO rework this to not allocate num_gates
+                //  see https://github.com/sine-fdn/polytune/issues/113
+                let mut outputs = vec![None; num_gates];
+                for w in circuit.output_gates.iter().copied() {
+                    let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
+                    if let Some((mac, _)) = macs_and_keys.get(p_out).copied() {
+                        outputs[w] = Some((bit, mac));
+                    }
+                }
+                send_to(channel, p_out, "output wire shares", &outputs).await
+            }),
+    )
+    .await?;
+
+    let mut output_wire_shares: Vec<Vec<Option<(bool, Mac)>>> = vec![];
     if p_out.contains(&p_own) {
-        for p in (0..p_max).filter(|p| *p != p_own) {
-            output_wire_shares[p] =
-                recv_vec_from(channel, p, "output wire shares", num_gates).await?;
-        }
+        output_wire_shares = try_join_all((0..p_max).map(async |p| {
+            if p != p_own {
+                recv_vec_from(channel, p, "output wire shares", num_gates).await
+            } else {
+                Ok::<_, channel::Error>(vec![])
+            }
+        }))
+        .await?;
     }
+
     let mut input_wires = vec![None; num_gates];
     if !is_contrib {
-        for p_out in p_out.iter().copied().filter(|p| *p != p_own) {
-            let mut wires_and_labels = vec![None; num_gates];
-            for w in circuit.output_gates.iter().copied() {
-                wires_and_labels[w] = Some((values[w], labels_eval[w][p_out]));
-            }
-            send_to(channel, p_out, "lambda", &wires_and_labels).await?;
-        }
+        try_join_all(
+            p_out
+                .iter()
+                .copied()
+                .filter(|p| *p != p_own)
+                .map(async |p_out| {
+                    // TODO rework this to not allocate num_gates
+                    //  see https://github.com/sine-fdn/polytune/issues/113
+                    let mut wires_and_labels = vec![None; num_gates];
+                    for w in circuit.output_gates.iter().copied() {
+                        wires_and_labels[w] = Some((values[w], labels_eval[w][p_out]));
+                    }
+                    send_to(channel, p_out, "lambda", &wires_and_labels).await
+                }),
+        )
+        .await?;
         for w in circuit.output_gates.iter().copied() {
             input_wires[w] = Some(values[w]);
         }
