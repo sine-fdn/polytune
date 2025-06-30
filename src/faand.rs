@@ -1321,7 +1321,7 @@ async fn faand(
     // Step 1) Generate all leaky AND triples by calling flaand l' times.
     // Generate random bits s_j for every triple and every party.
     let mut randomness_fhaand = vec![false; lprime * n];
-    for bit in 0..n * l {
+    for bit in 0..n * lprime {
         randomness_fhaand[bit] = random_bool();
     }
     let zshares = flaand(
