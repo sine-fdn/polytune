@@ -75,8 +75,10 @@ extraction_targets = [
     "-i",
     " ".join(["-**",
     "+**::faand::spec::share_is_authenticated",
+    "+**::faand::lemma_vis_correct",
     "+**::faand::lemma_compute_ts_pointwise",
     "+**::data::lemma_compute_ts_pointwise",
+
     ])
 ]
 

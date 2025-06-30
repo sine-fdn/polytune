@@ -82,6 +82,9 @@ let mac_by (share: t_Share) (party: usize)
       (fun _ -> Prims.l_True) =
   (impl_Auth__macs share._1 <: Alloc.Vec.t_Vec t_Mac Alloc.Alloc.t_Global).[ party ]
 
+let impl_Share__macs (self: t_Share) : Alloc.Vec.t_Vec t_Mac Alloc.Alloc.t_Global =
+  impl_Auth__macs self._1
+
 let impl_Auth__keys (self: t_Auth) : Alloc.Vec.t_Vec t_Key Alloc.Alloc.t_Global =
   Core.Iter.Traits.Iterator.f_collect #(Core.Iter.Adapters.Map.t_Map
         (Core.Slice.Iter.t_Iter (t_Mac & t_Key)) ((t_Mac & t_Key) -> t_Key))

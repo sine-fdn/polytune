@@ -592,22 +592,13 @@ fn random_bool() -> bool {
     random()
 }
 
-// #[requires(
-//     Prop::from(yi.len() >= l) &
-//     Prop::from(xshares.len() >= l) &
-//     forall(|ll: usize| implies(
-//                 0 <= ll && ll < l && xshares.len() >= l,
-//         xshares[ll].1.keys().len() >= n
-//     )))]
-// #[ensures(
-//     |result|
-//     Prop::from(result.len() == n) &
-//     forall(|j: usize|
-//         implies(
-//             0 <= j && j < n && result.len() == n,
-//             result[j].len() == l
-//         )))]
-
+#[requires(
+    Prop::from(xshare.1.keys().len() >= n) & 
+    Prop::from(randomness.len() >= n)
+)]
+#[ensures(
+    |result|
+    Prop::from(result.len() == n))]
 fn fhaand_compute_hashes(
     delta: Delta,
     i: usize,
@@ -673,6 +664,9 @@ fn lsb_of_hash<T: Into<u128>>(input: T) -> bool {
     lsb_of_hash_inner(input.into())
 }
 
+#[requires(Prop::from(ts.len() == n) &
+           Prop::from(s.len() == n))
+]
 fn fhaand_compute_vi(i: usize, n: usize, s: &[bool], ts: &[bool]) -> bool {
     let mut vi = false;
     for j in 0..n {
@@ -683,9 +677,12 @@ fn fhaand_compute_vi(i: usize, n: usize, s: &[bool], ts: &[bool]) -> bool {
     }
     vi
 }
+
 #[requires(
-    Prop::from(ts.len() == n)
-    & forall(|j: usize| implies(0 <= j && j < n && ts.len() == n, ts[j].len() >= l)))
+    Prop::from(ts.len() == l)
+    & forall(|j: usize| implies(0 <= j && j < l && ts.len() == l, ts[j].len() >= n))
+    & Prop::from(randomness.len() == n * l)
+)
 ]
 fn fhaand_compute_vi_l(
     i: usize,
@@ -761,6 +758,10 @@ fn fhaand_compute_ts_l(
 }
 
 #[inline]
+#[requires(
+    Prop::from(xshare.macs().len() >= n) &
+    Prop::from(h0h1_j.len() >= n) 
+)]
 fn fhaand_compute_ts(i: usize, n: usize, xshare: &Share, h0h1_j: &[(bool, bool)]) -> Vec<bool> {
     let mut ts = vec![false; n];
     for j in 0..n {
@@ -1577,6 +1578,61 @@ fn combine_two_leaky_ands(
     Ok((xshare, y1, zshare))
 }
 
+#[hax_lib::lemma]
+// TODO: Safety pre-/post-conditions
+fn lemma_vis_correct<const NUM_PARTIES: usize>(
+    parties: [spec::PartyState<NUM_PARTIES>; NUM_PARTIES],
+) -> Proof<
+    {
+        let hashes: [Vec<(bool, bool)>; NUM_PARTIES] = std::array::from_fn(|i| {
+            let party = &parties[i];
+            let xshare = &party.xshare;
+            let yi = party.yshare.bit();
+            fhaand_compute_hashes(party.delta, i, NUM_PARTIES, xshare, yi, &party.randomness)
+        });
+
+        // party i outputs hashes[i] = vec![(), (), .., ()]
+        // party j receives [hashes[0][j],.., hashes[i][j], .., hashes[n-1][j]]
+        let hashes_transposed: [Vec<(bool, bool)>; NUM_PARTIES] =
+            std::array::from_fn(|j| hashes.iter().map(|vec| vec[j].clone()).collect());
+
+        let ts: [Vec<bool>; NUM_PARTIES] = std::array::from_fn(|i| {
+            let party = &parties[i];
+            fhaand_compute_ts(i, NUM_PARTIES, &party.xshare, &hashes_transposed[i])
+        });
+
+        let vis: [bool; NUM_PARTIES] = std::array::from_fn(|i| {
+            let party = &parties[i];
+            fhaand_compute_vi(i, NUM_PARTIES, &party.randomness, &ts[i])
+        });
+
+        // What we expect as the correct result:
+
+        // Xor_{i \in [n]} v_i
+        let mut xor_vis = false;
+        for i in 0..NUM_PARTIES {
+            xor_vis = xor_vis ^ vis[i];
+        }
+
+        // should equal
+
+        //  Xor_{i \in [n]} Xor_{j in [n] \ {i}} x_i /\ y_j.
+        let mut expected_result = false;
+        for i in 0..NUM_PARTIES {
+            for j in 0..NUM_PARTIES {
+                if i == j {
+                    continue;
+                }
+                let half_and_i_j = parties[i].xshare.bit() & parties[j].yshare.bit();
+                expected_result = expected_result ^ half_and_i_j;
+            }
+        }
+
+        xor_vis == expected_result
+    },
+> {
+}
+
 /// This module contains a Rust specification for the triple
 /// computation performed by `flaand`.
 mod spec {
@@ -1584,12 +1640,12 @@ mod spec {
     use super::*;
     use std::array;
 
-    struct PartyState<const NUM_PARTIES: usize> {
-        delta: Delta,
-        xshare: Share,
-        yshare: Share,
-        rshare: Share,
-        randomness: [bool; NUM_PARTIES],
+    pub(super) struct PartyState<const NUM_PARTIES: usize> {
+        pub(super) delta: Delta,
+        pub(super) xshare: Share,
+        pub(super) yshare: Share,
+        pub(super) rshare: Share,
+        pub(super) randomness: [bool; NUM_PARTIES],
     }
 
     // XXX: We replace this, since there is a bug in hax that does not put preconditions on lemmas.
@@ -1750,66 +1806,5 @@ mod spec {
         });
 
         vis
-    }
-
-    #[hax_lib::lemma]
-    fn lemma_vis_correct<const NUM_PARTIES: usize>(
-        parties: [PartyState<NUM_PARTIES>; NUM_PARTIES],
-    ) -> Proof<
-        {
-            let hashes: [Vec<(bool, bool)>; NUM_PARTIES] = array::from_fn(|i| {
-                let party = &parties[i];
-                let xshare = &party.xshare;
-                let yi = party.yshare.bit();
-                super::fhaand_compute_hashes(
-                    party.delta,
-                    i,
-                    NUM_PARTIES,
-                    xshare,
-                    yi,
-                    &party.randomness,
-                )
-            });
-
-            // party i outputs hashes[i] = vec![(), (), .., ()]
-            // party j receives [hashes[0][j],.., hashes[i][j], .., hashes[n-1][j]]
-            let hashes_transposed: [Vec<(bool, bool)>; NUM_PARTIES] =
-                array::from_fn(|j| hashes.iter().map(|vec| vec[j].clone()).collect());
-
-            let ts: [Vec<bool>; NUM_PARTIES] = array::from_fn(|i| {
-                let party = &parties[i];
-                fhaand_compute_ts(i, NUM_PARTIES, &party.xshare, &hashes_transposed[i])
-            });
-
-            let vis: [bool; NUM_PARTIES] = array::from_fn(|i| {
-                let party = &parties[i];
-                super::fhaand_compute_vi(i, NUM_PARTIES, &party.randomness, &ts[i])
-            });
-
-            // What we expect as the correct result:
-
-            // Xor_{i \in [n]} v_i
-            let mut xor_vis = false;
-            for i in 0..NUM_PARTIES {
-                xor_vis = xor_vis ^ vis[i];
-            }
-
-            // should equal
-
-            //  Xor_{i \in [n]} Xor_{j in [n] \ {i}} x_i /\ y_j.
-            let mut expected_result = false;
-            for i in 0..NUM_PARTIES {
-                for j in 0..NUM_PARTIES {
-                    if i == j {
-                        continue;
-                    }
-                    let half_and_i_j = parties[i].xshare.bit() & parties[j].yshare.bit();
-                    expected_result = expected_result ^ half_and_i_j;
-                }
-            }
-
-            xor_vis == expected_result
-        },
-    > {
     }
 }
