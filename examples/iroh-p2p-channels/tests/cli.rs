@@ -9,8 +9,9 @@ fn simulate() {
     let mut cmd = Command::new("cargo")
         .args([
             "run",
-            // "--release",
+            "--release",
             "--",
+            "--wait-time=1",
             "--program=.add.garble.rs",
             "--party=2",
             "--input=2",
@@ -43,8 +44,9 @@ fn simulate() {
     let mut cmd = Command::new("cargo")
         .args([
             "run",
-            // "--release",
+            "--release",
             "--",
+            "--wait-time=1",
             "--program=.add.garble.rs",
             "--party=1",
             "--input=2",
@@ -70,8 +72,9 @@ fn simulate() {
     let out = Command::new("cargo")
         .args([
             "run",
-            // "--release",
+            "--release",
             "--",
+            "--wait-time=1",
             "--program=.add.garble.rs",
             "--party=0",
             "--input=2",

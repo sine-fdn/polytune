@@ -45,6 +45,9 @@ struct Cli {
     /// The index of the party (0 for the first participant, 1 for the second, etc).
     #[arg(long)]
     party: usize,
+    /// Seconds to wait for other peers to join the computation.
+    #[arg(long, default_value_t = 20)]
+    wait_time: u64,
     /// The party's input as a Garble literal, e.g. "123u32".
     #[arg(short, long)]
     input: String,
@@ -147,10 +150,12 @@ async fn main() -> Result<()> {
     };
     let (sender, receiver) = gossip.subscribe_and_join(topic, peer_ids).await?.split();
 
-    let secs = 20;
-    println!("> connected, other peers have {secs} time to join before the computation starts!");
+    println!(
+        "> connected, other peers have {} time to join before the computation starts!",
+        args.wait_time
+    );
 
-    sleep(Duration::from_secs(secs)).await;
+    sleep(Duration::from_secs(args.wait_time)).await;
     println!("> starting the computation...");
 
     let mut channel = IrohChannel {
@@ -204,12 +209,13 @@ impl Channel for IrohChannel {
         Ok(())
     }
 
-    // TODO this implementation seems really dubious to me... I'm really not sure if it behaves
-    //  correctly in edge-cases
+    // TODO I think the Channel implementation can be made more robust by having a dedicated async task
+    // that continously pulls messages from the GossipReceiver
     async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
         tracing::info!("receiving message from {p}");
         {
-            let mut msgs_lock = self.received_msgs.lock().expect("poisoned");
+            // fast path to check if there is already a stored message for us
+            let mut msgs_lock = self.received_msgs.lock().expect("mutex poisoned");
             if let Some(msgs) = msgs_lock.get_mut(&p) {
                 if let Some(msg) = msgs.pop_front() {
                     tracing::info!("found stored message from {p}");
@@ -223,21 +229,26 @@ impl Channel for IrohChannel {
             if let Event::Gossip(GossipEvent::Received(msg)) = event {
                 let msg: Message = postcard::from_bytes(&msg.content)?;
                 if msg.to_party == self.party {
-                    if msg.from_party == p {
-                        tracing::info!("received {} bytes from {p}", msg.data.len());
-                        return Ok(msg.data);
-                    } else {
-                        tracing::debug!(
-                            "received {} bytes, storing message from {} for now",
-                            msg.data.len(),
-                            msg.from_party,
-                        );
-                        self.received_msgs
-                            .lock()
-                            .expect("poisoned")
-                            .entry(msg.from_party)
-                            .or_default()
-                            .push_back(msg.data);
+                    tracing::debug!(
+                        "received {} bytes, storing message from {} for now",
+                        msg.data.len(),
+                        msg.from_party,
+                    );
+
+                    let mut msgs_lock = self.received_msgs.lock().expect("mutex poisoned");
+
+                    msgs_lock
+                        .entry(msg.from_party)
+                        .or_default()
+                        .push_back(msg.data);
+
+                    // might be inserted by us in the preceding lines or by another holder of channel while we waited
+                    // on self.receiver.lock().await
+                    if let Some(msgs) = msgs_lock.get_mut(&p) {
+                        if let Some(msg) = msgs.pop_front() {
+                            tracing::info!("found stored message from {p}");
+                            return Ok(msg);
+                        }
                     }
                 } else {
                     tracing::debug!(
