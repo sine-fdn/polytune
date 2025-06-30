@@ -12,40 +12,71 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo build --release
-      - run: cargo bench --no-run
-      - run: cargo test --release
-      - run: cargo clippy --all-targets -F __bench -- -Dwarnings
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
       - run: cargo fmt --check
+      - run: cargo clippy --all-targets -F __bench -- -Dwarnings
       - name: Install cargo-machete
         uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036
         with:
           tool: cargo-machete@0.8.0 # install-action checks sha for the binary
-      - name: Detect unused dependencies
+      - name: Check for unused dependencies 
         run: cargo machete
-      - run: cargo build --release && cargo test --release -- --nocapture
-        working-directory: ./examples/http-multi-server-channels
-      - run: cargo build --release && cargo test --release -- --nocapture
-        working-directory: ./examples/http-single-server-channels
-      - run: cargo build --release && cargo test --release -- --nocapture
-        working-directory: ./examples/iroh-p2p-channels
-      - run: docker compose -f docker-compose.yml up -d && cargo build --release && cargo test --release -- --nocapture
-        working-directory: ./examples/sql-integration
-      - run: cargo build --release && cargo test --release -- --nocapture
-        working-directory: ./examples/api-integration
+
+  test-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+      - run: cargo test --release
+
+  test-examples:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        workspace-member:
+          - http-multi-server-channels
+          - http-single-server-channels
+          - iroh-p2p-channels
+          - sql-integration
+          - api-integration
+    defaults:
+      run:
+        working-directory: examples/${{ matrix.workspace-member }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+        with:
+          key: ${{ matrix.workspace-member }}
+      - if: ${{ matrix.workspace-member == 'sql-integration' }}
+        run: docker compose -f docker-compose.yml up -d
+      - run: cargo test --release
+
+  test-wasm-example:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/wasm-http-channels
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
       - name: Install wasm-pack
         uses: taiki-e/install-action@a27ef18d36cfa66b0af3a360104621793b41c036
         with:
