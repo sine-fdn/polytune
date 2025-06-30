@@ -12,7 +12,7 @@ polytune = { path = "../../", version = "0.1.0" }
 reqwest = { version = "0.12.20", features = ["json"] }
 serde = "1.0.197"
 serde_json = "1.0.115"
-sqlx = { version = "0.8.1", features = [
+sqlx = { version = "0.8.6", features = [
     "runtime-tokio",
     "any",
     "postgres",
