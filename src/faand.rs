@@ -945,6 +945,7 @@ fn flaand_1(
     xshares: &[Share],
     yshares: &[Share],
     rshares: &[Share],
+    zshares: &mut [Share],
     i: usize,
     n: usize,
     l: usize,
@@ -958,6 +959,7 @@ fn flaand_1(
         loop_invariant!(|_: usize| z.len() == l && e.len() == l);
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
+        zshares[ll].0 = z[ll];
     }
 
     // Triple Checking.
@@ -1257,7 +1259,17 @@ async fn flaand(
 
     let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
 
-    let (mut ki_xj_phi, ei_uij, phi) = flaand_1(delta, xshares, yshares, rshares, i, n, l, &v)?;
+    let (mut ki_xj_phi, ei_uij, phi) = flaand_1(
+        delta,
+        xshares,
+        yshares,
+        rshares,
+        &mut zshares[..],
+        i,
+        n,
+        l,
+        &v,
+    )?;
 
     let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij, l).await?;
 
