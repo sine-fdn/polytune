@@ -59,7 +59,7 @@ async fn simulate_mpc_async(
                     res
                 }
                 Err(e) => {
-                    eprintln!("SMPC protocol failed for party {p_own}: {:?}", e);
+                    eprintln!("SMPC protocol failed for party {p_own}: {e:?}");
                     vec![]
                 }
             }
@@ -76,7 +76,7 @@ async fn simulate_mpc_async(
     .await;
     match eval_result {
         Err(e) => {
-            eprintln!("SMPC protocol failed for Evaluator: {:?}", e);
+            eprintln!("SMPC protocol failed for Evaluator: {e:?}");
             Ok(vec![])
         }
         Ok(res) => {
@@ -449,17 +449,14 @@ fn eval_mixed_circuits() -> Result<(), Error> {
             let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], &output_parties)?;
             let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
             if output_smpc != output_direct {
-                println!("Circuit: {:?}", circuit);
-                println!("A: {:?}", in_a);
-                println!("B: {:?}\n", in_b);
-                panic!(
-                    "Output did not match: {:?} vs {:?}",
-                    output_smpc, output_direct
-                );
+                println!("Circuit: {circuit:?}");
+                println!("A: {in_a:?}");
+                println!("B: {in_b:?}\n");
+                panic!("Output did not match: {output_smpc:?} vs {output_direct:?}");
             }
         }
     }
-    println!("Successfully ran {} tests", total_tests);
+    println!("Successfully ran {total_tests} tests");
     Ok(())
 }
 
@@ -534,8 +531,7 @@ fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {
             for gates in (in_a + in_b)..n {
                 let wires = in_a + in_b + gates;
                 println!(
-                    "Generating circuits with {} inputs from A + {} inputs from B + {} gates = {} total",
-                    in_a, in_b, gates, wires
+                    "Generating circuits with {in_a} inputs from A + {in_b} inputs from B + {gates} gates = {wires} total"
                 );
                 let mut circuits = vec![vec![]];
                 for w in (in_a + in_b)..wires {
