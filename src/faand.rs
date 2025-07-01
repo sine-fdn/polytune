@@ -1,6 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
+use futures::future::try_join_all;
 use rand::{Rng, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -10,6 +11,7 @@ use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, send_to},
     data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
+    utils::xor_inplace,
 };
 
 /// The statistical security parameter `RHO` used for cryptographic operations.
@@ -125,9 +127,8 @@ pub(crate) async fn broadcast_verification<
             return Err(Error::EmptyVector);
         }
     }
-    // Step 1: Send the vector to all parties that does not included its already sent value
-    // (for index i) and the value it received from the party it is sending to (index k).
-    for k in (0..n).filter(|k| *k != i) {
+    // Step 1 & 2: Send and receive vectors concurrently
+    let send_all = try_join_all((0..n).filter(|k| *k != i).map(async |k| {
         let mut modified_vec: Vec<Option<u128>> = vec![None; n];
         for j in (0..n).filter(|j| *j != i && *j != k) {
             if vec[j].is_empty() {
@@ -136,12 +137,19 @@ pub(crate) async fn broadcast_verification<
             modified_vec[j] = Some(hash_vecs[j]);
         }
         send_to(channel, k, phase, &modified_vec).await?;
-    }
+        Ok(())
+    }));
 
-    // Step 2: Receive and verify the vectors from all parties, that for index j the value is
-    // the same for all parties.
-    for k in (0..n).filter(|k| *k != i) {
-        let vec_k: Vec<Option<u128>> = recv_vec_from(channel, k, phase, n).await?;
+    let recv_all = try_join_all((0..n).filter(|k| *k != i).map(async |k| {
+        let res = recv_vec_from::<Option<u128>>(channel, k, phase, n).await?;
+        Ok(res)
+    }));
+
+    let (_, received_vecs) = futures::try_join!(send_all, recv_all)?;
+
+    // Verify the received vectors
+    for (idx, k) in (0..n).filter(|k| *k != i).enumerate() {
+        let vec_k = &received_vecs[idx];
         for j in (0..n).filter(|j| *j != i && *j != k) {
             if vec_k[j].is_none() {
                 return Err(Error::EmptyVector);
@@ -167,15 +175,21 @@ pub(crate) async fn broadcast<
     vec: &[T],
     len: usize,
 ) -> Result<Vec<Vec<T>>, Error> {
-    for k in (0..n).filter(|k| *k != i) {
-        send_to(channel, k, phase, vec).await?;
-    }
+    let send_all = try_join_all(
+        (0..n)
+            .filter(|k| *k != i)
+            .map(async |k| send_to(channel, k, phase, vec).await),
+    );
 
-    // 3 b) Receiving all commitments.
-    let mut res_vec = vec![vec![]; n];
-    for k in (0..n).filter(|k| *k != i) {
-        res_vec[k] = recv_vec_from::<T>(channel, k, phase, len).await?;
-    }
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            recv_vec_from::<T>(channel, k, phase, len).await
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, res_vec) = futures::try_join!(send_all, recv_all)?;
     let string = "broadcast ";
     broadcast_verification(channel, i, n, &(string.to_owned() + phase), &res_vec).await?;
     Ok(res_vec)
@@ -194,15 +208,21 @@ pub(crate) async fn broadcast_first_send_second<
     vec: &[Vec<(T, S)>],
     len: usize,
 ) -> Result<Vec<Vec<(T, S)>>, Error> {
-    for k in (0..n).filter(|k| *k != i) {
-        send_to(channel, k, phase, &vec[k]).await?;
-    }
+    let send_all = try_join_all(
+        (0..n)
+            .filter(|k| *k != i)
+            .map(async |k| send_to(channel, k, phase, &vec[k]).await),
+    );
 
-    // 3 b) Receiving all commitments.
-    let mut recv_vec = vec![vec![]; n];
-    for k in (0..n).filter(|k| *k != i) {
-        recv_vec[k] = recv_vec_from::<(T, S)>(channel, k, phase, len).await?;
-    }
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            recv_vec_from::<(T, S)>(channel, k, phase, len).await
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, recv_vec) = futures::try_join!(send_all, recv_all)?;
     let first_vec: Vec<Vec<T>> = recv_vec
         .iter()
         .map(|inner_vec| inner_vec.iter().map(|(a, _)| a.clone()).collect())
@@ -238,17 +258,28 @@ pub(crate) async fn shared_rng(
     let comm = vec![commitment];
     let commitments = broadcast(channel, i, n, "RNG comm", &comm, 1).await?;
 
-    // Step 3) Send the decommitments to all parties for multi-party cointossing.
-    for k in (0..n).filter(|k| *k != i) {
-        send_to(channel, k, "RNG ver", &[buf]).await?;
-    }
-    let mut bufs = vec![[0; 32]; n];
+    // Step 3) Send and receive decommitments concurrently for multi-party cointossing.
+    let send_all = try_join_all((0..n).filter(|k| *k != i).map(async |k| {
+        send_to(channel, k, "RNG ver", &[buf])
+            .await
+            .map_err(Into::into)
+    }));
+
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            recv_from::<[u8; 32]>(channel, k, "RNG ver")
+                .await?
+                .pop()
+                .ok_or(Error::EmptyMsg)
+        } else {
+            Ok(Default::default())
+        }
+    }));
+
+    let (_, bufs) = futures::try_join!(send_all, recv_all)?;
+
     let mut bufs_id = vec![[0; 34]; n];
     for k in (0..n).filter(|k| *k != i) {
-        bufs[k] = recv_from::<[u8; 32]>(channel, k, "RNG ver")
-            .await?
-            .pop()
-            .ok_or(Error::EmptyMsg)?;
         bufs_id[k][..32].copy_from_slice(&bufs[k]);
         let id_bytes = (k as u16).to_be_bytes();
         bufs_id[k][32..].copy_from_slice(&id_bytes);
@@ -290,29 +321,52 @@ pub(crate) async fn shared_rng_pairwise(
         commitment_vec[k] = commit(&bufvec_id[k]);
     }
 
-    // Step 2) Send the commitments to all parties for pairwise cointossing.
-    for k in (0..n).filter(|k| *k != i) {
-        send_to(channel, k, "RNG comm", &[commitment_vec[k]]).await?;
-    }
-    let mut commitments = vec![Commitment([0; 32]); n];
-    for k in (0..n).filter(|k| *k != i) {
-        commitments[k] = recv_from::<Commitment>(channel, k, "RNG comm")
-            .await?
-            .pop()
-            .ok_or(Error::EmptyMsg)?;
-    }
+    // Step 2) Send and receive commitments concurrently for pairwise cointossing.
+    let send_all = try_join_all((0..n).filter(|k| *k != i).map(async |k| {
+        send_to(channel, k, "RNG comm", &[commitment_vec[k]])
+            .await
+            .map_err(Error::from)
+    }));
 
-    // Step 3) Send the decommitments to all parties for pairwise cointossing.
-    for k in (0..n).filter(|k| *k != i) {
-        send_to(channel, k, "RNG ver", &[bufvec[k]]).await?;
-    }
-    let mut bufs = vec![[0; 32]; n];
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            let result = recv_from::<Commitment>(channel, k, "RNG comm")
+                .await
+                .map_err(Error::from)?
+                .pop()
+                .ok_or(Error::EmptyMsg)?;
+            Ok(result)
+        } else {
+            Ok(Commitment([0; 32]))
+        }
+    }));
+
+    let (_, commitments) = futures::try_join!(send_all, recv_all)?;
+
+    // Step 3) Send and receive decommitments concurrently for pairwise cointossing.
+    let send_all = try_join_all((0..n).filter(|k| *k != i).map(async |k| {
+        send_to(channel, k, "RNG ver", &[bufvec[k]])
+            .await
+            .map_err(Error::from)
+    }));
+
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            let result = recv_from::<[u8; 32]>(channel, k, "RNG ver")
+                .await
+                .map_err(Error::from)?
+                .pop()
+                .ok_or(Error::EmptyMsg)?;
+            Ok(result)
+        } else {
+            Ok(Default::default())
+        }
+    }));
+
+    let (_, bufs) = futures::try_join!(send_all, recv_all)?;
+
     let mut bufs_id = vec![[0; 34]; n];
     for k in (0..n).filter(|k| *k != i) {
-        bufs[k] = recv_from::<[u8; 32]>(channel, k, "RNG ver")
-            .await?
-            .pop()
-            .ok_or(Error::EmptyMsg)?;
         bufs_id[k][..32].copy_from_slice(&bufs[k]);
         let id_bytes = (k as u16).to_be_bytes();
         bufs_id[k][32..].copy_from_slice(&id_bytes);
@@ -352,7 +406,7 @@ async fn fabitn(
     i: usize,
     n: usize,
     l: usize,
-    mut shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
+    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
 ) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
@@ -361,9 +415,6 @@ async fn fabitn(
     let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
-    let mut keys = vec![vec![0; lprime]; n];
-    let mut macs = vec![vec![0; lprime]; n];
-
     let deltas = vec![Block::from(delta.0.to_be_bytes()); lprime];
 
     // Step 2: Use the shared RNGs for key and MAC generation
@@ -371,21 +422,43 @@ async fn fabitn(
         return Err(Error::InvalidLength);
     }
 
-    for k in (0..n).filter(|&k| k != i) {
+    let shared_rngs = (0..n).map(|k| {
         let (a, b) = if i < k { (i, k) } else { (k, i) };
+        shared_two_by_two[a][b].clone()
+    });
 
-        if let Some(shared) = shared_two_by_two[a][b].as_mut() {
+    let ot_futs = shared_rngs.enumerate().map(async |(k, mut rng)| {
+        if k == i {
+            return Ok((vec![], vec![]));
+        }
+        // TODO unfortunately we can't do pairwise OT sending/receiving in parallel due to limitations in the
+        //  Channel implementation. If we execute
+        // ```
+        // join(
+        //     kos_ot_sender(channel, &delta, k, shared)
+        //     kos_ot_receiver(channel, &x, k, shared)
+        // )
+        // ```
+        // the channel implementation can't distinguish between the messages intended for the ot
+        // sender and for the ot receiver. We would likely need a notion of sub-channels over
+        // an existing channel for this.
+        if let Some(shared) = &mut rng {
             if i < k {
-                keys[k] = kos_ot_sender(channel, &deltas, k, shared).await?;
-                macs[k] = kos_ot_receiver(channel, &x, k, shared).await?;
+                let keys = kos_ot_sender(channel, &deltas, k, shared).await?;
+                let macs = kos_ot_receiver(channel, &x, k, shared).await?;
+                Ok((keys, macs))
             } else {
-                macs[k] = kos_ot_receiver(channel, &x, k, shared).await?;
-                keys[k] = kos_ot_sender(channel, &deltas, k, shared).await?;
+                let macs = kos_ot_receiver(channel, &x, k, shared).await?;
+                let keys = kos_ot_sender(channel, &deltas, k, shared).await?;
+                Ok((keys, macs))
             }
         } else {
-            return Err(Error::EmptyVector);
+            Err(Error::EmptyVector)
         }
-    }
+    });
+
+    let (mut keys, mut macs): (Vec<_>, Vec<_>) = try_join_all(ot_futs).await?.into_iter().unzip();
+
     drop(deltas);
 
     // Step 2) Run 2-party OTs to compute keys and MACs [input parameters mm and kk].
@@ -594,24 +667,45 @@ async fn fhaand(
     }
 
     // Step 2) Calculate v.
-    let mut vi = vec![false; l];
-    let mut h0h1 = vec![(false, false); l];
-    // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
-    for j in (0..n).filter(|j| *j != i) {
+    // Step 2 a & b) Send and receive h0, h1 concurrently for all parties.
+    let send_all = try_join_all((0..n).filter(|j| *j != i).map(async |j| {
+        let mut vi = vec![false; l];
+        let mut h0h1_for_j = vec![(false, false); l];
         for ll in 0..l {
             let sj: bool = random();
             let (_, kixj) = xshares[ll].1.0[j];
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
-            h0h1[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
-            h0h1[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
+            h0h1_for_j[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
+            h0h1_for_j[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
             vi[ll] ^= sj;
         }
-        send_to(channel, j, "haand", &h0h1).await?;
-    }
-    // Step 2 b) Receive h0, h1 from all parties and compute t.
+        send_to(channel, j, "haand", &h0h1_for_j)
+            .await
+            .map_err(Error::from)?;
+        Ok(vi)
+    }));
+
+    let recv_all = try_join_all((0..n).map(async |j| {
+        if j != i {
+            recv_vec_from::<(bool, bool)>(channel, j, "haand", l)
+                .await
+                .map_err(Error::from)
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (vi_all, received_h0h1) = futures::try_join!(send_all, recv_all)?;
+
+    let mut vi = vi_all.iter().fold(vec![false; l], |mut vi, el| {
+        xor_inplace(&mut vi, el);
+        vi
+    });
+
+    // Process received h0h1 and compute t
     for j in (0..n).filter(|j| *j != i) {
-        let h0h1_j = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
+        let h0h1_j = &received_h0h1[j];
         for ll in 0..l {
             let (mixj, _) = xshares[ll].1.0[j];
             let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
@@ -861,19 +955,29 @@ pub(crate) async fn beaver_aand(
         de_shares.push((a ^ alpha, b ^ beta));
         d_e_dmac_emac.push((a.0 ^ alpha.0, b.0 ^ beta.0, Mac(0), Mac(0)));
     }
-    for k in (0..n).filter(|k| *k != i) {
+    let send_all = try_join_all((0..n).filter(|k| *k != i).map(async |k| {
+        let mut d_e_dmac_emac_for_k = d_e_dmac_emac.clone();
         for (j, (dshare, eshare)) in de_shares.iter().enumerate() {
-            let (_, _, dmac, emac) = &mut d_e_dmac_emac[j];
+            let (_, _, dmac, emac) = &mut d_e_dmac_emac_for_k[j];
             *dmac = dshare.1.0[k].0;
             *emac = eshare.1.0[k].0;
         }
-        send_to(channel, k, "faand", &d_e_dmac_emac).await?;
-    }
-    let mut d_e_dmac_emac_k = vec![vec![(false, false, Mac(0), Mac(0)); len]; n];
-    for k in (0..n).filter(|k| *k != i) {
-        d_e_dmac_emac_k[k] =
-            recv_vec_from::<(bool, bool, Mac, Mac)>(channel, k, "faand", len).await?;
-    }
+        send_to(channel, k, "faand", &d_e_dmac_emac_for_k)
+            .await
+            .map_err(Error::from)
+    }));
+
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            recv_vec_from::<(bool, bool, Mac, Mac)>(channel, k, "faand", len)
+                .await
+                .map_err(Error::from)
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, d_e_dmac_emac_k) = futures::try_join!(send_all, recv_all)?;
     for k in (0..n).filter(|k| *k != i) {
         for (j, &(d, e, ref dmac, ref emac)) in d_e_dmac_emac_k[k].iter().enumerate() {
             let (_, dkey) = de_shares[j].0.1.0[k];
@@ -933,7 +1037,7 @@ async fn check_dvalue(
         }
     }
 
-    for k in (0..n).filter(|&k| k != i) {
+    let send_all = try_join_all((0..n).filter(|&k| k != i).map(async |k| {
         let mut dvalues_macs = vec![(vec![], vec![]); len];
         for (j, bucket) in buckets.iter().enumerate() {
             let (_, y, _) = &bucket[0];
@@ -944,13 +1048,25 @@ async fn check_dvalue(
             }
             dvalues_macs[j].0 = d_values[j].to_vec();
         }
-        send_to(channel, k, "dvalue", &dvalues_macs).await?;
-        drop(dvalues_macs);
-    }
+        send_to(channel, k, "dvalue", &dvalues_macs)
+            .await
+            .map_err(Error::from)
+    }));
+
+    let recv_all = try_join_all((0..n).map(async |k| {
+        if k != i {
+            recv_vec_from::<(Vec<bool>, Vec<Mac>)>(channel, k, "dvalue", len)
+                .await
+                .map_err(Error::from)
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, dvalues_macs_all) = futures::try_join!(send_all, recv_all)?;
 
     for k in (0..n).filter(|k| *k != i) {
-        let dvalues_macs_k =
-            recv_vec_from::<(Vec<bool>, Vec<Mac>)>(channel, k, "dvalue", len).await?;
+        let dvalues_macs_k = &dvalues_macs_all[k];
         for (j, dval) in d_values.iter_mut().enumerate().take(len) {
             let (d_value_p, d_macs_p) = &dvalues_macs_k[j];
             let (_, y0key) = buckets[j][0].1.1.0[k];
