@@ -7,11 +7,7 @@ let _ =
   (* This module has implicit dependencies, here we make them explicit. *)
   (* The implicit dependencies arise from typeclasses instances. *)
   let open Polytune.Channel in
-  let open Rand.Distributions.Distribution in
-  let open Rand.Distributions.Other in
-  let open Rand.Rng in
   let open Rand_chacha.Chacha in
-  let open Rand_core in
   let open Serde.De in
   let open Serde.De.Impls in
   let open Serde.Ser in
@@ -123,6 +119,24 @@ val zero_rng': Prims.unit -> Rand_chacha.Chacha.t_ChaCha20Rng
 unfold
 let zero_rng = zero_rng'
 
+assume
+val random_bool': Prims.unit -> bool
+
+unfold
+let random_bool = random_bool'
+
+assume
+val rand_gen': rng: Rand_chacha.Chacha.t_ChaCha20Rng -> (Rand_chacha.Chacha.t_ChaCha20Rng & bool)
+
+unfold
+let rand_gen = rand_gen'
+
+assume
+val drop_func': #v_T: Type0 -> vec: Alloc.Vec.t_Vec v_T Alloc.Alloc.t_Global -> Prims.unit
+
+unfold
+let drop_func (#v_T: Type0) = drop_func' #v_T
+
 /// Protocol PI_aBit^n that performs F_aBit^n from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 /// This function implements a secure multi-party computation protocol to generate a random
@@ -139,10 +153,13 @@ let fabitn
       (delta: Polytune.Data_types.t_Delta)
       (i n l: usize)
       (shared_two_by_two: Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
-    : (iimpl_951670863_ &
-      Core.Result.t_Result
-        (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
-          Rand_chacha.Chacha.t_ChaCha20Rng) t_Error) =
+    : Prims.Pure
+      (iimpl_951670863_ &
+        Core.Result.t_Result
+          (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
+            Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
+      (requires l <=. (Core.Num.impl_usize__MAX -! (mk_usize 3 *! v_RHO <: usize) <: usize))
+      (fun _ -> Prims.l_True) =
   let three_rho:usize = mk_usize 3 *! v_RHO in
   let lprime:usize = l +! three_rho in
   let (x: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global):Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global =
@@ -158,7 +175,7 @@ let fabitn
             Core.Ops.Range.t_Range usize)
           (fun temp_0_ ->
               let _:usize = temp_0_ in
-              Rand.random #bool () <: bool)
+              random_bool () <: bool)
         <:
         Core.Iter.Adapters.Map.t_Map (Core.Ops.Range.t_Range usize) (usize -> bool))
   in
@@ -194,37 +211,104 @@ let fabitn
         (Alloc.Vec.t_Vec Polytune.Data_types.t_Share Alloc.Alloc.t_Global &
           Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
   else
+    let (shared_rand: Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global):Alloc.Vec.t_Vec
+      Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global =
+      Alloc.Vec.from_elem #Rand_chacha.Chacha.t_ChaCha20Rng
+        (zero_rng () <: Rand_chacha.Chacha.t_ChaCha20Rng)
+        n
+    in
     match
       Rust_primitives.Hax.Folds.fold_range_return (mk_usize 0)
         n
         (fun temp_0_ temp_1_ ->
-            let channel, keys, macs:(iimpl_951670863_ &
+            let channel, keys, macs, shared_rand:(iimpl_951670863_ &
               Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
-              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global) =
+              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
+              Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global) =
               temp_0_
             in
             let _:usize = temp_1_ in
-            true)
-        (channel, keys, macs
+            b2t
+            ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                  #Alloc.Alloc.t_Global
+                  keys
+                <:
+                usize) =.
+              n
+              <:
+              bool) /\
+            (forall (j: usize).
+                b2t
+                ((mk_usize 0 <=. j <: bool) && (j <. n <: bool) &&
+                  ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                        #Alloc.Alloc.t_Global
+                        keys
+                      <:
+                      usize) =.
+                    n
+                    <:
+                    bool)) ==>
+                b2t
+                ((Alloc.Vec.impl_1__len #u128
+                      #Alloc.Alloc.t_Global
+                      (keys.[ j ] <: Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                    <:
+                    usize) =.
+                  l
+                  <:
+                  bool)) /\
+            b2t
+            ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                  #Alloc.Alloc.t_Global
+                  macs
+                <:
+                usize) =.
+              n
+              <:
+              bool) /\
+            (forall (j: usize).
+                b2t
+                ((mk_usize 0 <=. j <: bool) && (j <. n <: bool) &&
+                  ((Alloc.Vec.impl_1__len #(Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                        #Alloc.Alloc.t_Global
+                        macs
+                      <:
+                      usize) =.
+                    n
+                    <:
+                    bool)) ==>
+                b2t
+                ((Alloc.Vec.impl_1__len #u128
+                      #Alloc.Alloc.t_Global
+                      (macs.[ j ] <: Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                    <:
+                    usize) =.
+                  l
+                  <:
+                  bool)))
+        (channel, keys, macs, shared_rand
           <:
           (iimpl_951670863_ &
             Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
-            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global))
+            Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
+            Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
         (fun temp_0_ k ->
-            let channel, keys, macs:(iimpl_951670863_ &
+            let channel, keys, macs, shared_rand:(iimpl_951670863_ &
               Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
-              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global) =
+              Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
+              Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global) =
               temp_0_
             in
             let k:usize = k in
             if k =. i <: bool
             then
               Core.Ops.Control_flow.ControlFlow_Continue
-              (channel, keys, macs
+              (channel, keys, macs, shared_rand
                 <:
                 (iimpl_951670863_ &
                   Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
-                  Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global))
+                  Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
+                  Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
               <:
               Core.Ops.Control_flow.t_ControlFlow
                 (Core.Ops.Control_flow.t_ControlFlow
@@ -237,19 +321,14 @@ let fabitn
                         Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                           Alloc.Alloc.t_Global &
                         Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                          Alloc.Alloc.t_Global)))
+                          Alloc.Alloc.t_Global &
+                        Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)))
                 (iimpl_951670863_ &
                   Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
-                  Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+                  Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
+                  Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
             else
               let shared:Rand_chacha.Chacha.t_ChaCha20Rng = shared_two_by_two.[ k ] in
-              let
-              (shared_rand: Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global):Alloc.Vec.t_Vec
-                Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global =
-                Alloc.Vec.from_elem #Rand_chacha.Chacha.t_ChaCha20Rng
-                  (zero_rng () <: Rand_chacha.Chacha.t_ChaCha20Rng)
-                  n
-              in
               if i <. k
               then
                 let tmp0, out:(iimpl_951670863_ &
@@ -316,13 +395,14 @@ let fabitn
                       in
                       let _:Prims.unit = () in
                       Core.Ops.Control_flow.ControlFlow_Continue
-                      (channel, keys, macs
+                      (channel, keys, macs, shared_rand
                         <:
                         (iimpl_951670863_ &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global))
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
                       <:
                       Core.Ops.Control_flow.t_ControlFlow
                         (Core.Ops.Control_flow.t_ControlFlow
@@ -335,12 +415,15 @@ let fabitn
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                   Alloc.Alloc.t_Global &
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                                  Alloc.Alloc.t_Global &
+                                Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng
                                   Alloc.Alloc.t_Global)))
                         (iimpl_951670863_ &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global)
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
                     | Core.Result.Result_Err err ->
                       Core.Ops.Control_flow.ControlFlow_Break
                       (Core.Ops.Control_flow.ControlFlow_Break
@@ -370,7 +453,9 @@ let fabitn
                               Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                 Alloc.Alloc.t_Global &
                               Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                                Alloc.Alloc.t_Global)))
+                                Alloc.Alloc.t_Global &
+                              Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
+                          ))
                       <:
                       Core.Ops.Control_flow.t_ControlFlow
                         (Core.Ops.Control_flow.t_ControlFlow
@@ -383,12 +468,15 @@ let fabitn
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                   Alloc.Alloc.t_Global &
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                                  Alloc.Alloc.t_Global &
+                                Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng
                                   Alloc.Alloc.t_Global)))
                         (iimpl_951670863_ &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global))
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
                 | Core.Result.Result_Err err ->
                   Core.Ops.Control_flow.ControlFlow_Break
                   (Core.Ops.Control_flow.ControlFlow_Break
@@ -418,7 +506,8 @@ let fabitn
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global)))
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)))
                   <:
                   Core.Ops.Control_flow.t_ControlFlow
                     (Core.Ops.Control_flow.t_ControlFlow
@@ -431,12 +520,14 @@ let fabitn
                             Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                               Alloc.Alloc.t_Global &
                             Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                              Alloc.Alloc.t_Global)))
+                              Alloc.Alloc.t_Global &
+                            Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)))
                     (iimpl_951670863_ &
                       Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                         Alloc.Alloc.t_Global &
                       Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                        Alloc.Alloc.t_Global)
+                        Alloc.Alloc.t_Global &
+                      Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
               else
                 let tmp0, out:(iimpl_951670863_ &
                   Core.Result.t_Result
@@ -502,13 +593,14 @@ let fabitn
                       in
                       let _:Prims.unit = () in
                       Core.Ops.Control_flow.ControlFlow_Continue
-                      (channel, keys, macs
+                      (channel, keys, macs, shared_rand
                         <:
                         (iimpl_951670863_ &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global))
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
                       <:
                       Core.Ops.Control_flow.t_ControlFlow
                         (Core.Ops.Control_flow.t_ControlFlow
@@ -521,12 +613,15 @@ let fabitn
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                   Alloc.Alloc.t_Global &
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                                  Alloc.Alloc.t_Global &
+                                Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng
                                   Alloc.Alloc.t_Global)))
                         (iimpl_951670863_ &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global)
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
                     | Core.Result.Result_Err err ->
                       Core.Ops.Control_flow.ControlFlow_Break
                       (Core.Ops.Control_flow.ControlFlow_Break
@@ -556,7 +651,9 @@ let fabitn
                               Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                 Alloc.Alloc.t_Global &
                               Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                                Alloc.Alloc.t_Global)))
+                                Alloc.Alloc.t_Global &
+                              Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
+                          ))
                       <:
                       Core.Ops.Control_flow.t_ControlFlow
                         (Core.Ops.Control_flow.t_ControlFlow
@@ -569,12 +666,15 @@ let fabitn
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                                   Alloc.Alloc.t_Global &
                                 Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
+                                  Alloc.Alloc.t_Global &
+                                Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng
                                   Alloc.Alloc.t_Global)))
                         (iimpl_951670863_ &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global))
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
                 | Core.Result.Result_Err err ->
                   Core.Ops.Control_flow.ControlFlow_Break
                   (Core.Ops.Control_flow.ControlFlow_Break
@@ -604,7 +704,8 @@ let fabitn
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                             Alloc.Alloc.t_Global &
                           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                            Alloc.Alloc.t_Global)))
+                            Alloc.Alloc.t_Global &
+                          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)))
                   <:
                   Core.Ops.Control_flow.t_ControlFlow
                     (Core.Ops.Control_flow.t_ControlFlow
@@ -617,12 +718,14 @@ let fabitn
                             Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                               Alloc.Alloc.t_Global &
                             Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                              Alloc.Alloc.t_Global)))
+                              Alloc.Alloc.t_Global &
+                            Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)))
                     (iimpl_951670863_ &
                       Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
                         Alloc.Alloc.t_Global &
                       Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global)
-                        Alloc.Alloc.t_Global))
+                        Alloc.Alloc.t_Global &
+                      Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global))
       <:
       Core.Ops.Control_flow.t_ControlFlow
         (iimpl_951670863_ &
@@ -631,10 +734,11 @@ let fabitn
               Rand_chacha.Chacha.t_ChaCha20Rng) t_Error)
         (iimpl_951670863_ &
           Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
-          Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global)
+          Alloc.Vec.t_Vec (Alloc.Vec.t_Vec u128 Alloc.Alloc.t_Global) Alloc.Alloc.t_Global &
+          Alloc.Vec.t_Vec Rand_chacha.Chacha.t_ChaCha20Rng Alloc.Alloc.t_Global)
     with
     | Core.Ops.Control_flow.ControlFlow_Break ret -> ret
-    | Core.Ops.Control_flow.ControlFlow_Continue (channel, keys, macs) ->
+    | Core.Ops.Control_flow.ControlFlow_Continue (channel, keys, macs, shared_rand) ->
       let tmp0, out:(iimpl_951670863_ &
         Core.Result.t_Result Rand_chacha.Chacha.t_ChaCha20Rng t_Error) =
         shared_rng #iimpl_951670863_ channel i n
@@ -693,10 +797,7 @@ let fabitn
                         in
                         let _:usize = temp_1_ in
                         let tmp0, out:(Rand_chacha.Chacha.t_ChaCha20Rng & bool) =
-                          Rand.Rng.f_gen #Rand_chacha.Chacha.t_ChaCha20Rng
-                            #FStar.Tactics.Typeclasses.solve
-                            #bool
-                            multi_shared_rand
+                          rand_gen multi_shared_rand
                         in
                         let multi_shared_rand:Rand_chacha.Chacha.t_ChaCha20Rng = tmp0 in
                         Alloc.Vec.impl_1__push #bool #Alloc.Alloc.t_Global inner out,
@@ -1081,11 +1182,7 @@ let fabitn
               with
               | Core.Ops.Control_flow.ControlFlow_Break ret -> ret
               | Core.Ops.Control_flow.ControlFlow_Continue _ ->
-                let _:Prims.unit =
-                  Core.Mem.drop #(Alloc.Vec.t_Vec (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-                        Alloc.Alloc.t_Global)
-                    r
-                in
+                let _:Prims.unit = drop_func #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) r in
                 let x:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global =
                   Alloc.Vec.impl_1__truncate #bool #Alloc.Alloc.t_Global x l
                 in

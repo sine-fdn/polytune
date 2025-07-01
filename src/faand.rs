@@ -374,6 +374,21 @@ fn zero_rng() -> ChaCha20Rng {
     ChaCha20Rng::from_seed([0u8; 32])
 }
 
+#[hax_lib::opaque]
+fn random_bool() -> bool {
+    random()
+}
+
+#[hax_lib::opaque]
+fn rand_gen(rng: &mut ChaCha20Rng) -> bool {
+    rng.gen()
+}
+
+#[hax_lib::opaque]
+fn drop_func<T>(vec: Vec<T>) -> () {
+    drop(vec)
+}
+
 /// Protocol PI_aBit^n that performs F_aBit^n from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
@@ -394,6 +409,7 @@ fn zero_rng() -> ChaCha20Rng {
         ))
     )
 )]*/
+#[hax_lib::requires(l <= usize::MAX - 3 * RHO)]
 async fn fabitn(
     channel: &mut impl Channel,
     delta: Delta,
@@ -406,7 +422,7 @@ async fn fabitn(
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
 
-    let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
+    let mut x: Vec<bool> = (0..lprime).map(|_| random_bool()).collect();
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
     let mut keys = vec![vec![0; lprime]; n];
@@ -416,13 +432,19 @@ async fn fabitn(
     if !(shared_two_by_two.len() == n) {
         return Err(Error::InvalidLength);
     }
+    let mut shared_rand: Vec<ChaCha20Rng> = vec![zero_rng(); n];
 
     for k in 0..n {
+        hax_lib::loop_invariant!(|_: usize| hax_lib::Prop::from(keys.len() == n)
+            & hax_lib::forall(|j: usize| hax_lib::implies(0 <= j && j < n && keys.len() == n, keys[j].len() == l))
+            & hax_lib::Prop::from(macs.len() == n)
+            & hax_lib::forall(|j: usize| hax_lib::implies(0 <= j && j < n && macs.len() == n, macs[j].len() == l))
+        );
+
         if k == i {
             continue;
         }
         let shared = &shared_two_by_two[k];
-        let mut shared_rand: Vec<ChaCha20Rng> = vec![zero_rng(); n];
         if i < k {
             (keys[k], shared_rand[k]) = kos_ot_sender(channel, delta.0, lprime, k, shared).await?;
             (macs[k], shared_rand[k]) = kos_ot_receiver(channel, &x, k, shared).await?;
@@ -441,7 +463,7 @@ async fn fabitn(
     for _ in 0..three_rho {
         let mut inner = Vec::with_capacity(lprime);
         for _ in 0..lprime {
-            inner.push(multi_shared_rand.gen());
+            inner.push(rand_gen(&mut multi_shared_rand));
         }
         r.push(inner);
     }
@@ -496,7 +518,7 @@ async fn fabitn(
             }
         }
     }
-    drop(r);
+    drop_func(r);
 
     // Step 4) Return the first l objects.
     x.truncate(l);
@@ -697,7 +719,7 @@ async fn fhaand(
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
     for j in (0..n).filter(|j| *j != i) {
         for ll in 0..l {
-            let sj: bool = random();
+            let sj: bool = random_bool();
             let (_, kixj) = xshares[ll].1 .0[j];
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
@@ -781,8 +803,8 @@ async fn flaand(
         e[ll] = z[ll] ^ rshares[ll].0;
         zshares[ll].0 = z[ll];
     }
-    drop(v);
-    drop(z);
+    drop_func(v);
+    drop_func(z);
 
     // Triple Checking.
     // Step 4) Compute phi.
@@ -836,8 +858,8 @@ async fn flaand(
         hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
         commhi.push(commit(&hi[ll].to_be_bytes()));
     }
-    drop(phi);
-    drop(ki_xj_phi);
+    drop_func(phi);
+    drop_func(ki_xj_phi);
 
     // All parties first broadcast the commitment of Hi.
     let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi, l).await?;
@@ -1044,7 +1066,7 @@ async fn check_dvalue(
             dvalues_macs[j].0 = d_values[j].to_vec();
         }
         send_to(channel, k, "dvalue", &dvalues_macs).await?;
-        drop(dvalues_macs);
+        drop_func(dvalues_macs);
     }
 
     for k in (0..n).filter(|k| *k != i) {
