@@ -54,8 +54,8 @@ async fn main() -> Result<(), Error> {
     let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
     let input = prg.parse_arg(party, &input)?.as_bits();
     let p_out: Vec<_> = (0..urls.len()).collect();
-    let mut channel = HttpChannel::new(urls, party).await?;
-    let output = mpc(&mut channel, &prg.circuit, &input, 0, party, &p_out).await?;
+    let channel = HttpChannel::new(urls, party).await?;
+    let output = mpc(&channel, &prg.circuit, &input, 0, party, &p_out).await?;
     if !output.is_empty() {
         println!("\nThe result is {}", prg.parse_output(&output)?);
     }

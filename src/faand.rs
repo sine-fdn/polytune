@@ -105,7 +105,7 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
 pub(crate) async fn broadcast_verification<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     i: usize,
     n: usize,
     phase: &str,
@@ -160,7 +160,7 @@ pub(crate) async fn broadcast_verification<
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     i: usize,
     n: usize,
     phase: &str,
@@ -187,7 +187,7 @@ pub(crate) async fn broadcast_first_send_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     i: usize,
     n: usize,
     phase: &str,
@@ -220,7 +220,7 @@ pub(crate) async fn broadcast_first_send_second<
 /// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
 /// cryptographically secure random number generator.
 pub(crate) async fn shared_rng(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     i: usize,
     n: usize,
 ) -> Result<ChaCha20Rng, Error> {
@@ -274,7 +274,7 @@ pub(crate) async fn shared_rng(
 /// This function generates a shared random number generator (RNG) between every two parties using
 /// two-party coin tossing for the two-party KOS OT protocol.
 pub(crate) async fn shared_rng_pairwise(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     i: usize,
     n: usize,
 ) -> Result<Vec<Vec<Option<ChaCha20Rng>>>, Error> {
@@ -348,7 +348,7 @@ pub(crate) async fn shared_rng_pairwise(
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
 async fn fabitn(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     i: usize,
     n: usize,
     l: usize,
@@ -474,7 +474,7 @@ async fn fabitn(
 ///      MACs against the commitments.
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 pub(crate) async fn fashare(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     i: usize,
     n: usize,
     l: usize,
@@ -581,7 +581,7 @@ pub(crate) async fn fashare(
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
 async fn fhaand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     i: usize,
     n: usize,
     l: usize,
@@ -656,7 +656,7 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
 /// the XOR of the output values z.
 async fn flaand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
     i: usize,
     n: usize,
@@ -779,7 +779,7 @@ type Bucket<'a> = Vec<(&'a Share, &'a Share, &'a Share)>;
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 async fn faand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     i: usize,
     n: usize,
     l: usize, //num_and_gates
@@ -829,7 +829,7 @@ async fn faand(
 
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
 pub(crate) async fn beaver_aand(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     alpha_beta_shares: Vec<(Share, Share)>,
     i: usize,
     n: usize,
@@ -911,7 +911,7 @@ pub(crate) async fn beaver_aand(
 
 /// Check and return d-values for a vector of shares.
 async fn check_dvalue(
-    (channel, delta): (&mut impl Channel, Delta),
+    (channel, delta): (&impl Channel, Delta),
     i: usize,
     n: usize,
     buckets: &[Bucket<'_>],

@@ -40,7 +40,7 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Set up a simple channel for communication
-//! let mut channel = /* ... */
+//! let channel= /* ... */
 //!
 //! // Load or define a circuit
 //! let circuit = /* ... */
@@ -53,7 +53,7 @@
 //!
 //! // Execute the MPC protocol
 //! let result = mpc(
-//!     &mut channel,
+//!     &channel,
 //!     &circuit,
 //!     &my_inputs,
 //!     p_eval,

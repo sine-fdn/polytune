@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
     sleep(Duration::from_secs(args.wait_time)).await;
     println!("> starting the computation...");
 
-    let mut channel = IrohChannel {
+    let channel = IrohChannel {
         sender,
         receiver: tokio::sync::Mutex::new(receiver),
         received_msgs: Mutex::default(),
@@ -169,7 +169,7 @@ async fn main() -> Result<()> {
     let p_own = args.party;
     let p_out: Vec<_> = (0..parties).collect();
 
-    let output = mpc(&mut channel, &prg.circuit, &input, p_eval, p_own, &p_out).await?;
+    let output = mpc(&channel, &prg.circuit, &input, p_eval, p_own, &p_out).await?;
 
     // shutdown
     router.shutdown().await?;

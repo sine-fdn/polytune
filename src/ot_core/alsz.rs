@@ -43,7 +43,7 @@ pub(crate) struct Receiver<OT: OtSender<Msg = Block> + SemiHonest> {
 
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT> {
     async fn init_fixed_key<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         s_: [u8; 16],
         rng: &mut RNG,
         p_to: usize,
@@ -69,7 +69,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> FixedKeyInitializer for Sender<OT
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
     pub(super) async fn send_setup<C: Channel>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         m: usize,
         p_to: usize,
     ) -> Result<Vec<u8>, Error> {
@@ -93,7 +93,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
     type Msg = Block;
 
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
@@ -105,7 +105,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
 
     async fn send<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[(Self::Msg, Self::Msg)],
         _: &mut RNG,
         p_to: usize,
@@ -132,7 +132,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> OtSender for Sender<OT> {
 impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
     async fn send_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         deltas: &[Self::Msg],
         _: &mut RNG,
         p_to: usize,
@@ -161,7 +161,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> CorrelatedSender for Sender<OT> {
 impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
     pub(super) async fn recv_setup<C: Channel>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         r: &[u8],
         m: usize,
         p_to: usize,
@@ -190,7 +190,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
     type Msg = Block;
 
     async fn init<C: Channel, RNG: CryptoRng + Rng>(
-        channel: &mut C,
+        channel: &C,
         rng: &mut RNG,
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
@@ -218,7 +218,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
 
     async fn recv<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[bool],
         _: &mut RNG,
         p_to: usize,
@@ -244,7 +244,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> OtReceiver for Receiver<OT> {
 impl<OT: OtSender<Msg = Block> + SemiHonest> CorrelatedReceiver for Receiver<OT> {
     async fn recv_correlated<C: Channel, RNG: CryptoRng + Rng>(
         &mut self,
-        channel: &mut C,
+        channel: &C,
         inputs: &[bool],
         _: &mut RNG,
         p_to: usize,

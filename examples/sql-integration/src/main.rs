@@ -535,7 +535,7 @@ async fn execute_mpc(
 
     // Now that we have our input, we can start the actual session without a trusted third party:
     let p_out: Vec<_> = vec![*leader];
-    let mut channel = {
+    let channel = {
         let mut locked = state.lock().await;
         let state = locked.borrow_mut();
         if !state.senders.is_empty() {
@@ -556,7 +556,7 @@ async fn execute_mpc(
     };
 
     // We run the computation using MPC, which might take some time...
-    let output = mpc(&mut channel, &prg.circuit, &input, 0, *party, &p_out).await?;
+    let output = mpc(&channel, &prg.circuit, &input, 0, *party, &p_out).await?;
 
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();

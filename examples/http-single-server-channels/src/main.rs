@@ -61,7 +61,7 @@ async fn main() {
             let prg = compile(&prg).unwrap();
             let input = prg.parse_arg(party, &input).unwrap().as_bits();
             let p_eval = 0;
-            let mut channel = PollingHttpChannel::new(&url, &session, party);
+            let channel = PollingHttpChannel::new(&url, &session, party);
             channel.join().await.unwrap();
             let parties = prg.circuit.input_gates.len();
             loop {
@@ -74,7 +74,7 @@ async fn main() {
                 }
             }
             let p_out: Vec<_> = (0..parties).collect();
-            let output = mpc(&mut channel, &prg.circuit, &input, p_eval, party, &p_out)
+            let output = mpc(&channel, &prg.circuit, &input, p_eval, party, &p_out)
                 .await
                 .unwrap();
             if !output.is_empty() {

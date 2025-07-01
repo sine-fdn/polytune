@@ -146,7 +146,7 @@ fn bench_circuit_two_parties<'a, M, F>(
             let mut validate_output = validate_output.clone();
             let mut elapsed = M::Value::default();
             for _ in 0..iters {
-                let [mut ch1, mut ch2] = channel::SimpleChannel::channels(2)
+                let [ch1, ch2] = channel::SimpleChannel::channels(2)
                     .try_into()
                     .expect("parties is 2");
                 let circ1 = circ.clone();
@@ -160,7 +160,7 @@ fn bench_circuit_two_parties<'a, M, F>(
                 // this means that we must recreate the SimpleChannel and circ above, because the future needs to
                 // be 'static for spawning.
                 let fut = async move {
-                    mpc(&mut ch1, &circ1, &inputs1, 0, 0, &p_out)
+                    mpc(&ch1, &circ1, &inputs1, 0, 0, &p_out)
                         .await
                         .expect("mpc execution failed")
                 };
@@ -172,7 +172,7 @@ fn bench_circuit_two_parties<'a, M, F>(
                     tx.send(res).expect("channel closed");
                 });
                 let fut = async move {
-                    mpc(&mut ch2, &circ2, &inputs2, 0, 1, &p_out)
+                    mpc(&ch2, &circ2, &inputs2, 0, 1, &p_out)
                         .await
                         .expect("mpc execution failed")
                 };

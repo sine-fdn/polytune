@@ -34,7 +34,7 @@ fn bench_ots<'a>(
             // iter_custom allows us to do the setup here without impacting the tracked time
             // doing the setup in primitives_benchmark is tricky/not possible due to the
             // future capturing &mut variables
-            let [mut ch1, mut ch2] = channel::SimpleChannel::channels(2)
+            let [ch1, ch2] = channel::SimpleChannel::channels(2)
                 .try_into()
                 .expect("parties is 2");
             let mut shared_rand1 = ChaCha20Rng::seed_from_u64(42);
@@ -46,8 +46,8 @@ fn bench_ots<'a>(
                 let now = Instant::now();
                 for _ in 0..iters {
                     tokio::try_join!(
-                        kos_ot_sender(&mut ch1, &deltas, 1, &mut shared_rand1),
-                        kos_ot_receiver(&mut ch2, &bs, 0, &mut shared_rand2)
+                        kos_ot_sender(&ch1, &deltas, 1, &mut shared_rand1),
+                        kos_ot_receiver(&ch2, &bs, 0, &mut shared_rand2)
                     )
                     .expect("OTs failed");
                 }

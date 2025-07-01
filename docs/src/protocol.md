@@ -14,7 +14,7 @@ Our implementation of WRK17 provides the `mpc` function for executing MPC comput
 
 ```rust
 pub async fn mpc(
-    channel: &mut impl Channel,
+    channel: &impl Channel,
     circuit: &Circuit,
     inputs: &[bool],
     p_fpre: Preprocessor,
