@@ -92,7 +92,10 @@ async fn simulate_mpc_async(
 }
 
 pub fn join_benchmark(c: &mut Criterion) {
-    let n_records = 10;
+    let n_records = std::env::var("POLYTUNE_BENCH_JOIN_SIZE")
+        .map(|v| v.parse().expect("POLYTUNE_BENCH_JOIN_SIZE must be a u64"))
+        .unwrap_or(10);
+
     let code = include_str!(".join.garble.rs");
 
     let bench_id = format!("join {n_records} records");
