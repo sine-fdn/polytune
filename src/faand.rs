@@ -808,10 +808,7 @@ async fn faand(
     }
 
     // Pre-allocate buckets with known capacity
-    let mut buckets: Vec<Bucket> = Vec::with_capacity(l);
-    for _ in 0..l {
-        buckets.push(Vec::with_capacity(b));
-    }
+    let mut buckets: Vec<Bucket> = vec![Vec::with_capacity(b); l];
 
     // Distribute shuffled indices into buckets
     for (pos, &idx) in indices.iter().enumerate() {
