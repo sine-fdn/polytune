@@ -1,13 +1,13 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use rand::{random, seq::SliceRandom, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, random};
 use rand_chacha::ChaCha20Rng;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     block::Block,
-    channel::{self, recv_from, recv_vec_from, send_to, Channel},
+    channel::{self, Channel, recv_from, recv_vec_from, send_to},
     data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
 };
@@ -498,7 +498,7 @@ pub(crate) async fn fashare(
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
         for k in (0..n).filter(|k| *k != i) {
-            let (mac, key) = xishare.1 .0[k];
+            let (mac, key) = xishare.1.0[k];
             d0[r] ^= key.0;
             dm.extend(&mac.0.to_be_bytes());
         }
@@ -600,7 +600,7 @@ async fn fhaand(
     for j in (0..n).filter(|j| *j != i) {
         for ll in 0..l {
             let sj: bool = random();
-            let (_, kixj) = xshares[ll].1 .0[j];
+            let (_, kixj) = xshares[ll].1.0[j];
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
             h0h1[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
@@ -613,7 +613,7 @@ async fn fhaand(
     for j in (0..n).filter(|j| *j != i) {
         let h0h1_j = recv_vec_from::<(bool, bool)>(channel, j, "haand", l).await?;
         for ll in 0..l {
-            let (mixj, _) = xshares[ll].1 .0[j];
+            let (mixj, _) = xshares[ll].1.0[j];
             let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
             let mut t = hash_mixj.as_bytes()[31] & 1 != 0;
             t ^= if xshares[ll].0 {
@@ -690,7 +690,7 @@ async fn flaand(
     let mut phi = vec![0; l];
     for (ll, phi_l) in phi.iter_mut().enumerate().take(l) {
         for k in (0..n).filter(|k| *k != i) {
-            let (mk_yi, ki_yk) = yshares[ll].1 .0[k];
+            let (mk_yi, ki_yk) = yshares[ll].1.0[k];
             *phi_l ^= ki_yk.0 ^ mk_yi.0;
         }
         *phi_l ^= yshares[ll].0 as u128 * delta.0;
@@ -702,7 +702,7 @@ async fn flaand(
     let mut ei_uij = vec![vec![]; n];
     for j in (0..n).filter(|j| *j != i) {
         for (ll, phi_l) in phi.iter().enumerate().take(l) {
-            let (_, ki_xj) = xshares[ll].1 .0[j];
+            let (_, ki_xj) = xshares[ll].1.0[j];
             ki_xj_phi[j][ll] = hash128(ki_xj.0)?;
             let uij = hash128(ki_xj.0 ^ delta.0)? ^ ki_xj_phi[j][ll] ^ *phi_l;
             ei_uij[j].push((e[ll], uij));
@@ -713,15 +713,15 @@ async fn flaand(
 
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
-            let (mi_xj, _) = xshares[ll].1 .0[j];
+            let (mi_xj, _) = xshares[ll].1.0[j];
             ki_xj_phi[j][ll] ^= hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
             // mi_xj_phi added here
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
-            let (mac, key) = rshares[ll].1 .0[j];
+            let (mac, key) = rshares[ll].1.0[j];
             if ei_uij_k[j][ll].0 {
-                zshares[ll].1 .0[j] = (mac, Key(key.0 ^ delta.0));
+                zshares[ll].1.0[j] = (mac, Key(key.0 ^ delta.0));
             } else {
-                zshares[ll].1 .0[j] = (mac, key);
+                zshares[ll].1.0[j] = (mac, key);
             }
         }
     }
@@ -731,7 +731,7 @@ async fn flaand(
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
         for k in (0..n).filter(|k| *k != i) {
-            let (mk_zi, ki_zk) = zshares[ll].1 .0[k];
+            let (mk_zi, ki_zk) = zshares[ll].1.0[k];
             hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
         hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
@@ -864,8 +864,8 @@ pub(crate) async fn beaver_aand(
     for k in (0..n).filter(|k| *k != i) {
         for (j, (dshare, eshare)) in de_shares.iter().enumerate() {
             let (_, _, dmac, emac) = &mut d_e_dmac_emac[j];
-            *dmac = dshare.1 .0[k].0;
-            *emac = eshare.1 .0[k].0;
+            *dmac = dshare.1.0[k].0;
+            *emac = eshare.1.0[k].0;
         }
         send_to(channel, k, "faand", &d_e_dmac_emac).await?;
     }
@@ -876,8 +876,8 @@ pub(crate) async fn beaver_aand(
     }
     for k in (0..n).filter(|k| *k != i) {
         for (j, &(d, e, ref dmac, ref emac)) in d_e_dmac_emac_k[k].iter().enumerate() {
-            let (_, dkey) = de_shares[j].0 .1 .0[k];
-            let (_, ekey) = de_shares[j].1 .1 .0[k];
+            let (_, dkey) = de_shares[j].0.1.0[k];
+            let (_, ekey) = de_shares[j].1.1.0[k];
 
             let expected_dmac = dkey.0 ^ if d { delta.0 } else { 0 };
             let expected_emac = ekey.0 ^ if e { delta.0 } else { 0 };
@@ -938,8 +938,8 @@ async fn check_dvalue(
         for (j, bucket) in buckets.iter().enumerate() {
             let (_, y, _) = &bucket[0];
             for (_, y_next, _) in bucket.iter().skip(1) {
-                let (y0mac, _) = y.1 .0[k];
-                let (ymac, _) = y_next.1 .0[k];
+                let (y0mac, _) = y.1.0[k];
+                let (ymac, _) = y_next.1.0[k];
                 dvalues_macs[j].1.push(y0mac ^ ymac);
             }
             dvalues_macs[j].0 = d_values[j].to_vec();
@@ -953,9 +953,9 @@ async fn check_dvalue(
             recv_vec_from::<(Vec<bool>, Vec<Mac>)>(channel, k, "dvalue", len).await?;
         for (j, dval) in d_values.iter_mut().enumerate().take(len) {
             let (d_value_p, d_macs_p) = &dvalues_macs_k[j];
-            let (_, y0key) = buckets[j][0].1 .1 .0[k];
+            let (_, y0key) = buckets[j][0].1.1.0[k];
             for (m, (d, dmac)) in dval.iter_mut().zip(d_macs_p).enumerate() {
-                let (_, ykey) = buckets[j][m + 1].1 .1 .0[k];
+                let (_, ykey) = buckets[j][m + 1].1.1.0[k];
                 let expected_mac = y0key.0 ^ ykey.0 ^ if d_value_p[m] { delta.0 } else { 0 };
                 if dmac.0 != expected_mac {
                     return Err(Error::AANDWrongMAC);
@@ -1001,8 +1001,8 @@ fn combine_two_leaky_ands(
     let xbit = x1.0 ^ x2.0;
     let mut xauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in (0..n).filter(|k| *k != i) {
-        let (mk_x1, ki_x1) = x1.1 .0[k];
-        let (mk_x2, ki_x2) = x2.1 .0[k];
+        let (mk_x1, ki_x1) = x1.1.0[k];
+        let (mk_x2, ki_x2) = x2.1.0[k];
         xauth.0[k] = (mk_x1 ^ mk_x2, ki_x1 ^ ki_x2);
     }
     let xshare = Share(xbit, xauth);
@@ -1010,9 +1010,9 @@ fn combine_two_leaky_ands(
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
     let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in (0..n).filter(|k| *k != i) {
-        let (mk_z1, ki_z1) = z1.1 .0[k];
-        let (mk_z2, ki_z2) = z2.1 .0[k];
-        let (mk_x2, ki_x2) = x2.1 .0[k];
+        let (mk_z1, ki_z1) = z1.1.0[k];
+        let (mk_z2, ki_z2) = z2.1.0[k];
+        let (mk_x2, ki_x2) = x2.1.0[k];
         zauth.0[k] = (
             mk_z1 ^ mk_z2 ^ Mac(d as u128 * mk_x2.0),
             ki_z1 ^ ki_z2 ^ Key(d as u128 * ki_x2.0),

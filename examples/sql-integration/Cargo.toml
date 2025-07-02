@@ -1,7 +1,7 @@
 [package]
 name = "polytune-sql-integration"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow = "1.0.79"
@@ -13,10 +13,10 @@ reqwest = { version = "0.12.20", features = ["json"] }
 serde = "1.0.197"
 serde_json = "1.0.115"
 sqlx = { version = "0.8.6", features = [
-    "runtime-tokio",
     "any",
-    "postgres",
     "mysql",
+    "postgres",
+    "runtime-tokio",
     "sqlite",
 ] }
 tokio = { version = "1.35.1", features = ["macros", "rt", "rt-multi-thread"] }

@@ -5,8 +5,8 @@
 use std::sync::LazyLock;
 
 use aes::{
-    cipher::{BlockCipherEncrypt, Key, KeyInit},
     Aes128,
+    cipher::{BlockCipherEncrypt, Key, KeyInit},
 };
 use bytemuck::Pod;
 

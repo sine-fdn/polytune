@@ -8,7 +8,7 @@ use std::{
 
 use aes::cipher::{self, array::sizes};
 use bytemuck::{Pod, Zeroable};
-use rand::{distr::StandardUniform, prelude::Distribution, Rng};
+use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 use serde::{Deserialize, Serialize};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
@@ -131,7 +131,7 @@ impl Block {
 
     /// Iterator over bits of the Block.
     #[inline]
-    pub fn bits(&self) -> impl Iterator<Item = bool> {
+    pub fn bits(&self) -> impl Iterator<Item = bool> + use<> {
         struct BitIter {
             blk: Block,
             idx: usize,

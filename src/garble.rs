@@ -1,8 +1,8 @@
 //! The cryptographic building blocks used to garble (= encrypt/decrypt) gate tables.
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, KeyInit},
 };
 
 use crate::data_types::{Label, Mac};
@@ -81,7 +81,7 @@ mod tests {
 
     use crate::{
         data_types::{Label, Mac},
-        garble::{decrypt, encrypt, GarblingKey},
+        garble::{GarblingKey, decrypt, encrypt},
     };
 
     #[test]

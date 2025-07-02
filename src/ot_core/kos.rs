@@ -8,14 +8,14 @@
 
 use crate::{
     block::Block,
-    channel::{recv_from, recv_vec_from, send_to, Channel},
+    channel::{Channel, recv_from, recv_vec_from, send_to},
     faand::Error,
     ot_core::{
-        alsz::{
-            boolvec_to_u8vec, u8vec_to_boolvec, Receiver as AlszReceiver, Sender as AlszSender,
-        },
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Malicious,
         Receiver as OtReceiver, SemiHonest, Sender as OtSender,
+        alsz::{
+            Receiver as AlszReceiver, Sender as AlszSender, boolvec_to_u8vec, u8vec_to_boolvec,
+        },
     },
 };
 

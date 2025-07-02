@@ -462,7 +462,7 @@ mod scalar_simd_tests {
 
     use std::{arch::x86_64::_mm_clmulepi64_si128, mem::transmute};
 
-    use rand::{rng, Rng};
+    use rand::{Rng, rng};
 
     use super::{clmul, scalar};
 

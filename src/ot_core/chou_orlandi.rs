@@ -18,7 +18,7 @@
 
 use crate::{
     block::Block,
-    channel::{recv_vec_from, send_to, Channel},
+    channel::{Channel, recv_vec_from, send_to},
     faand::Error,
     ot_core::{Malicious, Receiver as OtReceiver, SemiHonest, Sender as OtSender},
     rand_compat::RngCompat,

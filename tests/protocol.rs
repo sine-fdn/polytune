@@ -4,7 +4,7 @@ use garble_lang::{
 };
 use polytune::{
     channel,
-    protocol::{mpc, Error},
+    protocol::{Error, mpc},
 };
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.

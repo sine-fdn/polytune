@@ -1,9 +1,10 @@
 //! The FPre preprocessor as a (semi-)trusted party, providing correlated randomness.
 
+use futures::future::try_join_all;
 use rand::random;
 
 use crate::{
-    channel::{self, recv_from, send_to, Channel},
+    channel::{self, Channel, recv_from, send_to},
     data_types::{Auth, Delta, Key, Mac, Share},
 };
 
@@ -46,32 +47,39 @@ impl From<channel::Error> for Error {
 /// Runs FPre as a trusted dealer, communicating with all other parties.
 #[allow(dead_code)]
 pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Result<(), Error> {
-    for p in 0..parties {
-        recv_from::<()>(channel, p, "delta (fpre)").await?;
-    }
-    let mut deltas = vec![];
-    for p in 0..parties {
+    try_join_all((0..parties).map(async |p| recv_from::<()>(channel, p, "delta (fpre)").await))
+        .await?;
+
+    let deltas = try_join_all((0..parties).map(async |p| {
         let delta = Delta(random());
         send_to(channel, p, "delta (fpre)", &[delta]).await?;
-        deltas.push(delta);
-    }
+        Ok::<_, Error>(delta)
+    }))
+    .await?;
 
-    let mut num_shares = 0;
-    for p in 0..parties {
-        let r: u32 = recv_from(channel, p, "random shares (fpre)")
+    let num_shares: Vec<u32> = try_join_all((0..parties).map(async |p| {
+        recv_from(channel, p, "random shares (fpre)")
             .await?
             .pop()
-            .ok_or(Error::EmptyMsg)?;
-        if num_shares > 0 && num_shares != r {
-            let e = Error::RandomSharesMismatch(num_shares, r);
-            for p in 0..parties {
-                send_to(channel, p, "error", &[format!("{e:?}")]).await?;
-            }
+            .ok_or(Error::EmptyMsg)
+    }))
+    .await?;
+
+    for window in num_shares.windows(2) {
+        let &[a, b] = window else {
+            unreachable!("window is size 2")
+        };
+        if a != b {
+            let e = Error::RandomSharesMismatch(a, b);
+            try_join_all(
+                (0..parties).map(async |p| send_to(channel, p, "error", &[format!("{e:?}")]).await),
+            )
+            .await?;
             return Err(e);
         }
-        num_shares = r;
     }
-    let num_shares = num_shares as usize;
+
+    let num_shares = num_shares.first().copied().unwrap_or_default() as usize;
     let mut random_shares = vec![vec![]; parties];
     for _ in 0..num_shares {
         let mut bits = vec![];
@@ -97,20 +105,29 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
             random_shares[i].push(Share(bits[i], Auth(mac_and_key)));
         }
     }
-    for (p, shares) in random_shares.into_iter().enumerate() {
-        send_to(channel, p, "random shares (fpre)", &shares).await?;
-    }
+    try_join_all(
+        random_shares
+            .into_iter()
+            .enumerate()
+            .map(async |(p, shares)| send_to(channel, p, "random shares (fpre)", &shares).await),
+    )
+    .await?;
+
+    let all_and_shares: Vec<Vec<(Share, Share)>> =
+        try_join_all((0..parties).map(async |p| recv_from(channel, p, "AND shares (fpre)").await))
+            .await?;
 
     let mut num_shares = None;
     let mut shares = vec![];
-    for p in 0..parties {
-        let and_shares: Vec<(Share, Share)> = recv_from(channel, p, "AND shares (fpre)").await?;
+    for and_shares in all_and_shares {
         if let Some(num_shares) = num_shares {
             if num_shares != and_shares.len() {
                 let e = Error::AndSharesMismatch(num_shares, and_shares.len());
-                for p in 0..parties {
-                    send_to(channel, p, "error", &[format!("{e:?}")]).await?;
-                }
+                try_join_all(
+                    (0..parties)
+                        .map(async |p| send_to(channel, p, "error", &[format!("{e:?}")]).await),
+                )
+                .await?;
                 return Err(e);
             }
         } else {
@@ -143,9 +160,10 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
     }
     if has_cheated {
         let e = Error::CheatingDetected;
-        for p in 0..parties {
-            send_to(channel, p, "error", &[format!("{e:?}")]).await?;
-        }
+        try_join_all(
+            (0..parties).map(async |p| send_to(channel, p, "error", &[format!("{e:?}")]).await),
+        )
+        .await?;
         return Err(e);
     }
     let mut and_shares = vec![vec![]; parties];
@@ -187,18 +205,24 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
             and_shares[i].push(Share(bits[i], Auth(mac_and_key)));
         }
     }
-    for (p, and_shares) in and_shares.into_iter().enumerate() {
-        send_to(channel, p, "AND shares (fpre)", &and_shares).await?;
-    }
+    try_join_all(
+        and_shares
+            .into_iter()
+            .enumerate()
+            .map(async |(p, and_shares)| {
+                send_to(channel, p, "AND shares (fpre)", &and_shares).await
+            }),
+    )
+    .await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
-        fpre::{fpre, Auth, Delta, Error, Key, Mac, Share},
-        protocol::{Preprocessor, _mpc},
+        channel::{SimpleChannel, recv_from, recv_vec_from, send_to},
+        fpre::{Auth, Delta, Error, Key, Mac, Share, fpre},
+        protocol::{_mpc, Preprocessor},
     };
     use garble_lang::{circuit::Circuit, compile};
 
