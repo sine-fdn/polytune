@@ -1,8 +1,5 @@
 use super::Block;
 
-/// The irreducible polynomial for gf128 operations.
-const MOD: u64 = 0b10000111; // 0x87
-
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 cpufeatures::new!(target_feature_pclmulqdq, "pclmulqdq");
 
@@ -116,7 +113,8 @@ mod clmul {
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
 
-    use super::MOD;
+    /// The irreducible polynomial for gf128 operations.
+    const MOD: u64 = 0b10000111; // 0x87
 
     /// Multiplication over GF(2^128) using pclmulqdq.
     ///

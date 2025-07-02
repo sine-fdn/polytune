@@ -806,14 +806,14 @@ async fn faand(
         let j = shared_rand.random_range(0..=i);
         indices.swap(i, j);
     }
-    
+
     // Pre-allocate buckets with known capacity
     let mut buckets: Vec<Bucket> = Vec::with_capacity(l);
     for _ in 0..l {
         buckets.push(Vec::with_capacity(b));
     }
-    
-    // Distribute shuffled indices into buckets    
+
+    // Distribute shuffled indices into buckets
     for (pos, &idx) in indices.iter().enumerate() {
         let bucket_idx = pos % l;
         if buckets[bucket_idx].len() < b {
