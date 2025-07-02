@@ -25,6 +25,7 @@ use std::fmt;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use futures::future::{try_join, try_join_all};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::{
@@ -263,6 +264,99 @@ pub(crate) async fn recv_vec_from<T: DeserializeOwned + std::fmt::Debug>(
             reason: ErrorKind::InvalidLength,
         })
     }
+}
+
+/// Broadcasts the same data to all parties except self and receives responses from all other parties.
+///
+/// All sending and receiving is done concurrently.
+///
+/// # Security
+/// Note that this is an unverified broadcast. If you need a broadcast that verifies that
+/// each party actually sends the same data to the others, use [`crate::faand::broadcast`].
+///
+/// # Arguments
+/// * `channel` - The communication channel
+/// * `own_party` - Index of the current party (won't send to itself)
+/// * `num_parties` - Total number of parties
+/// * `phase` - Protocol phase name for message identification
+/// * `data` - Data to send to all other parties
+/// * `expected_recv_len` - Expected length of received vectors
+///
+/// # Returns
+/// A vector indexed by party ID, where `result[i]` contains the response from party `i`.
+/// The entry for `own_party` will be empty.
+pub(crate) async fn unverified_broadcast<T>(
+    channel: &impl Channel,
+    own_party: usize,
+    num_parties: usize,
+    phase: &str,
+    data: &[T],
+    expected_recv_len: usize,
+) -> Result<Vec<Vec<T>>, Error>
+where
+    T: Serialize + DeserializeOwned + std::fmt::Debug,
+{
+    let send_fut = try_join_all(
+        (0..num_parties)
+            .filter(|p| *p != own_party)
+            .map(|p| send_to(channel, p, phase, data)),
+    );
+
+    let recv_fut = try_join_all((0..num_parties).map(async |p| {
+        if p != own_party {
+            recv_vec_from(channel, p, phase, expected_recv_len).await
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, responses) = try_join(send_fut, recv_fut).await?;
+    Ok(responses)
+}
+
+/// Scatters different data to each party and receives responses from all other parties.
+///
+/// All sending and receiving is done concurrently.
+///
+/// # Arguments
+/// * `channel` - The communication channel
+/// * `own_party` - Index of the current party (won't send to itself)
+/// * `phase` - Protocol phase name for message identification
+/// * `data_per_party` - Vector where `data_per_party[i]` is sent to party `i` except
+///   when `i == own_party`
+/// * `expected_recv_len` - Expected length of received vectors
+///
+/// # Returns
+/// A vector indexed by party ID, where `result[i]` contains the response from party `i`.
+/// `result[own_party]` will be an empty `Vec`.
+pub(crate) async fn scatter<T>(
+    channel: &impl Channel,
+    own_party: usize,
+    phase: &str,
+    data_per_party: &[Vec<T>],
+    expected_recv_len: usize,
+) -> Result<Vec<Vec<T>>, Error>
+where
+    T: Serialize + DeserializeOwned + std::fmt::Debug,
+{
+    let num_parties = data_per_party.len();
+
+    let send_fut = try_join_all(
+        (0..num_parties)
+            .filter(|p| *p != own_party)
+            .map(|p| send_to(channel, p, phase, &data_per_party[p])),
+    );
+
+    let recv_fut = try_join_all((0..num_parties).map(async |p| {
+        if p != own_party {
+            recv_vec_from(channel, p, phase, expected_recv_len).await
+        } else {
+            Ok(vec![])
+        }
+    }));
+
+    let (_, responses) = try_join(send_fut, recv_fut).await?;
+    Ok(responses)
 }
 
 /// A simple asynchronous channel using [`Sender`] and [`Receiver`].
