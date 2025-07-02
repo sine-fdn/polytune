@@ -1,7 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use rand::{random, Rng, SeedableRng};
+use rand::{random, seq::SliceRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -799,24 +799,21 @@ async fn faand(
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
 
     // Step 2) Randomly partition all objects into l buckets, each with b objects.
-    // Fisher–Yates shuffle: randomly permutes the elements in shuffled in an unbiased manner, meaning
-    // that each possible permutation is equally likely.
+    // Use SliceRandom::shuffle for unbiased random permutation
     let mut indices: Vec<usize> = (0..lprime).collect();
-    for i in (1..lprime).rev() {
-        let j = shared_rand.random_range(0..=i);
-        indices.swap(i, j);
-    }
+    indices.shuffle(shared_rand);
 
-    // Pre-allocate buckets with known capacity
-    let mut buckets: Vec<Bucket> = vec![Vec::with_capacity(b); l];
-
-    // Distribute shuffled indices into buckets
-    for (pos, &idx) in indices.iter().enumerate() {
-        let bucket_idx = pos % l;
-        if buckets[bucket_idx].len() < b {
-            buckets[bucket_idx].push((&xshares[idx], &yshares[idx], &zshares[idx]));
-        }
-    }
+    // Distribute shuffled indices into buckets using chunks
+    // Since indices.len() == lprime == l * b, chunks_exact(b) gives us exactly l chunks of size b
+    let buckets: Vec<Bucket> = indices
+        .chunks_exact(b)
+        .map(|chunk| {
+            chunk
+                .iter()
+                .map(|&idx| (&xshares[idx], &yshares[idx], &zshares[idx]))
+                .collect()
+        })
+        .collect();
 
     // Step 3) For each bucket, combine b leaky ANDs into a single non-leaky AND.
     let d_values = check_dvalue((channel, delta), i, n, &buckets).await?;
