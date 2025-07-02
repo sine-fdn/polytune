@@ -10,6 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_LOG: info
 
 jobs:
   lint:
@@ -63,7 +64,7 @@ jobs:
           key: ${{ matrix.workspace-member }}
       - if: ${{ matrix.workspace-member == 'sql-integration' }}
         run: docker compose -f docker-compose.yml up -d
-      - run: cargo test --release
+      - run: cargo test --release -- --nocapture
 
   test-wasm-example:
     runs-on: ubuntu-latest
