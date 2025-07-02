@@ -8,7 +8,7 @@ anyhow = "1.0.79"
 bytes = { version = "1.7", features = ["serde"] }
 clap = { version = "4.4.18", features = ["derive"] }
 data-encoding = "2.6.0"
-iroh = "0.35.0"
+iroh = "0.90.0"
 iroh-gossip = "0.35.0"
 n0-future = "0.1.2"
 polytune = { path = "../../", version = "0.1.0" }
