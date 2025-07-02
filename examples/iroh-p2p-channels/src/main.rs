@@ -188,6 +188,23 @@ struct IrohChannel {
     party: usize,
 }
 
+impl IrohChannel {
+    fn check_for_stored_msg(&self, p: usize) -> Option<Vec<u8>> {
+        // fast path to check if there is already a stored message for us
+        let mut msgs_lock = self.received_msgs.lock().expect("mutex poisoned");
+        if let Some(msgs) = msgs_lock.get_mut(&p) {
+            if let msg @ Some(_) = msgs.pop_front() {
+                tracing::info!("found stored message from {p}");
+                msg
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 impl Channel for IrohChannel {
     type SendError = anyhow::Error;
     type RecvError = anyhow::Error;
@@ -213,18 +230,16 @@ impl Channel for IrohChannel {
     // that continously pulls messages from the GossipReceiver
     async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
         tracing::info!("receiving message from {p}");
-        {
-            // fast path to check if there is already a stored message for us
-            let mut msgs_lock = self.received_msgs.lock().expect("mutex poisoned");
-            if let Some(msgs) = msgs_lock.get_mut(&p) {
-                if let Some(msg) = msgs.pop_front() {
-                    tracing::info!("found stored message from {p}");
-                    return Ok(msg);
-                }
-            }
+        if let Some(msg) = self.check_for_stored_msg(p) {
+            return Ok(msg);
         }
         tracing::info!("could not find stored message, waiting for message...");
         let mut receiver = self.receiver.lock().await;
+        // While waiting for the receiver lock, another Channel holder might've inserted
+        // a msg for us, so we check again
+        if let Some(msg) = self.check_for_stored_msg(p) {
+            return Ok(msg);
+        }
         while let Some(event) = receiver.try_next().await? {
             if let Event::Gossip(GossipEvent::Received(msg)) = event {
                 let msg: Message = postcard::from_bytes(&msg.content)?;
@@ -235,20 +250,17 @@ impl Channel for IrohChannel {
                         msg.from_party,
                     );
 
-                    let mut msgs_lock = self.received_msgs.lock().expect("mutex poisoned");
-
-                    msgs_lock
+                    self.received_msgs
+                        .lock()
+                        .expect("mutex poisoned")
                         .entry(msg.from_party)
                         .or_default()
                         .push_back(msg.data);
 
                     // might be inserted by us in the preceding lines or by another holder of channel while we waited
                     // on self.receiver.lock().await
-                    if let Some(msgs) = msgs_lock.get_mut(&p) {
-                        if let Some(msg) = msgs.pop_front() {
-                            tracing::info!("found stored message from {p}");
-                            return Ok(msg);
-                        }
+                    if let Some(msg) = self.check_for_stored_msg(p) {
+                        return Ok(msg);
                     }
                 } else {
                     tracing::debug!(
