@@ -797,19 +797,28 @@ async fn faand(
 
     // Step 1) Generate all leaky AND triples by calling flaand l' times.
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
-    let triples: Vec<(&Share, &Share, &Share)> = (0..lprime)
-        .map(|l| (&xshares[l], &yshares[l], &zshares[l]))
-        .collect();
 
     // Step 2) Randomly partition all objects into l buckets, each with b objects.
-    let mut buckets: Vec<Bucket> = vec![vec![]; l];
-
-    for obj in triples {
-        let mut j = shared_rand.random_range(0..l);
-        while buckets[j].len() >= b {
-            j = (j + 1) % l;
+    // Fisher–Yates shuffle: randomly permutes the elements in shuffled in an unbiased manner, meaning
+    // that each possible permutation is equally likely.
+    let mut indices: Vec<usize> = (0..lprime).collect();
+    for i in (1..lprime).rev() {
+        let j = shared_rand.random_range(0..=i);
+        indices.swap(i, j);
+    }
+    
+    // Pre-allocate buckets with known capacity
+    let mut buckets: Vec<Bucket> = Vec::with_capacity(l);
+    for _ in 0..l {
+        buckets.push(Vec::with_capacity(b));
+    }
+    
+    // Distribute shuffled indices into buckets    
+    for (pos, &idx) in indices.iter().enumerate() {
+        let bucket_idx = pos % l;
+        if buckets[bucket_idx].len() < b {
+            buckets[bucket_idx].push((&xshares[idx], &yshares[idx], &zshares[idx]));
         }
-        buckets[j].push(obj);
     }
 
     // Step 3) For each bucket, combine b leaky ANDs into a single non-leaky AND.
@@ -820,7 +829,7 @@ async fn faand(
     }
 
     let mut aand_triples = Vec::with_capacity(buckets.len());
-    for (bucket, d) in buckets.into_iter().zip(d_values.into_iter()) {
+    for (bucket, d) in buckets.into_iter().zip(d_values) {
         aand_triples.push(combine_bucket(i, n, bucket, d)?);
     }
 
