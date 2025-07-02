@@ -1,7 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use rand::{Rng, SeedableRng, random};
+use rand::{Rng, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -797,20 +797,23 @@ async fn faand(
 
     // Step 1) Generate all leaky AND triples by calling flaand l' times.
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
-    let triples: Vec<(&Share, &Share, &Share)> = (0..lprime)
-        .map(|l| (&xshares[l], &yshares[l], &zshares[l]))
-        .collect();
 
     // Step 2) Randomly partition all objects into l buckets, each with b objects.
-    let mut buckets: Vec<Bucket> = vec![vec![]; l];
+    // Use SliceRandom::shuffle for unbiased random permutation
+    let mut indices: Vec<usize> = (0..lprime).collect();
+    indices.shuffle(shared_rand);
 
-    for obj in triples {
-        let mut j = shared_rand.random_range(0..l);
-        while buckets[j].len() >= b {
-            j = (j + 1) % l;
-        }
-        buckets[j].push(obj);
-    }
+    // Distribute shuffled indices into buckets using chunks
+    // Since indices.len() == lprime == l * b, chunks_exact(b) gives us exactly l chunks of size b
+    let buckets: Vec<Bucket> = indices
+        .chunks_exact(b)
+        .map(|chunk| {
+            chunk
+                .iter()
+                .map(|&idx| (&xshares[idx], &yshares[idx], &zshares[idx]))
+                .collect()
+        })
+        .collect();
 
     // Step 3) For each bucket, combine b leaky ANDs into a single non-leaky AND.
     let d_values = check_dvalue((channel, delta), i, n, &buckets).await?;
@@ -820,7 +823,7 @@ async fn faand(
     }
 
     let mut aand_triples = Vec::with_capacity(buckets.len());
-    for (bucket, d) in buckets.into_iter().zip(d_values.into_iter()) {
+    for (bucket, d) in buckets.into_iter().zip(d_values) {
         aand_triples.push(combine_bucket(i, n, bucket, d)?);
     }
 
