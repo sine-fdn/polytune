@@ -23,6 +23,12 @@ fn simulate() {
         .unwrap();
     let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines().skip(4);
     let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
+    thread::spawn(move || {
+        while let Some(Ok(line)) = stderr.next() {
+            eprintln!("party2> {line}");
+        }
+    });
+
     println!("Trying to get the ticket so that others can join...");
     let ticket = stdout.next().unwrap().unwrap();
     let ticket_prefix = "> ticket to join us: ";
@@ -36,11 +42,7 @@ fn simulate() {
             println!("party2> {line}");
         }
     });
-    thread::spawn(move || {
-        while let Some(Ok(line)) = stderr.next() {
-            eprintln!("party2> {line}");
-        }
-    });
+
     let mut cmd = Command::new("cargo")
         .args([
             "run",
