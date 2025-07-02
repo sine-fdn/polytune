@@ -1,7 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use rand::{Rng, SeedableRng, random};
+use rand::{Rng, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
