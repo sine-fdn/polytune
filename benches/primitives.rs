@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-use criterion::{measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion};
+use criterion::{BenchmarkGroup, BenchmarkId, Criterion, measurement::WallTime};
 use polytune::{
     bench_reexports::{kos_ot_receiver, kos_ot_sender},
     channel,
 };
-use rand::{random, SeedableRng};
+use rand::{SeedableRng, random};
 use rand_chacha::ChaCha20Rng;
 use tokio::runtime::Runtime;
 

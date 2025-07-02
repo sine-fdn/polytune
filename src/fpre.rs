@@ -4,7 +4,7 @@ use futures::future::try_join_all;
 use rand::random;
 
 use crate::{
-    channel::{self, recv_from, send_to, Channel},
+    channel::{self, Channel, recv_from, send_to},
     data_types::{Auth, Delta, Key, Mac, Share},
 };
 
@@ -220,9 +220,9 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
 #[cfg(test)]
 mod tests {
     use crate::{
-        channel::{recv_from, recv_vec_from, send_to, SimpleChannel},
-        fpre::{fpre, Auth, Delta, Error, Key, Mac, Share},
-        protocol::{Preprocessor, _mpc},
+        channel::{SimpleChannel, recv_from, recv_vec_from, send_to},
+        fpre::{Auth, Delta, Error, Key, Mac, Share, fpre},
+        protocol::{_mpc, Preprocessor},
     };
     use garble_lang::{circuit::Circuit, compile};
 

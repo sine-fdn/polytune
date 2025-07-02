@@ -12,11 +12,7 @@ impl BitAnd<Delta> for bool {
     type Output = Delta;
 
     fn bitand(self, rhs: Delta) -> Self::Output {
-        if self {
-            rhs
-        } else {
-            Delta(0)
-        }
+        if self { rhs } else { Delta(0) }
     }
 }
 

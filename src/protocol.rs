@@ -37,14 +37,14 @@ use std::sync::Mutex;
 
 use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use rand::{random, SeedableRng};
+use rand::{SeedableRng, random};
 use rand_chacha::ChaCha20Rng;
 
 use crate::{
-    channel::{self, recv_from, recv_vec_from, send_to, Channel},
+    channel::{self, Channel, recv_from, recv_vec_from, send_to},
     data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
     faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
-    garble::{self, decrypt, encrypt, GarblingKey},
+    garble::{self, GarblingKey, decrypt, encrypt},
 };
 
 fn xor_labels(a: &[Label], b: &[Label]) -> Vec<Label> {

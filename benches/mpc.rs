@@ -1,14 +1,14 @@
 use std::{fmt::Debug, time::Duration, vec};
 
 use criterion::{
-    measurement::{Measurement, WallTime},
     BenchmarkGroup, BenchmarkId, Criterion,
+    measurement::{Measurement, WallTime},
 };
 use garble_lang::circuit::{Circuit, Gate};
 use polytune::{channel, protocol::mpc};
 use tokio::{runtime::Runtime, sync::oneshot};
 
-use crate::memory_tracking::{create_instrumented_runtime, MemoryMeasurement};
+use crate::memory_tracking::{MemoryMeasurement, create_instrumented_runtime};
 
 pub fn mpc_benchmarks(c: &mut Criterion) {
     let rt0 = create_instrumented_runtime(0);

@@ -1,10 +1,10 @@
-use anyhow::{anyhow, bail, Context, Error};
+use anyhow::{Context, Error, anyhow, bail};
 use axum::{
+    Json, Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{Request, Response},
     routing::{get, post},
-    Json, Router,
 };
 use clap::Parser;
 use polytune::{
@@ -20,8 +20,8 @@ use polytune::{
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::{
-    any::{install_default_drivers, AnyQueryResult, AnyRow},
     AnyPool, Pool, Row, ValueRef,
+    any::{AnyQueryResult, AnyRow, install_default_drivers},
 };
 use std::{
     borrow::BorrowMut,
@@ -38,14 +38,14 @@ use std::{
 use tokio::{
     fs,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Mutex,
+        mpsc::{Receiver, Sender, channel},
     },
     time::{sleep, timeout},
 };
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, warn, Span};
+use tracing::{Span, debug, error, info, warn};
 use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
@@ -236,7 +236,9 @@ async fn main() -> Result<(), Error> {
                         debug!("Inserted {rows} row(s)");
                     }
                 } else {
-                    warn!("No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows");
+                    warn!(
+                        "No 'output' and/or 'output_db' specified in the policy, dropping {n_rows} rows"
+                    );
                 }
                 info!("MPC Output: {n_rows} rows")
             }
@@ -358,7 +360,9 @@ async fn execute_mpc(
     // Now we need to load our input rows from the DB and convert it to a Garble array:
     let input_ty = &prg.main.params[*party].ty;
     let Type::ArrayConst(row_type, _) = input_ty else {
-        bail!("Expected an array input type (with const size) for party {party}, but found {input_ty}");
+        bail!(
+            "Expected an array input type (with const size) for party {party}, but found {input_ty}"
+        );
     };
     let Type::Tuple(field_types) = row_type.as_ref() else {
         bail!("Expected an array of tuples as input type for party {party}, but found {input_ty}");
@@ -373,10 +377,10 @@ async fn execute_mpc(
         let mut row_as_literal = vec![];
         if field_types.len() != row.len() {
             bail!(
-                    "The program expects a tuple with {} fields, but the query returned a row with {} fields",
-                    field_types.len(),
-                    row.len()
-                );
+                "The program expects a tuple with {} fields, but the query returned a row with {} fields",
+                field_types.len(),
+                row.len()
+            );
         }
         for (c, field_type) in field_types.iter().enumerate() {
             let mut literal = None;

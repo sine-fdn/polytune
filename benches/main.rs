@@ -1,5 +1,5 @@
 use criterion::Criterion;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 use crate::memory_tracking::PeakAllocator;
 

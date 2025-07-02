@@ -9,7 +9,7 @@ use garble_lang::{
 };
 use polytune::{
     channel,
-    protocol::{mpc, Error},
+    protocol::{Error, mpc},
 };
 use tracing::{error, info};
 

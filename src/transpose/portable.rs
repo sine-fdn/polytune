@@ -1,4 +1,4 @@
-use wide::{i64x2, i8x16};
+use wide::{i8x16, i64x2};
 
 /// Transpose a bit matrix.
 ///
