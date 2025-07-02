@@ -339,7 +339,7 @@ mod tests {
     #![allow(clippy::undocumented_unsafe_blocks)]
     use std::arch::x86_64::_mm256_setzero_si256;
 
-    use rand::{rngs::StdRng, RngCore, SeedableRng};
+    use rand::{RngCore, SeedableRng, rngs::StdRng};
 
     use super::{avx_transpose128x128, transpose_bitmatrix};
 

@@ -12,7 +12,7 @@ use crate::{
     aes_hash::{AesHash, FIXED_KEY_HASH},
     aes_rng::AesRng,
     block::Block,
-    channel::{recv_vec_from, send_to, Channel},
+    channel::{Channel, recv_vec_from, send_to},
     faand::Error,
     ot_core::{
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,

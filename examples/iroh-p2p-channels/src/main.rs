@@ -9,12 +9,12 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use iroh::{Endpoint, NodeAddr, RelayMap, RelayMode, RelayUrl, SecretKey};
 use iroh_gossip::{
-    net::{Event, Gossip, GossipEvent, GossipReceiver, GossipSender, GOSSIP_ALPN},
+    net::{Event, GOSSIP_ALPN, Gossip, GossipEvent, GossipReceiver, GossipSender},
     proto::TopicId,
 };
 use n0_future::StreamExt;

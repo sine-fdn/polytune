@@ -25,14 +25,14 @@ use std::fmt;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::{
-    mpsc::{channel, Receiver, Sender},
     Mutex,
+    mpsc::{Receiver, Sender, channel},
 };
 #[cfg(not(target_arch = "wasm32"))]
-use tracing::{trace, Level};
+use tracing::{Level, trace};
 
 /// Errors related to sending / receiving / (de-)serializing messages.
 #[derive(Debug)]

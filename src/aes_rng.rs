@@ -12,8 +12,8 @@
 use std::mem;
 
 use aes::{
-    cipher::{BlockCipherEncrypt, KeyInit},
     Aes128,
+    cipher::{BlockCipherEncrypt, KeyInit},
 };
 use rand::rand_core::block::{BlockRng, BlockRngCore, CryptoBlockRng};
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
@@ -219,10 +219,10 @@ mod tests {
 #[cfg(all(test, not(miri), target_feature = "aes"))]
 mod aes_par_blocks_tests {
     use aes::{
+        Aes128,
         cipher::{
             BlockCipherEncClosure, BlockCipherEncrypt, BlockSizeUser, KeyInit, ParBlocksSizeUser,
         },
-        Aes128,
     };
 
     use super::AES_PAR_BLOCKS;

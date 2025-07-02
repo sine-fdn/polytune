@@ -1,10 +1,10 @@
-use anyhow::{anyhow, bail, Context, Error};
+use anyhow::{Context, Error, anyhow, bail};
 use axum::{
+    Json, Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{Request, Response},
     routing::{get, post},
-    Json, Router,
 };
 use clap::Parser;
 use polytune::{
@@ -26,14 +26,14 @@ use std::{
 };
 use tokio::{
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Mutex,
+        mpsc::{Receiver, Sender, channel},
     },
     time::{sleep, timeout},
 };
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, warn, Span};
+use tracing::{Span, error, info, warn};
 use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.

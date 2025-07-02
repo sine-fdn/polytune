@@ -1,10 +1,10 @@
 use anyhow::Error;
 use axum::{
+    Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderValue, Method},
     routing::{get, post},
-    Router,
 };
 use clap::Parser;
 use http::header;

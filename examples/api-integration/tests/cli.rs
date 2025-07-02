@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, BufReader},
-    process::{exit, Command, Stdio},
+    process::{Command, Stdio, exit},
     sync::mpsc::channel,
     thread::{self, sleep},
     time::Duration,
