@@ -41,7 +41,7 @@ use rand::{SeedableRng, random};
 use rand_chacha::ChaCha20Rng;
 
 use crate::{
-    channel::{self, Channel, recv_from, recv_vec_from, send_to},
+    channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
     data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
     faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
     garble::{self, GarblingKey, decrypt, encrypt},
@@ -456,21 +456,14 @@ pub(crate) async fn _mpc(
         }
     }
 
-    let send_fut = try_join_all(
-        (0..p_max)
-            .filter(|p| *p != p_own)
-            .map(|p| send_to(channel, p, "wire shares", &wire_shares_for_others[p])),
-    );
-
-    let recv_fut = try_join_all((0..p_max).map(async |p| {
-        if p != p_own {
-            recv_vec_from::<Option<(bool, Mac)>>(channel, p, "wire shares", num_gates).await
-        } else {
-            Ok(vec![])
-        }
-    }));
-
-    let (_, wire_shares_from_others) = try_join(send_fut, recv_fut).await?;
+    let wire_shares_from_others = scatter(
+        channel,
+        p_own,
+        "wire shares",
+        &wire_shares_for_others,
+        num_gates,
+    )
+    .await?;
 
     let mut inputs = inputs.iter();
     let mut masked_inputs = vec![None; num_gates];
