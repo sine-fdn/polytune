@@ -33,6 +33,7 @@ jobs:
       - name: Cache compilation
         uses: ubicloud/rust-cache@65b3ff06b9bcc69d88c25e212f1ae3d14a0953c3
       - name: Restore criterion cache
+        id: restore-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.CRITERION_HOME }}
@@ -44,8 +45,10 @@ jobs:
         if: ${{ !github.event.inputs.ref }}
         uses: actions/cache/save@v4
         with:
+          # always overwrite the cache so we can see the change to the previous
+          if: always()
           path: ${{ env.CRITERION_HOME }}
-          key: ${{ runner.os }}-${{ runner.arch }}-criterion-data
+          key: ${{ steps.restore-cache.outputs.cache-primary-key }}
       - name: Upload benchmark reports
         uses: actions/upload-artifact@v4
         with:
