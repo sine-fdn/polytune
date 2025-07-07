@@ -139,7 +139,7 @@ pub(crate) async fn broadcast_verification<
         }
     }
 
-    let received_vecs = scatter(channel, i, phase, &modified_vecs, n).await?;
+    let received_vecs = scatter(channel, i, phase, &modified_vecs).await?;
 
     // Step 2.1: Verify the vectors from all parties, that for index j the value is
     // the same for all parties.
@@ -168,9 +168,8 @@ pub(crate) async fn broadcast<
     n: usize,
     phase: &str,
     vec: &[T],
-    len: usize,
 ) -> Result<Vec<Vec<T>>, Error> {
-    let res_vec = unverified_broadcast(channel, i, n, phase, vec, len).await?;
+    let res_vec = unverified_broadcast(channel, i, n, phase, vec).await?;
     let string = "broadcast ";
     broadcast_verification(channel, i, n, &(string.to_owned() + phase), &res_vec).await?;
     Ok(res_vec)
@@ -187,11 +186,10 @@ pub(crate) async fn broadcast_first_send_second<
     n: usize,
     phase: &str,
     vec: &[Vec<(T, S)>],
-    len: usize,
 ) -> Result<Vec<Vec<(T, S)>>, Error> {
     // TODO IMPOARTANT: Why is this method called broadcast but then does a scatter for both elements
     //  and verifies the sending of the first vec? Why does this not fail the tests?
-    let recv_vec = scatter(channel, i, phase, vec, len).await?;
+    let recv_vec = scatter(channel, i, phase, vec).await?;
     let first_vec: Vec<Vec<T>> = recv_vec
         .iter()
         .map(|inner_vec| inner_vec.iter().map(|(a, _)| a.clone()).collect())
@@ -225,10 +223,10 @@ pub(crate) async fn shared_rng(
     // Step 2) a) Send the commitments to all parties for multi-party cointossing.
     // Broadcast multi-party commitments.
     let comm = vec![commitment];
-    let commitments = broadcast(channel, i, n, "RNG comm", &comm, 1).await?;
+    let commitments = broadcast(channel, i, n, "RNG comm", &comm).await?;
 
     // Step 3) Send and receive decommitments concurrently for multi-party cointossing.
-    let bufs_vec = unverified_broadcast(channel, i, n, "RNG ver", &buf, 32).await?;
+    let bufs_vec = unverified_broadcast(channel, i, n, "RNG ver", &buf).await?;
     let bufs: Vec<[u8; 32]> = bufs_vec
         .into_iter()
         .enumerate()
@@ -287,10 +285,10 @@ pub(crate) async fn shared_rng_pairwise(
 
     // Step 2) Send and receive commitments concurrently for pairwise cointossing.
 
-    let commitments = scatter(channel, i, "RNG comm", &commitment_vec, 1).await?;
+    let commitments = scatter(channel, i, "RNG comm", &commitment_vec).await?;
 
     // Step 3) Send and receive decommitments concurrently for pairwise cointossing.
-    let bufs = scatter(channel, i, "RNG ver", &bufvec, 32).await?;
+    let bufs = scatter(channel, i, "RNG ver", &bufvec).await?;
 
     let mut bufs_id = vec![[0; 34]; n];
     for k in (0..n).filter(|k| *k != i) {
@@ -422,8 +420,7 @@ async fn fabitn(
         }
     }
 
-    let xj_xjmac_k =
-        broadcast_first_send_second(channel, i, n, "fabitn", &xj_xjmac, three_rho).await?;
+    let xj_xjmac_k = broadcast_first_send_second(channel, i, n, "fabitn", &xj_xjmac).await?;
 
     // Step 3 c) Compute keys.
     for (j, rbits) in r.iter().enumerate() {
@@ -511,12 +508,12 @@ pub(crate) async fn fashare(
         dmvec.push(dm);
     }
 
-    let mut c0_c1_cm_k = broadcast(channel, i, n, "fashare comm", &c0_c1_cm, RHO).await?;
+    let mut c0_c1_cm_k = broadcast(channel, i, n, "fashare comm", &c0_c1_cm).await?;
 
     c0_c1_cm_k[i] = c0_c1_cm;
 
     // 3 b) Pi broadcasts decommitment for macs.
-    let mut dm_k = broadcast(channel, i, n, "fashare ver", &dmvec, RHO).await?;
+    let mut dm_k = broadcast(channel, i, n, "fashare ver", &dmvec).await?;
     dm_k[i] = dmvec;
 
     // 3 c) Compute bi to determine di_bi and send to all parties.
@@ -532,7 +529,7 @@ pub(crate) async fn fashare(
         di_bi[r] = if bi[r] { d1[r] } else { d0[r] };
     }
 
-    let di_bi_k = broadcast(channel, i, n, "fashare di_bi", &di_bi, RHO).await?;
+    let di_bi_k = broadcast(channel, i, n, "fashare di_bi", &di_bi).await?;
 
     // 3 d) Consistency check of macs: open commitment of xor of keys and check if it equals to the xor of all macs.
     let mut xor_xk_macs = vec![vec![0; RHO]; n];
@@ -732,7 +729,7 @@ async fn flaand(
         }
     }
 
-    let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij, l).await?;
+    let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij).await?;
 
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
@@ -764,10 +761,10 @@ async fn flaand(
     drop(ki_xj_phi);
 
     // All parties first broadcast the commitment of Hi.
-    let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi, l).await?;
+    let commhi_k = broadcast(channel, i, n, "flaand comm", &commhi).await?;
 
     // Then all parties broadcast Hi.
-    let hi_k = broadcast(channel, i, n, "flaand hash", &hi, l).await?;
+    let hi_k = broadcast(channel, i, n, "flaand hash", &hi).await?;
 
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
     for k in (0..n).filter(|k| *k != i) {
@@ -901,7 +898,7 @@ pub(crate) async fn beaver_aand(
         .collect();
 
     let d_e_dmac_emac_k: Vec<Vec<(bool, bool, Mac, Mac)>> =
-        scatter(channel, i, "faand", &scatter_data, len).await?;
+        scatter(channel, i, "faand", &scatter_data).await?;
     for k in (0..n).filter(|k| *k != i) {
         for (j, &(d, e, ref dmac, ref emac)) in d_e_dmac_emac_k[k].iter().enumerate() {
             let (_, dkey) = de_shares[j].0.1.0[k];
@@ -981,7 +978,7 @@ async fn check_dvalue(
         })
         .collect();
 
-    let dvalues_macs_all = scatter(channel, i, "dvalue", &scatter_data, len).await?;
+    let dvalues_macs_all = scatter(channel, i, "dvalue", &scatter_data).await?;
 
     for k in (0..n).filter(|k| *k != i) {
         let dvalues_macs_k = &dvalues_macs_all[k];

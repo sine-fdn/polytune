@@ -291,11 +291,11 @@ pub(crate) async fn unverified_broadcast<T>(
     num_parties: usize,
     phase: &str,
     data: &[T],
-    expected_recv_len: usize,
 ) -> Result<Vec<Vec<T>>, Error>
 where
     T: Serialize + DeserializeOwned + std::fmt::Debug,
 {
+    let expected_recv_len = data.len();
     let send_fut = try_join_all(
         (0..num_parties)
             .filter(|p| *p != own_party)
@@ -334,12 +334,38 @@ pub(crate) async fn scatter<T>(
     own_party: usize,
     phase: &str,
     data_per_party: &[Vec<T>],
-    expected_recv_len: usize,
 ) -> Result<Vec<Vec<T>>, Error>
 where
     T: Serialize + DeserializeOwned + std::fmt::Debug,
 {
     let num_parties = data_per_party.len();
+
+    let mut expected_recv_len = None;
+
+    for (p, data) in data_per_party.iter().enumerate() {
+        if p == own_party {
+            continue;
+        }
+        // The first time we see a non-zero length vector we initialize
+        // expected_recv_len
+        if expected_recv_len.is_none() && !data.is_empty() {
+            expected_recv_len = Some(data.len());
+            continue;
+        }
+
+        if let Some(len) = expected_recv_len
+            && len != data.len()
+        {
+            return Err(Error {
+                phase: phase.to_string(),
+                reason: ErrorKind::InvalidLength,
+            });
+        }
+    }
+    let Some(expected_recv_len) = expected_recv_len else {
+        // data_per_party is empty if expected_recv_len is None
+        return Ok(vec![]);
+    };
 
     let send_fut = try_join_all(
         (0..num_parties)

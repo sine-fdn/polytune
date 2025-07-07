@@ -456,14 +456,8 @@ pub(crate) async fn _mpc(
         }
     }
 
-    let wire_shares_from_others = scatter(
-        channel,
-        p_own,
-        "wire shares",
-        &wire_shares_for_others,
-        num_gates,
-    )
-    .await?;
+    let wire_shares_from_others =
+        scatter(channel, p_own, "wire shares", &wire_shares_for_others).await?;
 
     let mut inputs = inputs.iter();
     let mut masked_inputs = vec![None; num_gates];
@@ -497,15 +491,8 @@ pub(crate) async fn _mpc(
             }
         }
     }
-    let masked_inputs_from_other_party = broadcast(
-        channel,
-        p_own,
-        p_max,
-        "masked inputs",
-        &masked_inputs,
-        num_gates,
-    )
-    .await?;
+    let masked_inputs_from_other_party =
+        broadcast(channel, p_own, p_max, "masked inputs", &masked_inputs).await?;
 
     for p in (0..p_max).filter(|p| *p != p_own) {
         for (w, mask) in masked_inputs_from_other_party[p].iter().enumerate() {
