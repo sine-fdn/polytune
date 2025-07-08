@@ -42,11 +42,10 @@ jobs:
         run: |
           cargo bench --features "__bench" -- "${{ github.event.inputs.filter }}"
       - name: Save criterion cache
-        if: ${{ !github.event.inputs.ref }}
+          # always overwrite the cache on main branch runs so we can see the change to the previous
+        if: ${{ always() && !github.event.inputs.ref }}
         uses: actions/cache/save@v4
         with:
-          # always overwrite the cache so we can see the change to the previous
-          if: always()
           path: ${{ env.CRITERION_HOME }}
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
       - name: Upload benchmark reports
