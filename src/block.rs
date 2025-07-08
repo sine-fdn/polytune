@@ -14,9 +14,15 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 use wide::u8x16;
 
+// TODO remove this once OT implementations are refactored and we know
+// what parts we need and which not
+#[allow(dead_code)]
 mod gf128;
 
 /// A 128-bit block. Uses SIMD operations where available.
+///
+/// This type is publicly re-exported when the private `__bench` feature
+/// is enabled at [`crate::bench_reexports::Block`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct Block(u8x16);

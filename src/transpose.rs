@@ -1,8 +1,8 @@
 //! Transpose bit-matrices fast.
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub mod avx2;
-pub mod portable;
+mod avx2;
+mod portable;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 cpufeatures::new!(target_feature_avx2, "avx2");
@@ -16,7 +16,7 @@ cpufeatures::new!(target_feature_avx2, "avx2");
 /// If the number of rows is not divisable by 128.
 /// If the number of columns (= input.len() * 8 / rows) is not divisable by 8.
 /// If the number of columns is less than 16.
-pub fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
+pub(crate) fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
     // If the following check pass, we can call either the AVX implementation
     // or the portable one.
     assert_eq!(input.len(), output.len());

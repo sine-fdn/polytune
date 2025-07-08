@@ -8,7 +8,7 @@
 //!
 //! If you're a user of polytune, do not enable the `__bench` feature or use
 //! these APIs exposed here.
-use crate::block::Block;
+pub use crate::block::Block;
 use rand_chacha::ChaCha20Rng;
 
 use crate::{channel::Channel, mpc::faand::Error, ot};

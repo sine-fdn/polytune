@@ -12,7 +12,7 @@ impl Block {
     /// Returns (low, high) bits.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[inline]
-    pub fn clmul(&self, rhs: &Self) -> (Self, Self) {
+    pub(crate) fn clmul(&self, rhs: &Self) -> (Self, Self) {
         if target_feature_pclmulqdq::get() {
             // SAFETY: pclmulqdq is available
             unsafe {
@@ -30,7 +30,7 @@ impl Block {
     /// Returns (low, high) bits.
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     #[inline]
-    pub fn clmul(&self, rhs: &Self) -> (Self, Self) {
+    pub(crate) fn clmul(&self, rhs: &Self) -> (Self, Self) {
         let (low, high) = scalar::clmul128(self.into(), rhs.into());
         (low.into(), high.into())
     }
@@ -43,7 +43,7 @@ impl Block {
     /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1`.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[inline]
-    pub fn gf_mul(&self, rhs: &Self) -> Self {
+    pub(crate) fn gf_mul(&self, rhs: &Self) -> Self {
         if target_feature_pclmulqdq::get() {
             // SAFETY: pclmulqdq is available
             unsafe { clmul::gf128_mul(self.into(), rhs.into()).into() }
@@ -57,7 +57,7 @@ impl Block {
     /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1`.
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     #[inline]
-    pub fn gf_mul(&self, rhs: &Self) -> Self {
+    pub(crate) fn gf_mul(&self, rhs: &Self) -> Self {
         scalar::gf128_mul(self.into(), rhs.into()).into()
     }
 
@@ -67,7 +67,7 @@ impl Block {
     /// this method uses SIMD instructions or a scalar implementation.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[inline]
-    pub fn gf_reduce(low: &Self, high: &Self) -> Self {
+    pub(crate) fn gf_reduce(low: &Self, high: &Self) -> Self {
         if target_feature_pclmulqdq::get() {
             // SAFETY: pclmulqdq is available
             unsafe { clmul::gf128_reduce(low.into(), high.into()).into() }
@@ -79,7 +79,7 @@ impl Block {
     /// Reduce polynomial over GF(2) by `x^128 + x^7 + x^2 + x + 1`.
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     #[inline]
-    pub fn gf_reduce(low: &Self, high: &Self) -> Self {
+    pub(crate) fn gf_reduce(low: &Self, high: &Self) -> Self {
         scalar::gf128_reduce(low.into(), high.into()).into()
     }
 
@@ -90,7 +90,7 @@ impl Block {
     ///
     /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1.
     #[inline]
-    pub fn gf_pow(&self, mut exp: u64) -> Block {
+    pub(crate) fn gf_pow(&self, mut exp: u64) -> Block {
         let mut s = Block::ONE;
         let mut pow2 = *self;
 
@@ -121,7 +121,7 @@ mod clmul {
     /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1.
     #[target_feature(enable = "pclmulqdq")]
     #[inline]
-    pub fn gf128_mul(a: __m128i, b: __m128i) -> __m128i {
+    pub(super) fn gf128_mul(a: __m128i, b: __m128i) -> __m128i {
         let (low, high) = clmul128(a, b);
         gf128_reduce(low, high)
     }
@@ -131,7 +131,7 @@ mod clmul {
     /// Return (low, high) bits
     #[target_feature(enable = "pclmulqdq")]
     #[inline]
-    pub fn clmul128(a: __m128i, b: __m128i) -> (__m128i, __m128i) {
+    pub(super) fn clmul128(a: __m128i, b: __m128i) -> (__m128i, __m128i) {
         // NOTE: I tried using karatsuba but it was slightly slower than the naive
         // multiplication
         let ab_low = _mm_clmulepi64_si128::<0x00>(a, b);
@@ -147,7 +147,7 @@ mod clmul {
     /// Reduce polynomial over GF(2) by `x^128 + x^7 + x^2 + x + 1` using pclmulqdq.
     #[target_feature(enable = "pclmulqdq")]
     #[inline]
-    pub fn gf128_reduce(mut low: __m128i, mut high: __m128i) -> __m128i {
+    pub(super) fn gf128_reduce(mut low: __m128i, mut high: __m128i) -> __m128i {
         // NOTE: I tried a sse shift based reduction but it was slower than the clmul
         // implementation
         let modulus = [MOD, 0];
@@ -248,7 +248,7 @@ mod scalar {
     ///
     /// Uses the irreducible polynomial `x^128 + x^7 + x^2 + x + 1.
     #[inline]
-    pub fn gf128_mul(a: u128, b: u128) -> u128 {
+    pub(super) fn gf128_mul(a: u128, b: u128) -> u128 {
         let (low, high) = clmul128(a, b);
         gf128_reduce(low, high)
     }
@@ -257,7 +257,7 @@ mod scalar {
     ///
     /// Return (low, high) bits
     #[inline]
-    pub fn clmul128(a: u128, b: u128) -> (u128, u128) {
+    pub(super) fn clmul128(a: u128, b: u128) -> (u128, u128) {
         let (a_low, a_high) = (a as u64, (a >> 64) as u64);
         let (b_low, b_high) = (b as u64, (b >> 64) as u64);
 
@@ -281,7 +281,7 @@ mod scalar {
     /// When carries do occur, they wind up in a "hole" and are subsequently
     /// masked out of the result.
     #[inline]
-    pub fn clmul64(x: u64, y: u64) -> u128 {
+    pub(super) fn clmul64(x: u64, y: u64) -> u128 {
         // Because we're multiplying u64 into a u128 result, we need to increase the number of holes from
         // 3 as in bearssl to 4. This method should be faster than doing the reverse trick described in the bearssl
         // blog post, as that would execute clmul64 twice which would be 2 * 16 = 32 multiplications opposed to our
@@ -324,7 +324,7 @@ mod scalar {
     ///      low ^ reduce(high * (x^7 + x^2 + x + 1))
     /// since x^128 ≡ x^7 + x^2 + x + 1 (mod f(x)).
     #[inline]
-    pub fn gf128_reduce(low: u128, high: u128) -> u128 {
+    pub(super) fn gf128_reduce(low: u128, high: u128) -> u128 {
         // Helper: performs a left shift on a 128-bit word and returns
         // a tuple (overflow, lower) where:
         //    x << shift = (overflow << 128) | lower.
