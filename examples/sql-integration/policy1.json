@@ -4,11 +4,11 @@
   "leader": 0,
   "party": 1,
   "input": {
-    "query": "SELECT CONCAT(first_name, last_name, date_of_birth), special_educational_needs FROM school_entry_examination",
+    "query": "SELECT CONCAT(first_name, last_name, date_of_birth), special_educational_needs FROM disability",
     "db": "mysql://root:test@localhost:5551/test"
   },
   "constants": {
-    "ROWS": "SELECT COUNT(id) FROM school_entry_examination",
-    "ID_LEN": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM school_entry_examination"
+    "ROWS": "SELECT COUNT(id) FROM disability",
+    "ID_LEN": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM disability"
   }
 }

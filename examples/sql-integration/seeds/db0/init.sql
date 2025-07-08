@@ -1,4 +1,4 @@
-CREATE TABLE early_detection_screening (
+CREATE TABLE location_town (
     id SERIAL PRIMARY KEY,
     first_name TEXT,
     last_name TEXT,
@@ -6,7 +6,7 @@ CREATE TABLE early_detection_screening (
     screening_status TEXT
 );
 
-COPY early_detection_screening
-FROM '/docker-entrypoint-initdb.d/early_detection_screening.csv'
+COPY location_town
+FROM '/docker-entrypoint-initdb.d/location_town.csv'
 DELIMITER ','
 CSV HEADER;

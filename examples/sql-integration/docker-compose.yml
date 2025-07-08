@@ -17,7 +17,7 @@ services:
     shm_size: 128mb
     volumes:
       - ./seeds/db1:/docker-entrypoint-initdb.d
-      - ./seeds/db1/school_entry_examination.csv:/var/lib/mysql-files/school_entry_examination.csv
+      - ./seeds/db1/disability.csv:/var/lib/mysql-files/disability.csv
     ports:
       - 5551:3306
     environment:

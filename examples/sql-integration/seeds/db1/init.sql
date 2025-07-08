@@ -1,7 +1,7 @@
 CREATE DATABASE test;
 USE test;
 
-CREATE TABLE school_entry_examination (
+CREATE TABLE disability (
     id SERIAL PRIMARY KEY,
     first_name TEXT,
     last_name TEXT,
@@ -10,8 +10,8 @@ CREATE TABLE school_entry_examination (
     special_educational_needs INT
 );
 
-LOAD DATA INFILE '/var/lib/mysql-files/school_entry_examination.csv'
-INTO TABLE school_entry_examination
+LOAD DATA INFILE '/var/lib/mysql-files/disability.csv'
+INTO TABLE disability
 FIELDS TERMINATED BY ','
 OPTIONALLY ENCLOSED BY '"'
 LINES TERMINATED BY '\n'
