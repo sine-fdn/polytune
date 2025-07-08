@@ -3,7 +3,7 @@ CREATE TABLE location_town (
     first_name TEXT,
     last_name TEXT,
     date_of_birth TEXT,
-    screening_status TEXT
+    area_city INT
 );
 
 COPY location_town

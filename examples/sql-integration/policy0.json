@@ -4,7 +4,7 @@
   "leader": 0,
   "party": 0,
   "input": {
-    "query": "SELECT first_name || last_name || date_of_birth, screening_status FROM location_town",
+    "query": "SELECT first_name || last_name || date_of_birth, area_city FROM location_town",
     "db": "postgres://postgres:test@localhost:5550/postgres"
   },
   "output": {

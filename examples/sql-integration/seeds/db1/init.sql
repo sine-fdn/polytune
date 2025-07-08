@@ -6,8 +6,7 @@ CREATE TABLE disability (
     first_name TEXT,
     last_name TEXT,
     date_of_birth TEXT,
-    sufficiently_vaccinated INT,
-    special_educational_needs INT
+    care_level INT
 );
 
 LOAD DATA INFILE '/var/lib/mysql-files/disability.csv'
