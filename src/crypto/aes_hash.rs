@@ -10,7 +10,7 @@ use aes::{
 };
 use bytemuck::Pod;
 
-use crate::{aes_rng::AES_PAR_BLOCKS, block::Block, utils::xor_inplace};
+use crate::{block::Block, crypto::AES_PAR_BLOCKS, utils::xor_inplace};
 
 /// AES accelerated hashing of [`Block`]s.
 #[derive(Clone)]

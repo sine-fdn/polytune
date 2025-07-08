@@ -135,7 +135,7 @@ impl BlockRngCore for AesRngCore {
 }
 
 mod hidden {
-    use crate::aes_rng::AES_PAR_BLOCKS;
+    use crate::crypto::AES_PAR_BLOCKS;
 
     /// Equivalent to [aes::Block; AES_PAR_BLOCKS]. Since large arrays arrays don't impl Default we write a
     /// wrapper.

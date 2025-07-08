@@ -10,7 +10,7 @@ workspace = { members = [
 name = "polytune"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87.0"
+rust-version = "1.88.0"
 description = "Maliciously-Secure Multi-Party Computation (MPC) Engine using Authenticated Garbling"
 repository = "https://github.com/sine-fdn/polytune/"
 license = "MIT"

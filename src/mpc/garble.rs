@@ -5,7 +5,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
 };
 
-use crate::data_types::{Label, Mac};
+use crate::mpc::data_types::{Label, Mac};
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -80,8 +80,8 @@ mod tests {
     use rand::random_range;
 
     use crate::{
-        data_types::{Label, Mac},
-        garble::{GarblingKey, decrypt, encrypt},
+        mpc::data_types::{Label, Mac},
+        mpc::garble::{GarblingKey, decrypt, encrypt},
     };
 
     #[test]

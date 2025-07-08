@@ -16,7 +16,7 @@
 //!
 //! The crate is structured into several modules:
 //!
-//! * [`protocol`]: Contains the [`protocol::mpc`] function that executes the protocol for a party.
+//! * Top-level [`polytune`](`crate`): Contains the [`mpc`] function that executes the protocol for a party.
 //! * [`channel`]: Communication abstractions for exchanging data between parties.
 //!
 //! ## Basic Usage
@@ -26,7 +26,7 @@
 //! 1. Set up communication channels with other parties
 //! 2. Create or load a circuit definition
 //! 3. Prepare private inputs
-//! 4. Call the [`protocol::mpc`] function with appropriate parameters
+//! 4. Call the [`mpc`] function with appropriate parameters
 //! 5. Process the resulting outputs
 //!
 //! ## Example
@@ -35,7 +35,7 @@
 //! use polytune::{
 //!     channel::SimpleChannel,
 //!     garble_lang::circuit::Circuit,
-//!     protocol::mpc,
+//!     mpc,
 //! };
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -76,31 +76,19 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 pub use garble_lang;
+pub use mpc::protocol::{Error, MpcError, mpc};
 
-pub mod channel;
-pub mod protocol;
-
-// TODO remove this once OT implementations are refactored and we know
-// what parts we need and which not
-#[allow(dead_code)]
-mod aes_hash;
-// TODO remove this once OT implementations are refactored and we know
-// what parts we need and which not
-#[allow(dead_code)]
-mod aes_rng;
 #[cfg(feature = "__bench")]
 #[doc(hidden)]
 pub mod bench_reexports;
 mod block;
-mod data_types;
-mod faand;
-mod fpre;
-mod garble;
+pub mod channel;
 mod ot;
 mod ot_core;
-mod rand_compat;
 mod transpose;
 // TODO remove this once OT implementations are refactored and we know
 // what parts we need and which not
+mod crypto;
+mod mpc;
 #[allow(dead_code)]
 mod utils;

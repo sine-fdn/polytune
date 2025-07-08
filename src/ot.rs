@@ -1,7 +1,7 @@
 //! KOS OT extension implementation.
 use crate::ot_core::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sender};
 
-use crate::{aes_rng::AesRng, block::Block, channel::Channel, faand::Error};
+use crate::{block::Block, channel::Channel, crypto::AesRng, mpc::faand::Error};
 
 use rand_chacha::ChaCha20Rng;
 

@@ -9,7 +9,7 @@
 use crate::{
     block::Block,
     channel::{Channel, recv_from, recv_vec_from, send_to},
-    faand::Error,
+    mpc::faand::Error,
     ot_core::{
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Malicious,
         Receiver as OtReceiver, SemiHonest, Sender as OtSender,

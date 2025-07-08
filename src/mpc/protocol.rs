@@ -42,9 +42,9 @@ use rand_chacha::ChaCha20Rng;
 
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
-    data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
-    faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
-    garble::{self, GarblingKey, decrypt, encrypt},
+    mpc::data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
+    mpc::faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
+    mpc::garble::{self, GarblingKey, decrypt, encrypt},
 };
 
 fn xor_labels(a: &[Label], b: &[Label]) -> Vec<Label> {

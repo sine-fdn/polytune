@@ -2,7 +2,7 @@ use std::{path::PathBuf, process::exit, time::Duration};
 
 use clap::{Parser, Subcommand};
 use http_channel::PollingHttpChannel;
-use polytune::{garble_lang::compile, protocol::mpc};
+use polytune::{garble_lang::compile, mpc};
 use tokio::{fs, time::sleep};
 use tracing::debug;
 

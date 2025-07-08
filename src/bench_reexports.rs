@@ -11,7 +11,7 @@
 use crate::block::Block;
 use rand_chacha::ChaCha20Rng;
 
-use crate::{channel::Channel, faand::Error, ot};
+use crate::{channel::Channel, mpc::faand::Error, ot};
 
 pub async fn kos_ot_sender(
     channel: &impl Channel,

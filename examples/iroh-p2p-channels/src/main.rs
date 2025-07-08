@@ -21,7 +21,7 @@ use n0_future::StreamExt;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::compile,
-    protocol::mpc,
+    mpc,
 };
 use serde::{Deserialize, Serialize};
 use tokio::{fs, time::sleep};

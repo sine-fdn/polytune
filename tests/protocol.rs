@@ -2,10 +2,7 @@ use garble_lang::{
     circuit::{Circuit, Gate},
     compile,
 };
-use polytune::{
-    channel,
-    protocol::{Error, mpc},
-};
+use polytune::{Error, channel, mpc};
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 fn simulate_mpc(

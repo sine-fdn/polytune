@@ -20,7 +20,7 @@ use curve25519_dalek::RistrettoPoint;
 use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
 
-use crate::{block::Block, channel::Channel, faand::Error};
+use crate::{block::Block, channel::Channel, mpc::faand::Error};
 
 pub(crate) fn hash_pt(tweak: u128, pt: &RistrettoPoint) -> Block {
     let h = blake3::keyed_hash(pt.compress().as_bytes(), &tweak.to_le_bytes());

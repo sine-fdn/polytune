@@ -19,9 +19,9 @@
 use crate::{
     block::Block,
     channel::{Channel, recv_vec_from, send_to},
-    faand::Error,
+    mpc::faand::Error,
     ot_core::{Malicious, Receiver as OtReceiver, SemiHonest, Sender as OtSender},
-    rand_compat::RngCompat,
+    utils::RngCompat,
 };
 
 use curve25519_dalek::{
