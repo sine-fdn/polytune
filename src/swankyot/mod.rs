@@ -23,7 +23,27 @@ use rand_chacha::ChaCha20Rng;
 
 use scuttlebutt::Block;
 
-use crate::{channel::Channel, faand::Error};
+use crate::channel::{Channel, Error as ChannelError};
+
+/// Errors occurring during preprocessing.
+#[derive(Debug)]
+pub enum Error {
+    /// A message could not be sent or received.
+    ChannelErr(ChannelError),
+    /// KOS consistency check failed.
+    KOSConsistencyCheckFailed,
+    /// A message was sent, but it contained no data.
+    EmptyMsg,
+    /// Invalid array length.
+    InvalidLength,
+}
+
+/// Converts a `channel::Error` into a custom `Error` type.
+impl From<ChannelError> for Error {
+    fn from(e: ChannelError) -> Self {
+        Self::ChannelErr(e)
+    }
+}
 
 pub(crate) fn hash_pt(tweak: u128, pt: &RistrettoPoint) -> Block {
     let h = blake3::keyed_hash(pt.compress().as_bytes(), &tweak.to_le_bytes());

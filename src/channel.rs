@@ -156,6 +156,7 @@ pub trait Channel {
 
     /// Sends a message to the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
+    #[hax_lib::opaque]
     async fn send_bytes_to(
         &mut self,
         party: usize,
@@ -165,6 +166,7 @@ pub trait Channel {
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
+    #[hax_lib::opaque]
     async fn recv_bytes_from(
         &mut self,
         party: usize,
