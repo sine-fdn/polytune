@@ -17,7 +17,7 @@ postcard = { version = "1", default-features = false, features = [
     "experimental-derive",
     "use-std",
 ] }
-rand = { version = "0.8.5", features = ["std_rng"] }
+rand = { version = "0.9.1", features = ["std_rng"] }
 serde = { version = "1.0.195", features = ["derive"] }
 tokio = { version = "1.46.1", features = ["macros", "rt", "rt-multi-thread"] }
 tracing = "0.1.40"

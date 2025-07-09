@@ -3255,7 +3255,7 @@ dependencies = [
  "n0-future",
  "polytune",
  "postcard",
- "rand 0.8.5",
+ "rand 0.9.1",
  "serde",
  "tokio",
  "tracing",
