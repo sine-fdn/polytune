@@ -1620,9 +1620,6 @@ fn lemma_vis_correct<const NUM_PARTIES: usize>(
         let mut expected_result = false;
         for i in 0..NUM_PARTIES {
             for j in 0..NUM_PARTIES {
-                if i == j {
-                    continue;
-                }
                 let half_and_i_j = parties[i].xshare.bit() & parties[j].yshare.bit();
                 expected_result = expected_result ^ half_and_i_j;
             }
@@ -1696,84 +1693,6 @@ mod spec {
     > {
         hax_lib::fstar!(r#"admit()"#);
     }
-
-    // fn xshares_are_authenticated<
-    //     const NUM_PARTIES: usize,
-    //     const NUM_TRIPLES: usize,
-    //     const PROD: usize,
-    // >(
-    //     parties: &[PartyState<NUM_PARTIES, NUM_TRIPLES, PROD>; NUM_PARTIES],
-    // ) -> bool {
-    //     let mut result = false;
-    //     for triple in 0..NUM_TRIPLES {
-    //         for i in 0..NUM_PARTIES {
-    //             let party_i = &parties[i];
-    //             let share_at_i = &party_i.xshares[triple];
-    //             for j in 0..NUM_PARTIES {
-    //                 let party_j = &parties[j];
-    //                 let delta_j = &party_j.delta;
-    //                 let share_at_j = &party_j.xshares[triple];
-    //                 result =
-    //                     result && share_is_authenticated(&share_at_i, &share_at_j, i, j, &delta_j);
-    //             }
-    //         }
-    //     }
-    //     result
-    // }
-
-    // fn ts_are_correct<const NUM_PARTIES: usize>(
-    //     parties: [PartyState<NUM_PARTIES>; NUM_PARTIES],
-    //     ts: [Vec<Vec<bool>>; NUM_PARTIES],
-    // ) -> bool {
-    //     debug_assert!(NUM_PARTIES * NUM_TRIPLES == PROD);
-    //     let mut result = false;
-    //     for i in 0..NUM_PARTIES {
-    //         for j in 0..NUM_PARTIES {
-    //             for triple in 0..NUM_TRIPLES {
-    //                 let party_i = &parties[i];
-    //                 let party_j = &parties[j];
-    //                 let randomness_i = party_i.randomness;
-
-    //                 hax_lib::fstar!(r#"assert(v $j * v $NUM_PARTIES + v $triple < v $PROD)"#);
-    //                 let s = randomness_i[j * NUM_PARTIES + triple];
-    //                 let t = ts[i][j][triple];
-
-    //                 let x_j = party_j.xshares[triple].bit();
-    //                 let y_i = party_i.yshares[triple].bit();
-
-    //                 let t_correct = (s ^ t) == (x_j && y_i);
-    //                 result = result && t_correct;
-    //             }
-    //         }
-    //     }
-    //     result
-    // }
-
-    // fn vs_are_correct<const NUM_PARTIES: usize, const NUM_TRIPLES: usize, const PROD: usize>(
-    //     parties: [PartyState<NUM_PARTIES, NUM_TRIPLES, PROD>; NUM_PARTIES],
-    //     vs: [Vec<bool>; NUM_PARTIES],
-    // ) -> bool {
-    //     let mut result = false;
-    //     for triple in 0..NUM_TRIPLES {
-    //         let mut v = false;
-    //         for i in 0..NUM_PARTIES {
-    //             v = v ^ vs[i][triple];
-    //         }
-    //         let mut half_and = false;
-    //         for i in 0..NUM_PARTIES {
-    //             let x_i = parties[i].xshares[triple].bit();
-    //             for j in 0..NUM_PARTIES {
-    //                 if i == j {
-    //                     continue;
-    //                 }
-    //                 let y_j = parties[j].yshares[triple].bit();
-    //                 half_and = half_and ^ (x_i & y_j);
-    //             }
-    //         }
-    //         result = result && (v == half_and);
-    //     }
-    //     result
-    // }
 
     #[allow(unreachable_code)]
     fn ideal_fhaand<const NUM_PARTIES: usize>(
