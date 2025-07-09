@@ -175,9 +175,22 @@ pub(crate) async fn broadcast<
     Ok(res_vec)
 }
 
-/// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
-/// the vector is broadcasted, the second element is simply sent to all parties.
-pub(crate) async fn broadcast_first_send_second<
+/// Combined verified broadcast and scatter.
+///
+/// Broadcast with abort the vector resulting from taking each first
+/// element of the tuples contained in one of the vectors in data
+/// and scatter the second value.
+///
+/// This means, that the following must hold
+/// ```ignore
+/// for each i,j in {0,..,n}^2:
+///     for k in {0,.., data[0].len()}:
+///         data[i].0[k] == data[j].0[k]
+///
+/// ```
+/// If the tuple elements are not equal, the broadcast verification
+/// will fail and this method returns an error.
+pub(crate) async fn broadcast_first_scatter_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -185,17 +198,23 @@ pub(crate) async fn broadcast_first_send_second<
     i: usize,
     n: usize,
     phase: &str,
-    vec: &[Vec<(T, S)>],
+    data: &[Vec<(T, S)>],
 ) -> Result<Vec<Vec<(T, S)>>, Error> {
-    // TODO IMPOARTANT: Why is this method called broadcast but then does a scatter for both elements
-    //  and verifies the sending of the first vec? Why does this not fail the tests?
-    let recv_vec = scatter(channel, i, phase, vec).await?;
+    // first we scatter the data, as the second elements of the tuple with type `S`
+    // might be different. This effectively `unverified_broadcasts`s the first
+    // elements
+    let recv_vec = scatter(channel, i, phase, data).await?;
+    // now we extract those first elements of the tuples which we scattered which
+    // should have been equal
     let first_vec: Vec<Vec<T>> = recv_vec
         .iter()
         .map(|inner_vec| inner_vec.iter().map(|(a, _)| a.clone()).collect())
         .collect();
     let string = "broadcast ";
+    // and verify that the first elements of the tuples were indeed broadcasted correctly
     broadcast_verification(channel, i, n, &(string.to_owned() + phase), &first_vec).await?;
+    // As a result, we have broadcasted the first elements of the vec and
+    // scattered the second
     Ok(recv_vec)
 }
 
@@ -420,7 +439,7 @@ async fn fabitn(
         }
     }
 
-    let xj_xjmac_k = broadcast_first_send_second(channel, i, n, "fabitn", &xj_xjmac).await?;
+    let xj_xjmac_k = broadcast_first_scatter_second(channel, i, n, "fabitn", &xj_xjmac).await?;
 
     // Step 3 c) Compute keys.
     for (j, rbits) in r.iter().enumerate() {
@@ -729,7 +748,7 @@ async fn flaand(
         }
     }
 
-    let ei_uij_k = broadcast_first_send_second(channel, i, n, "flaand", &ei_uij).await?;
+    let ei_uij_k = broadcast_first_scatter_second(channel, i, n, "flaand", &ei_uij).await?;
 
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
