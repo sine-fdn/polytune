@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile-upstream:master-labs
-FROM rust:1.82 AS builder
+FROM rust:1.88 AS builder
 WORKDIR /usr/src/polytune
 COPY . .
 RUN cargo install --path ./examples/sql-integration

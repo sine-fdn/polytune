@@ -2,29 +2,16 @@ const ROWS_0: usize = PARTY_0::ROWS;
 const ROWS_1: usize = PARTY_1::ROWS;
 const ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);
 
-enum ScreeningStatus {
-    Recent,
-    OutOfDate,
-    Missing,
-}
-
 pub fn main(
-    screenings: [([u8; ID_LEN], ScreeningStatus); ROWS_0],
-    school_examinations: [([u8; ID_LEN], u8); ROWS_1],
-) -> [(u16, u16); 1] {
-    let mut missing_screenings_with_special_ed_needs = 0u16;
-    let mut total = ROWS_1 as u16;
-    for joined in join(screenings, school_examinations) {
-        let ((_, screening), (_, special_ed_needs)) = joined;
-        if special_ed_needs <= 2u8 {
-            match screening {
-                ScreeningStatus::Missing => {
-                    missing_screenings_with_special_ed_needs =
-                        missing_screenings_with_special_ed_needs + 1u16;
-                }
-                _ => {}
-            }
+    location: [([u8; ID_LEN], u8); ROWS_0],
+    disability: [([u8; ID_LEN], u8); ROWS_1],
+) -> [u16; 10] {
+    let mut result: [u16; 10] = [0u16; 10];
+    for joined in join(location, disability) {
+        let ((_, loc), (_, care_level)) = joined;
+        if care_level >= 4 {
+            result[loc as usize] += 1u16;
         }
     }
-    [(missing_screenings_with_special_ed_needs, total)]
+    result
 }

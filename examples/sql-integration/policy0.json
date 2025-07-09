@@ -4,16 +4,16 @@
   "leader": 0,
   "party": 0,
   "input": {
-    "query": "SELECT first_name || last_name || date_of_birth, screening_status FROM early_detection_screening",
+    "query": "SELECT CONCAT(first_name, last_name, date_of_birth), area_city FROM location_town",
     "db": "postgres://postgres:test@localhost:5550/postgres"
   },
   "output": {
     "setup": "TRUNCATE results",
-    "query": "INSERT INTO results (joined, total) VALUES (CAST($1 AS INT), CAST($2 AS INT))",
+    "query": "INSERT INTO results (joined) VALUES (CAST($1 AS INT))",
     "db": "postgres://postgres:test@localhost:5555/postgres"
   },
   "constants": {
-    "ROWS": "SELECT COUNT(id) FROM early_detection_screening",
-    "ID_LEN": "SELECT MAX(LENGTH(first_name || last_name || date_of_birth)) FROM early_detection_screening"
+    "ROWS": "SELECT COUNT(id) FROM location_town",
+    "ID_LEN": "SELECT MAX(LENGTH(CONCAT(first_name, last_name, date_of_birth))) FROM location_town"
   }
 }

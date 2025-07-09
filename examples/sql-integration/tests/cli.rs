@@ -59,7 +59,7 @@ fn simulate() {
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line.contains("MPC Output: 1 rows") {
+            if line.contains("MPC Output: 10 rows") {
                 return s.send(()).unwrap();
             }
         }

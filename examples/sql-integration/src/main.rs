@@ -391,45 +391,50 @@ async fn execute_mpc(
                     }
                 }
                 Type::Unsigned(UnsignedNumType::U8) => {
-                    if let Ok(n) = row.try_get::<i32, _>(c) {
-                        if n >= 0 && n <= u8::MAX as i32 {
-                            literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U8))
-                        }
+                    if let Ok(n) = row.try_get::<i32, _>(c)
+                        && n >= 0
+                        && n <= u8::MAX as i32
+                    {
+                        literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U8))
                     }
                 }
                 Type::Unsigned(UnsignedNumType::U16) => {
-                    if let Ok(n) = row.try_get::<i32, _>(c) {
-                        if n >= 0 && n <= u16::MAX as i32 {
-                            literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U16))
-                        }
+                    if let Ok(n) = row.try_get::<i32, _>(c)
+                        && n >= 0
+                        && n <= u16::MAX as i32
+                    {
+                        literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U16))
                     }
                 }
                 Type::Unsigned(UnsignedNumType::U32) => {
-                    if let Ok(n) = row.try_get::<i32, _>(c) {
-                        if n >= 0 && n <= u32::MAX as i32 {
-                            literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U32))
-                        }
+                    if let Ok(n) = row.try_get::<i32, _>(c)
+                        && n >= 0
+                        && n <= u32::MAX as i32
+                    {
+                        literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U32))
                     }
                 }
                 Type::Unsigned(UnsignedNumType::U64) => {
-                    if let Ok(n) = row.try_get::<i32, _>(c) {
-                        if n >= 0 {
-                            literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U64))
-                        }
+                    if let Ok(n) = row.try_get::<i32, _>(c)
+                        && n >= 0
+                    {
+                        literal = Some(Literal::NumUnsigned(n as u64, UnsignedNumType::U64))
                     }
                 }
                 Type::Signed(SignedNumType::I8) => {
-                    if let Ok(n) = row.try_get::<i32, _>(c) {
-                        if n >= i8::MIN as i32 && n <= i8::MAX as i32 {
-                            literal = Some(Literal::NumSigned(n as i64, SignedNumType::I8))
-                        }
+                    if let Ok(n) = row.try_get::<i32, _>(c)
+                        && n >= i8::MIN as i32
+                        && n <= i8::MAX as i32
+                    {
+                        literal = Some(Literal::NumSigned(n as i64, SignedNumType::I8))
                     }
                 }
                 Type::Signed(SignedNumType::I16) => {
-                    if let Ok(n) = row.try_get::<i32, _>(c) {
-                        if n >= i16::MIN as i32 && n <= i16::MAX as i32 {
-                            literal = Some(Literal::NumSigned(n as i64, SignedNumType::I16))
-                        }
+                    if let Ok(n) = row.try_get::<i32, _>(c)
+                        && n >= i16::MIN as i32
+                        && n <= i16::MAX as i32
+                    {
+                        literal = Some(Literal::NumSigned(n as i64, SignedNumType::I16))
                     }
                 }
                 Type::Signed(SignedNumType::I32) => {
@@ -467,10 +472,10 @@ async fn execute_mpc(
                     let mut str = None;
                     if let Ok(s) = row.try_get::<String, _>(c) {
                         str = Some(s)
-                    } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
-                        if let Ok(s) = String::from_utf8(s) {
-                            str = Some(s)
-                        }
+                    } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c)
+                        && let Ok(s) = String::from_utf8(s)
+                    {
+                        str = Some(s)
                     }
                     if let Some(s) = str {
                         let mut fixed_str =
@@ -496,22 +501,22 @@ async fn execute_mpc(
                     let mut str = None;
                     if let Ok(s) = row.try_get::<String, _>(c) {
                         str = Some(s)
-                    } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c) {
-                        if let Ok(s) = String::from_utf8(s) {
-                            str = Some(s)
-                        }
+                    } else if let Ok(s) = row.try_get::<Vec<u8>, _>(c)
+                        && let Ok(s) = String::from_utf8(s)
+                    {
+                        str = Some(s)
                     }
                     if let Some(variant) = str {
                         for v in &enum_def.variants {
-                            if let Variant::Unit(variant_name) = v {
-                                if variant_name.to_lowercase() == variant.to_lowercase() {
-                                    literal = Some(Literal::Enum(
-                                        name.clone(),
-                                        variant_name.clone(),
-                                        VariantLiteral::Unit,
-                                    ));
-                                    break;
-                                }
+                            if let Variant::Unit(variant_name) = v
+                                && variant_name.to_lowercase() == variant.to_lowercase()
+                            {
+                                literal = Some(Literal::Enum(
+                                    name.clone(),
+                                    variant_name.clone(),
+                                    VariantLiteral::Unit,
+                                ));
+                                break;
                             }
                         }
                     }
