@@ -41,6 +41,39 @@ jobs:
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
       - run: cargo doc --no-deps
 
+  # This job checks that we can build polytune with the msrv specified in the
+  # Cargo.toml and that we *can't build* with one previous version.
+  check-msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install taplo for extracting rust-version
+        uses: taiki-e/install-action@f3a27926ea13d7be3ee2f4cbb925883cf9442b56
+        with:
+          tool: taplo@0.10.0
+      - run: |
+          rust_version=$(taplo get -f Cargo.toml 'package.rust-version')
+          prev_rust_version=$(echo "$rust_version" | awk -F'.' -v OFS='.' '{ $2 = $2 - 1; print }')
+          echo "rust-version=$rust_version" >> $GITHUB_OUTPUT
+          echo "prev-rust-version=$prev_rust_version" >> $GITHUB_OUTPUT
+        id: get-rust-version
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: ${{  steps.get-rust-version.outputs.rust-version }}
+      - run: cargo build
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: ${{  steps.get-rust-version.outputs.prev-rust-version }}
+      - run: sed --in-place '/^rust-version/d' Cargo.toml
+      - run: cargo build
+        id: build-prev-version
+        continue-on-error: true
+      - run: |
+          if [[ "${{ steps.build-prev-version }}" == "success" ]]; then
+            echo "::error::Build with previous of MSRV succeeded unexpectedly. Change rust-version in Cargo.toml"
+            exit 1
+          fi
+
   test-lib:
     strategy:
       matrix:
