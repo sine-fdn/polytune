@@ -9,11 +9,11 @@
 #![allow(non_upper_case_globals)]
 
 use crate::{
-    aes_hash::{AesHash, FIXED_KEY_HASH},
-    aes_rng::AesRng,
     block::Block,
     channel::{Channel, recv_vec_from, send_to},
-    faand::Error,
+    crypto::AesRng,
+    crypto::{AesHash, FIXED_KEY_HASH},
+    mpc::faand::Error,
     ot_core::{
         CorrelatedReceiver, CorrelatedSender, FixedKeyInitializer, Receiver as OtReceiver,
         SemiHonest, Sender as OtSender,

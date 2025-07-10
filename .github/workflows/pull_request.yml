@@ -100,7 +100,6 @@ jobs:
         workspace-member:
           - http-multi-server-channels
           - http-single-server-channels
-          - iroh-p2p-channels
           - sql-integration
           - api-integration
     defaults:

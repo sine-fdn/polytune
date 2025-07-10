@@ -5,7 +5,7 @@ use rand::random;
 
 use crate::{
     channel::{self, Channel, recv_from, send_to},
-    data_types::{Auth, Delta, Key, Mac, Share},
+    mpc::data_types::{Auth, Delta, Key, Mac, Share},
 };
 
 /// Errors that can occur while executing FPre as a trusted dealer.
@@ -221,8 +221,8 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
 mod tests {
     use crate::{
         channel::{SimpleChannel, recv_from, recv_vec_from, send_to},
-        fpre::{Auth, Delta, Error, Key, Mac, Share, fpre},
-        protocol::{_mpc, Preprocessor},
+        mpc::fpre::{Auth, Delta, Error, Key, Mac, Share, fpre},
+        mpc::protocol::{_mpc, Preprocessor},
     };
     use garble_lang::{circuit::Circuit, compile};
 
@@ -440,7 +440,7 @@ mod tests {
         channels = SimpleChannel::channels(inputs.len() + 1);
         let channel = channels.pop().unwrap();
         let parties = inputs.len();
-        tokio::spawn(async move { crate::fpre::fpre(&channel, parties).await });
+        tokio::spawn(async move { crate::mpc::fpre::fpre(&channel, parties).await });
 
         let mut parties = channels.into_iter().zip(inputs).enumerate();
         let Some((_, (eval_channel, inputs))) = parties.next() else {

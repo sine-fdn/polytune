@@ -7,10 +7,7 @@ use garble_lang::{
     literal::{Literal, VariantLiteral},
     token::UnsignedNumType,
 };
-use polytune::{
-    channel,
-    protocol::{Error, mpc},
-};
+use polytune::{Error, channel, mpc};
 use tracing::{error, info};
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.

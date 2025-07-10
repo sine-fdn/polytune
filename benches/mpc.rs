@@ -5,7 +5,7 @@ use criterion::{
     measurement::{Measurement, WallTime},
 };
 use garble_lang::circuit::{Circuit, Gate};
-use polytune::{channel, protocol::mpc};
+use polytune::{channel, mpc};
 use tokio::{runtime::Runtime, sync::oneshot};
 
 use crate::memory_tracking::{MemoryMeasurement, create_instrumented_runtime};

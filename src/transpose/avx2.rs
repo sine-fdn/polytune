@@ -72,7 +72,7 @@ fn partial_swap_64x64_matrices(x: &mut __m256i, y: &mut __m256i) {
 /// # Safety
 /// AVX2 needs to be enabled.
 #[target_feature(enable = "avx2")]
-pub fn avx_transpose128x128(in_out: &mut [__m256i; 64]) {
+fn avx_transpose128x128(in_out: &mut [__m256i; 64]) {
     // This algorithm implements a bit-transpose of a 128x128 bit matrix using a
     // divide-and-conquer algorithm. The idea is that for
     // A = [ A B ]
@@ -173,7 +173,7 @@ const fn mask(pattern: u64, pattern_len: u32) -> u64 {
 /// # Safety
 /// AVX2 instruction set must be available.
 #[target_feature(enable = "avx2")]
-pub fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
+pub(super) fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
     assert_eq!(input.len(), output.len());
     assert!(rows >= 128, "Number of rows must be >= 128.");
     assert_eq!(

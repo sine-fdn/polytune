@@ -9,7 +9,7 @@ use clap::Parser;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::compile,
-    protocol::mpc,
+    mpc,
 };
 use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};

@@ -9,7 +9,7 @@ use wide::{i8x16, i64x2};
 /// - If the number of columns, computed as `input.len() * 8 / rows` is less
 ///   than 16
 /// - If the number of columns is not divisible by 8
-pub fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
+pub(super) fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) {
     assert!(rows >= 16, "rows must be at least 16");
     assert_eq!(0, rows % 16, "rows must be divisible by 16");
     assert_eq!(

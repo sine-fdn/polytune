@@ -26,7 +26,7 @@ use crate::block::Block;
 /// This uses AES in a counter-mode to implement a PRG. TODO: Citation for
 /// why/when this is secure.
 #[derive(Clone, Debug)]
-pub struct AesRng(BlockRng<AesRngCore>);
+pub(crate) struct AesRng(BlockRng<AesRngCore>);
 
 impl RngCore for AesRng {
     #[inline]
@@ -80,14 +80,14 @@ impl AesRng {
     /// Create a new random number generator using a random seed from
     /// `rand::random`.
     #[inline]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let seed = rand::random::<Block>();
         AesRng::from_seed(seed)
     }
 
     /// Create a new RNG using a random seed from this one.
     #[inline]
-    pub fn fork(&mut self) -> Self {
+    pub(crate) fn fork(&mut self) -> Self {
         let seed = self.random::<Block>();
         AesRng::from_seed(seed)
     }
@@ -102,7 +102,7 @@ impl Default for AesRng {
 
 /// The core of `AesRng`, used with `BlockRng`.
 #[derive(Clone)]
-pub struct AesRngCore {
+pub(crate) struct AesRngCore {
     aes: Aes128,
     state: u128,
 }
@@ -135,12 +135,12 @@ impl BlockRngCore for AesRngCore {
 }
 
 mod hidden {
-    use crate::aes_rng::AES_PAR_BLOCKS;
+    use crate::crypto::AES_PAR_BLOCKS;
 
     /// Equivalent to [aes::Block; AES_PAR_BLOCKS]. Since large arrays arrays don't impl Default we write a
     /// wrapper.
     #[derive(Copy, Clone)]
-    pub struct ParBlockWrapper([u32; AES_PAR_BLOCKS * 4]);
+    pub(crate) struct ParBlockWrapper([u32; AES_PAR_BLOCKS * 4]);
 
     impl Default for ParBlockWrapper {
         fn default() -> Self {
@@ -194,14 +194,14 @@ impl From<AesRngCore> for AesRng {
 /// must not influence correctness or network messages.
 // https://github.com/RustCrypto/block-ciphers/blob/4da9b802de52a3326fdc74d559caddd57042fed2/aes/src/ni.rs#L43
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub const AES_PAR_BLOCKS: usize = 9;
+pub(crate) const AES_PAR_BLOCKS: usize = 9;
 #[cfg(target_arch = "aarch64")]
 // https://github.com/RustCrypto/block-ciphers/blob/4da9b802de52a3326fdc74d559caddd57042fed2/aes/src/armv8.rs#L32
-pub const AES_PAR_BLOCKS: usize = 21;
+pub(crate) const AES_PAR_BLOCKS: usize = 21;
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
 // When no AES ILP is available, setting this constant to something higher than 1 might still provide a
 // small performance boost when other code uses this constant to chunk some data (e.g. in the hash_blocks methods).
-pub const AES_PAR_BLOCKS: usize = 4;
+pub(crate) const AES_PAR_BLOCKS: usize = 4;
 
 #[cfg(test)]
 mod tests {

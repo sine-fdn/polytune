@@ -4,7 +4,7 @@ use gloo_timers::future::TimeoutFuture;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::{compile, literal::Literal, token::SignedNumType},
-    protocol::mpc,
+    mpc,
 };
 use reqwest::StatusCode;
 use url::Url;

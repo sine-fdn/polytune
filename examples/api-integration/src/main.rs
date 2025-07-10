@@ -10,7 +10,7 @@ use clap::Parser;
 use polytune::{
     channel::{Channel, RecvInfo, SendInfo},
     garble_lang::{compile_with_constants, literal::Literal},
-    protocol::mpc,
+    mpc,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};

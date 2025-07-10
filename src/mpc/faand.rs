@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::{
     block::Block,
     channel::{self, Channel, recv_vec_from, scatter, send_to, unverified_broadcast},
-    data_types::{Auth, Delta, Key, Mac, Share},
+    mpc::data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
     utils::xor_inplace,
 };
