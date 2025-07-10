@@ -75,11 +75,16 @@ extraction_targets = [
     "-i",
     " ".join(["-**",
     "+**::faand::spec::share_is_authenticated",
-    # "+**::faand::lemma_vis_correct",
-    "+**::faand::lemma_xor_distributivity",
     "+**::faand::lemma_compute_ts_pointwise",
     "+**::faand::combine_two_leaky_ands",
-    # "+**::faand::fabitn"
+    "+**::faand::compute_vi",
+    "+**::faand::compute_vi_l",
+    "+**::faand::compute_ts_l",
+    "+**::faand::fhaand_compute_hashes",
+    "+**::faand::flaand_1",
+    "+**::faand::flaand_2",
+    "+**::faand::flaand_3",
+    # "+**::faand::lemma_vis_correct",
     ])
 ]
 

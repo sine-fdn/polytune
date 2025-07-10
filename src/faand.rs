@@ -965,6 +965,8 @@ fn hash128(input: u128) -> u128 {
     Prop::and(
         (v.len() >= l).into(),
         Prop::and(
+            (zshares.len() >= l).into(),
+        Prop::and(
             (rshares.len() >= l).into(),
             Prop::and(
             Prop::and(
@@ -980,7 +982,7 @@ fn hash128(input: u128) -> u128 {
                                     0 <= ll && ll < l && yshares.len() >= l,
                                     yshares[ll].1.0.len() >= n
                 ))
-        )))
+            ))))
     )))]
 fn flaand_1(
     delta: Delta,
@@ -999,7 +1001,7 @@ fn flaand_1(
 
     for ll in 0..l {
         #[cfg(hax)]
-        loop_invariant!(|_: usize| z.len() == l && e.len() == l);
+        loop_invariant!(|_: usize| z.len() == l && e.len() == l && zshares.len() >= l);
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
         zshares[ll].0 = z[ll];
