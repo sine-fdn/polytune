@@ -1,7 +1,6 @@
 workspace = { members = [
     "examples/http-multi-server-channels",
     "examples/http-single-server-channels",
-    "examples/iroh-p2p-channels",
     "examples/wasm-http-channels",
     "examples/sql-integration",
     "examples/api-integration",
