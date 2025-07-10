@@ -77,8 +77,8 @@ async fn main() -> Result<(), Error> {
     let state: Msgs = Arc::new(Mutex::new(HashMap::new()));
     let app = Router::new()
         .route("/ping", get(ping))
-        .route("/session/:session/send/:from/:to", post(send))
-        .route("/session/:session/recv/:from/:to", post(recv))
+        .route("/session/{session}/send/{from}/{to}", post(send))
+        .route("/session/{session}/recv/{from}/{to}", post(recv))
         .with_state(state)
         .layer(cors)
         .layer(DefaultBodyLimit::max(1000 * 1024 * 1024))
