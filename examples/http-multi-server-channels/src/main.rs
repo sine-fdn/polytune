@@ -6,11 +6,7 @@ use axum::{
     routing::post,
 };
 use clap::Parser;
-use polytune::{
-    channel::Channel,
-    garble_lang::compile,
-    mpc,
-};
+use polytune::{channel::Channel, garble_lang::compile, mpc};
 use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
 use tokio::{

@@ -73,11 +73,7 @@ impl Channel for PollingHttpChannel {
         }
     }
 
-    async fn recv_bytes_from(
-        &self,
-        p: usize,
-        _phase: &str,
-    ) -> Result<Vec<u8>, HttpChannelError> {
+    async fn recv_bytes_from(&self, p: usize, _phase: &str) -> Result<Vec<u8>, HttpChannelError> {
         let url = format!("{}/recv/{}/{}/{}", self.url, self.session, p, self.party);
         let mut attempts = 0;
         loop {

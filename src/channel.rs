@@ -82,11 +82,7 @@ pub trait Channel {
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
-    async fn recv_bytes_from(
-        &self,
-        party: usize,
-        phase: &str,
-    ) -> Result<Vec<u8>, Self::RecvError>;
+    async fn recv_bytes_from(&self, party: usize, phase: &str) -> Result<Vec<u8>, Self::RecvError>;
 }
 
 /// Serializes and sends an MPC message to the other party.
