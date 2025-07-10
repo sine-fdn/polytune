@@ -9,11 +9,11 @@
 //! can switch between different channel implementations (network sockets, in-memory channels, etc.)
 //! without changing protocol code.
 //!
-//! ## Message Chunking
+//! ## Message Transport
 //!
-//! The module provides automatic chunking of large messages to avoid issues with message size
-//! limits. Messages are split into chunks, serialized, and reassembled on the receiving end
-//! transparently.
+//! Messages are serialized and transmitted in full. It is the responsibility of the caller to ensure
+//! message sizes do not exceed transport limitations, i.e., message chunking may need to be
+//! implemented.
 //!
 //! ## Serialization
 //!
@@ -26,7 +26,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::future::{try_join, try_join_all};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::{
     Mutex,
@@ -55,24 +55,6 @@ pub enum ErrorKind {
     SerdeError(String),
     /// The message is a Vec, but not of the expected length.
     InvalidLength,
-}
-
-/// A chunk of a message as bytes and the number of chunks remaining to be sent.
-#[derive(Debug, Serialize)]
-struct SendChunk<'a, T> {
-    /// A chunk of a full message.
-    chunk: &'a [T],
-    /// The number of chunks that remain to be sent after the current one.
-    remaining_chunks: usize,
-}
-
-/// A chunk of a message as bytes and the number of chunks remaining to be sent.
-#[derive(Debug, Deserialize)]
-struct RecvChunk<T> {
-    /// A chunk of a full message.
-    chunk: Vec<T>,
-    /// The number of chunks that remain to be sent after the current one.
-    remaining_chunks: usize,
 }
 
 /// Information about a sent message that can be useful for logging.
@@ -178,35 +160,22 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     phase: &str,
     msg: &[S],
 ) -> Result<(), Error> {
-    let chunk_size = 5_000_000;
-    let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
-    if chunks.is_empty() {
-        chunks.push(&[]);
-    }
-    let length = chunks.len();
-    for (i, chunk) in chunks.into_iter().enumerate() {
-        let remaining_chunks = length - i - 1;
-        let chunk = SendChunk {
-            chunk,
-            remaining_chunks,
-        };
-        let chunk = bincode::serialize(&chunk).map_err(|e| Error {
-            phase: format!("sending {phase}"),
-            reason: ErrorKind::SerdeError(format!("{e:?}")),
-        })?;
-        let info = SendInfo {
+    let data = bincode::serialize(&msg).map_err(|e| Error {
+        phase: format!("sending {phase}"),
+        reason: ErrorKind::SerdeError(format!("{e:?}")),
+    })?;
+    let info = SendInfo {
+        phase: phase.to_string(),
+        current_msg: 0,
+        remaining_msgs: 0,
+    };
+    channel
+        .send_bytes_to(party, data, info)
+        .await
+        .map_err(|e| Error {
             phase: phase.to_string(),
-            current_msg: i,
-            remaining_msgs: remaining_chunks,
-        };
-        channel
-            .send_bytes_to(party, chunk, info)
-            .await
-            .map_err(|e| Error {
-                phase: phase.to_string(),
-                reason: ErrorKind::SendError(format!("{e:?}")),
-            })?;
-    }
+            reason: ErrorKind::SendError(format!("{e:?}")),
+        })?;
     Ok(())
 }
 
@@ -216,36 +185,23 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
     party: usize,
     phase: &str,
 ) -> Result<Vec<T>, Error> {
-    let mut msg = vec![];
-    let mut i = 0;
-    let mut remaining = None;
-    loop {
-        let info = RecvInfo {
+    let info = RecvInfo {
+        phase: phase.to_string(),
+        current_msg: 0,
+        remaining_msgs: Some(0),
+    };
+    let data = channel
+        .recv_bytes_from(party, info)
+        .await
+        .map_err(|e| Error {
             phase: phase.to_string(),
-            current_msg: i,
-            remaining_msgs: remaining,
-        };
-        let chunk = channel
-            .recv_bytes_from(party, info)
-            .await
-            .map_err(|e| Error {
-                phase: phase.to_string(),
-                reason: ErrorKind::RecvError(format!("{e:?}")),
-            })?;
-        let RecvChunk {
-            chunk,
-            remaining_chunks,
-        }: RecvChunk<T> = bincode::deserialize(&chunk).map_err(|e| Error {
-            phase: format!("receiving {phase}"),
-            reason: ErrorKind::SerdeError(format!("{e:?}")),
+            reason: ErrorKind::RecvError(format!("{e:?}")),
         })?;
-        msg.extend(chunk);
-        if remaining_chunks == 0 {
-            return Ok(msg);
-        }
-        remaining = Some(remaining_chunks);
-        i += 1;
-    }
+    let msg: Vec<T> = bincode::deserialize(&data).map_err(|e| Error {
+        phase: format!("receiving {phase}"),
+        reason: ErrorKind::SerdeError(format!("{e:?}")),
+    })?;
+    Ok(msg)
 }
 
 /// Receives and deserializes a Vec from the other party (while checking the length).
