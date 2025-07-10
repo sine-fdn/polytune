@@ -61,8 +61,6 @@ pub enum ErrorKind {
 #[derive(Debug, Clone)]
 pub struct SendInfo {
     phase: String,
-    current_msg: usize,
-    remaining_msgs: usize,
 }
 
 impl SendInfo {
@@ -70,54 +68,18 @@ impl SendInfo {
     pub fn phase(&self) -> &str {
         &self.phase
     }
-
-    /// How many chunks have already been sent, 1 for the first message, 2 for the second, etc.
-    pub fn sent(&self) -> usize {
-        self.current_msg + 1
-    }
-
-    /// How many chunks have yet to be sent for the full message to be transmitted.
-    pub fn remaining(&self) -> usize {
-        self.remaining_msgs
-    }
-
-    /// The total number of chunks that make up the full message.
-    pub fn total(&self) -> usize {
-        self.sent() + self.remaining()
-    }
 }
 
 /// Information about a received message that can be useful for logging.
 #[derive(Debug, Clone)]
 pub struct RecvInfo {
     phase: String,
-    current_msg: usize,
-    remaining_msgs: Option<usize>,
 }
 
 impl RecvInfo {
     /// The name of the protocol phase that sent the message.
     pub fn phase(&self) -> &str {
         &self.phase
-    }
-
-    /// How many chunks have already been sent, 1 for the first message, 2 for the second, etc.
-    pub fn sent(&self) -> usize {
-        self.current_msg + 1
-    }
-
-    /// How many chunks have yet to be sent for the full message to be transmitted.
-    ///
-    /// Will be `None` for the first message, before it is clear how many chunks need to be sent.
-    pub fn remaining(&self) -> Option<usize> {
-        self.remaining_msgs
-    }
-
-    /// The total number of chunks that make up the full message.
-    ///
-    /// Will be `None` for the first message, before it is clear how many chunks need to be sent.
-    pub fn total(&self) -> Option<usize> {
-        self.remaining().map(|remaining| self.sent() + remaining)
     }
 }
 
@@ -166,8 +128,6 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     })?;
     let info = SendInfo {
         phase: phase.to_string(),
-        current_msg: 0,
-        remaining_msgs: 0,
     };
     channel
         .send_bytes_to(party, data, info)
@@ -187,8 +147,6 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
 ) -> Result<Vec<T>, Error> {
     let info = RecvInfo {
         phase: phase.to_string(),
-        current_msg: 0,
-        remaining_msgs: Some(0),
     };
     let data = channel
         .recv_bytes_from(party, info)
@@ -417,12 +375,7 @@ impl Channel for SimpleChannel {
         self.bytes_sent
             .fetch_add(msg.len() as u64, Ordering::Relaxed);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        let i = info.sent();
-        if i == 1 {
-            trace!(size = mb, "Sending msg");
-        } else {
-            trace!(size = mb, "  (continued sending msg)");
-        }
+        trace!(size = mb, "Sending msg");
         self.s[p]
             .as_ref()
             .unwrap_or_else(|| panic!("No sender for party {p}"))

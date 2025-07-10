@@ -379,19 +379,13 @@ impl Channel for HttpChannel {
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        let i = info.sent();
-        let total = info.total();
         let phase = info.phase();
-        if i == 1 {
-            info!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
-        } else {
-            info!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
-        }
+        info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
         loop {
             sleep(Duration::from_millis(simulated_delay_in_ms)).await;
             let req = client.post(&url).body(msg.clone()).send();
             let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
-                warn!("  req timeout: chunk {}/{} for party {}", i + 1, total, p);
+                warn!("  req timeout: party {}", p);
                 continue;
             };
             match res.status() {
