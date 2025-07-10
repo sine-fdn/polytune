@@ -2,6 +2,7 @@
 name = "polytune-wasm-http-channels"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [[bin]]
 name = "broker"
@@ -52,7 +53,7 @@ tracing-subscriber = { version = "0.3.18", optional = true }
 #
 # for the client:
 #
-polytune = { path = "../../", version = "0.1.0" }
+polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = "0.12.20"
 url = "2.5.4"
 wasm-bindgen = "0.2.100"
