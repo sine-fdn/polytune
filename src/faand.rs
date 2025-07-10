@@ -2,8 +2,9 @@
 use std::vec;
 
 #[cfg(hax)]
-use hax_lib::{opaque, ensures, exists, forall, implies, lemma,
-    fstar, loop_invariant, requires, Prop};
+use hax_lib::{
+    ensures, exists, forall, fstar, implies, lemma, loop_invariant, opaque, requires, Prop,
+};
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -377,7 +378,6 @@ fn zero_rng() -> ChaCha20Rng {
     ChaCha20Rng::from_seed([0u8; 32])
 }
 
-
 #[cfg_attr(hax, opaque)]
 fn rand_gen(rng: &mut ChaCha20Rng) -> bool {
     rng.gen()
@@ -428,8 +428,7 @@ async fn fabitn(
         loop_invariant!(|_: usize| Prop::from(keys.len() == n)
             & forall(|j: usize| implies(0 <= j && j < n && keys.len() == n, keys[j].len() == l))
             & Prop::from(macs.len() == n)
-            & forall(|j: usize| implies(0 <= j && j < n && macs.len() == n, macs[j].len() == l))
-        );
+            & forall(|j: usize| implies(0 <= j && j < n && macs.len() == n, macs[j].len() == l)));
 
         if k == i {
             continue;
@@ -571,27 +570,21 @@ pub(crate) async fn fashare(
     let mut dmvec: Vec<VectorU8> = Vec::with_capacity(RHO);
 
     for r in 0..RHO {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::and(
             (xishares.len() == l + RHO).into(),
-            forall(|ll: usize| implies(
-                l <= ll && ll < l + RHO,
-                xishares[ll].1 .0.len() == n
-            ))
+            forall(|ll: usize| implies(l <= ll && ll < l + RHO, xishares[ll].1 .0.len() == n))
         ));
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
         for k in 0..n {
-#[cfg(hax)]
+            #[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 (xishares.len() == l + RHO).into(),
-                forall(|ll: usize| implies(
-                    l <= ll && ll < l + RHO,
-                    xishares[ll].1 .0.len() == n
-                ))
+                forall(|ll: usize| implies(l <= ll && ll < l + RHO, xishares[ll].1 .0.len() == n))
             ));
-            #[cfg(hax)]//
+            #[cfg(hax)] //
             loop_invariant!(|_: usize| xishare.1 .0.len() == n);
             if k == i {
                 continue;
@@ -692,7 +685,7 @@ fn random_bool() -> bool {
 }
 
 #[cfg_attr(hax, requires(
-    Prop::from(xshare.1.keys().len() >= n) & 
+    Prop::from(xshare.1.keys().len() >= n) &
     Prop::from(randomness.len() >= n)
 ))]
 #[cfg_attr(hax, ensures(
@@ -708,7 +701,7 @@ fn fhaand_compute_hashes(
 ) -> Vec<(bool, bool)> {
     let mut h0h1 = vec![(false, false); n];
     for j in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(h0h1.len() == n));
         if j == i {
             continue;
@@ -739,7 +732,7 @@ fn fhaand_compute_hashes_l(
 
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
     for ll in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(h0h1.len() == n)
             & forall(|j: usize| implies(0 <= j && j < n && h0h1.len() == n, h0h1[j].len() == l)));
 
@@ -795,7 +788,7 @@ fn fhaand_compute_vi_l(
     // Step 2 b) Receive h0, h1 from all parties and compute vi.
     let mut vis = vec![false; l];
     for ll in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| vis.len() == l);
         vis[ll] = fhaand_compute_vi(i, n, &randomness[ll * n..(ll + 1) * n], &ts[ll]);
     }
@@ -852,7 +845,7 @@ fn fhaand_compute_ts_l(
 ) -> Vec<Vec<bool>> {
     let mut ts = vec![vec![false; n]; l];
     for ll in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(ts.len() == n)
             & forall(|j: usize| implies(0 <= j && j < n && ts.len() == n, ts[j].len() >= l)));
         ts[ll] = fhaand_compute_ts(i, n, &xshares[ll], &h0h1_j[ll]);
@@ -868,7 +861,7 @@ fn fhaand_compute_ts_l(
 fn fhaand_compute_ts(i: usize, n: usize, xshare: &Share, h0h1_j: &[(bool, bool)]) -> Vec<bool> {
     let mut ts = vec![false; n];
     for j in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(ts.len() == n));
         if j == i {
             continue;
@@ -905,63 +898,6 @@ fn compute_t_pointwise(x_i: bool, mac_by_j: Mac, h0h1_j: (bool, bool)) -> bool {
     }
 }
 
-// XXX: We replace this, since there is a bug in hax that does not put preconditions on lemmas.
-#[cfg(hax)]
-#[cfg_attr(hax, fstar::replace(
-    r#"let lemma_compute_ts_pointwise
-      (i j: usize)
-      (share_at_i share_at_j: Polytune.Data_types.t_Share)
-      (delta_j: Polytune.Data_types.t_Delta)
-      (s_j y_j: bool)
-    : Lemma
-    (requires (
-      (Alloc.Vec.impl_1__len (Polytune.Data_types.impl_Auth__macs share_at_i._1) >. j)
-        /\ (Alloc.Vec.impl_1__len (Polytune.Data_types.impl_Auth__keys share_at_j._1) >. i)))
-    (ensures
-      (let x_i:bool = Polytune.Data_types.impl_Share__bit share_at_i in
-        let hashes:(bool & bool) =
-          compute_hash_pointwise delta_j
-            y_j
-            (Polytune.Data_types.key_for share_at_j i <: Polytune.Data_types.t_Key)
-            s_j
-        in
-        let t:bool =
-          compute_t_pointwise x_i
-            (Polytune.Data_types.mac_by share_at_i j <: Polytune.Data_types.t_Mac)
-            hashes
-        in
-        if x_i then t =. (Core.Ops.Bit.f_bitxor y_j s_j <: bool) else t =. s_j))
-        = Polytune.Faand.Spec.share_is_authenticated share_at_i share_at_j i j delta_j;
-        ()
-"#
-))]
-#[cfg_attr(hax, lemma)]
-#[cfg_attr(hax, requires(
-        Prop::from(share_at_i.1.macs().len() > j) &
-        Prop::from(share_at_j.1.keys().len() > i)
-))]
-fn lemma_compute_ts_pointwise(
-    i: usize,
-    j: usize,
-    share_at_i: Share,
-    share_at_j: Share,
-    delta_j: Delta,
-    s_j: bool,
-    y_j: bool,
-) -> Proof<
-    {
-        let x_i = share_at_i.bit();
-        let hashes = compute_hash_pointwise(delta_j, y_j, key_for(&share_at_j, i), s_j);
-        let t = compute_t_pointwise(x_i, mac_by(&share_at_i, j), hashes);
-        if x_i {
-            t == y_j ^ s_j
-        } else {
-            t == s_j
-        }
-    },
-> {
-    spec::share_is_authenticated(&share_at_i, &share_at_j, i, j, &delta_j);
-}
 /// Protocol Pi_HaAND that performs F_HaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
@@ -1062,7 +998,7 @@ fn flaand_1(
     let mut e = vec![false; l];
 
     for ll in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| z.len() == l && e.len() == l);
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
@@ -1073,10 +1009,10 @@ fn flaand_1(
     // Step 4) Compute phi.
     let mut phi = vec![0; l];
     for ll in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| phi.len() == l);
         for k in 0..n {
-#[cfg(hax)]
+            #[cfg(hax)]
             loop_invariant!(|_: usize| phi.len() == l);
             if k == i {
             } else {
@@ -1092,7 +1028,7 @@ fn flaand_1(
     let mut ki_xj_phi = vec![vec![0; l]; n];
     let mut ei_uij = vec![vec![]; n];
     for j in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::and(
             (ki_xj_phi.len() == n && ei_uij.len() == n && phi.len() == l).into(),
             forall(|j: usize| implies(
@@ -1104,7 +1040,7 @@ fn flaand_1(
             continue;
         }
         for ll in 0..l {
-#[cfg(hax)]
+            #[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 (ki_xj_phi.len() == n && ei_uij.len() == n && phi.len() == l).into(),
                 forall(|j: usize| implies(
@@ -1178,7 +1114,7 @@ fn flaand_2(
     phi: &Vec<u128>,
 ) -> Result<(Vec<Commitment>, Vec<u128>), Error> {
     for j in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| Prop::and(
             Prop::and(
                 (ki_xj_phi.len() >= n).into(),
@@ -1200,7 +1136,7 @@ fn flaand_2(
             continue;
         }
         for ll in 0..l {
-#[cfg(hax)]
+            #[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 Prop::and(
                     (ki_xj_phi.len() >= n).into(),
@@ -1251,7 +1187,7 @@ fn flaand_2(
     let mut hi = vec![0; l];
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|ll: usize| Prop::and(
             (hi.len() == l && commhi.len() == ll).into(),
             Prop::and(
@@ -1263,7 +1199,7 @@ fn flaand_2(
             )
         ));
         for k in 0..n {
-#[cfg(hax)]
+            #[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 (hi.len() == l && commhi.len() == ll).into(),
                 Prop::and(
@@ -1318,13 +1254,13 @@ fn flaand_3(
     let mut commitment_error = false;
     let mut xor_not_zero_error = false;
     for k in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| xor_all_hi.len() == l);
         if k == i {
             continue;
         }
         for ll in 0..l {
-#[cfg(hax)]
+            #[cfg(hax)]
             loop_invariant!(|_: usize| xor_all_hi.len() == l);
             if !open_commitment(&commhi_k[k][ll], &hi_k_outer[k][ll].to_be_bytes()) {
                 commitment_error = true;
@@ -1335,7 +1271,7 @@ fn flaand_3(
 
     // Step 7) Check that the xor of all his is zero.
     for i in 0..l {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|_: usize| xor_all_hi.len() == l);
         if xor_all_hi[i] != 0 {
             xor_not_zero_error = true;
@@ -1677,7 +1613,7 @@ fn combine_two_leaky_ands(
     let xbit = x1.0 ^ x2.0;
     let mut xauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|k: usize| xauth.0.len() == n);
         if k == i {
             continue;
@@ -1691,7 +1627,7 @@ fn combine_two_leaky_ands(
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
     let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in 0..n {
-#[cfg(hax)]
+        #[cfg(hax)]
         loop_invariant!(|k: usize| zauth.0.len() == n);
         if k == i {
             continue;
@@ -1709,37 +1645,69 @@ fn combine_two_leaky_ands(
     Ok((xshare, y1, zshare))
 }
 
-fn xor_bits(a:&[bool]) -> bool {
-    if a.len() == 0 {
-        false
-    } else {
-        a[0] ^ xor_bits(&a[1..])
-    }
-}
-
-#[cfg_attr(hax, requires(a.len() == b.len()))]
-#[cfg_attr(hax, ensures(|result| result.len() == a.len()))] 
-fn xor_zip(a: &[bool], b: &[bool]) -> Vec<bool> {
-    if a.len() == 0 {
-        Vec::new()
-    } else {
-        let mut rest = xor_zip(&a[1..], &b[1..]);
-        rest.extend_from_slice(&[a[0] ^ b[0]]);
-        rest
-    }
+// XXX: We replace this, since there is a bug in hax that does not put preconditions on lemmas.
+#[cfg(hax)]
+#[cfg_attr(
+    hax,
+    fstar::replace(
+        r#"let lemma_compute_ts_pointwise
+      (i j: usize)
+      (share_at_i share_at_j: Polytune.Data_types.t_Share)
+      (delta_j: Polytune.Data_types.t_Delta)
+      (s_j y_j: bool)
+    : Lemma
+    (requires (
+      (Alloc.Vec.impl_1__len (Polytune.Data_types.impl_Auth__macs share_at_i._1) >. j)
+        /\ (Alloc.Vec.impl_1__len (Polytune.Data_types.impl_Auth__keys share_at_j._1) >. i)))
+    (ensures
+      (let x_i:bool = Polytune.Data_types.impl_Share__bit share_at_i in
+        let hashes:(bool & bool) =
+          compute_hash_pointwise delta_j
+            y_j
+            (Polytune.Data_types.key_for share_at_j i <: Polytune.Data_types.t_Key)
+            s_j
+        in
+        let t:bool =
+          compute_t_pointwise x_i
+            (Polytune.Data_types.mac_by share_at_i j <: Polytune.Data_types.t_Mac)
+            hashes
+        in
+        if x_i then t =. (Core.Ops.Bit.f_bitxor y_j s_j <: bool) else t =. s_j))
+        = Polytune.Faand.Spec.share_is_authenticated share_at_i share_at_j i j delta_j;
+        ()
+"#
+    )
+)]
+#[cfg_attr(hax, lemma)]
+#[cfg_attr(hax, requires(
+        Prop::from(share_at_i.1.macs().len() > j) &
+        Prop::from(share_at_j.1.keys().len() > i)
+))]
+fn lemma_compute_ts_pointwise(
+    i: usize,
+    j: usize,
+    share_at_i: Share,
+    share_at_j: Share,
+    delta_j: Delta,
+    s_j: bool,
+    y_j: bool,
+) -> Proof<
+    {
+        let x_i = share_at_i.bit();
+        let hashes = compute_hash_pointwise(delta_j, y_j, key_for(&share_at_j, i), s_j);
+        let t = compute_t_pointwise(x_i, mac_by(&share_at_i, j), hashes);
+        if x_i {
+            t == y_j ^ s_j
+        } else {
+            t == s_j
+        }
+    },
+> {
+    spec::share_is_authenticated(&share_at_i, &share_at_j, i, j, &delta_j);
 }
 
 #[cfg(hax)]
 #[cfg_attr(hax, lemma)]
-fn lemma_xor_distributivity<const LEN:usize>(a: &[bool; LEN], b: &[bool; LEN]) -> Proof<{
-    xor_bits(&xor_zip(a.as_slice(),b.as_slice())) == xor_bits(a.as_slice()) ^ xor_bits(b.as_slice())
-}>{
-    
-}
-
-#[cfg(hax)]
-#[cfg_attr(hax, lemma)]
-// TODO: Safety pre-/post-conditions
 fn lemma_vis_correct<const NUM_PARTIES: usize>(
     parties: [spec::PartyState<NUM_PARTIES>; NUM_PARTIES],
 ) -> Proof<
@@ -1790,8 +1758,8 @@ fn lemma_vis_correct<const NUM_PARTIES: usize>(
 > {
 }
 
-/// This module contains a Rust specification for the triple
-/// computation performed by `flaand`.
+/// This module contains any helper lemmas needed to prove the main lemmas.
+#[cfg(hax)]
 mod spec {
     #![allow(unused)]
     use super::*;
@@ -1806,9 +1774,10 @@ mod spec {
     }
 
     // XXX: We replace this, since there is a bug in hax that does not put preconditions on lemmas.
-    #[cfg(hax)]
-    #[cfg_attr(hax, fstar::replace(
-        r#"let share_is_authenticated
+    #[cfg_attr(
+        hax,
+        fstar::replace(
+            r#"let share_is_authenticated
       (share_at_i share_at_j: Polytune.Data_types.t_Share)
       (i j: usize)
       (delta_j: Polytune.Data_types.t_Delta)
@@ -1828,7 +1797,8 @@ mod spec {
         else mac.Polytune.Data_types._0 =. key.Polytune.Data_types._0)) =
   let _:Prims.unit = admit () in
   ()"#
-    ))]
+        )
+    )]
     #[cfg_attr(hax, lemma)]
     #[cfg_attr(hax, requires(
         Prop::from(share_at_i.1.macs().len() > j) &
@@ -1855,36 +1825,35 @@ mod spec {
         fstar!(r#"admit()"#);
     }
 
-    #[allow(unreachable_code)]
-    fn ideal_fhaand<const NUM_PARTIES: usize>(
-        parties: [PartyState<NUM_PARTIES>; NUM_PARTIES],
-    ) -> [bool; NUM_PARTIES] {
-        // Every party's vector of hashes (H0, H1) per other party per triple computation.
+    fn xor_bits(a: &[bool]) -> bool {
+        if a.len() == 0 {
+            false
+        } else {
+            a[0] ^ xor_bits(&a[1..])
+        }
+    }
 
-        let hashes: [Vec<(bool, bool)>; NUM_PARTIES] = array::from_fn(|i| {
-            let party = &parties[i];
-            let xshare = &party.xshare;
-            let yi = party.yshare.bit();
-            super::fhaand_compute_hashes(party.delta, i, NUM_PARTIES, xshare, yi, &party.randomness)
-        });
+    #[cfg_attr(hax, requires(a.len() == b.len()))]
+    #[cfg_attr(hax, ensures(|result| result.len() == a.len()))]
+    fn xor_zip(a: &[bool], b: &[bool]) -> Vec<bool> {
+        if a.len() == 0 {
+            Vec::new()
+        } else {
+            let mut rest = xor_zip(&a[1..], &b[1..]);
+            rest.extend_from_slice(&[a[0] ^ b[0]]);
+            rest
+        }
+    }
 
-        // party i outputs hashes[i] = vec![(), (), .., ()]
-        // party j receives [hashes[0][j],.., hashes[i][j], .., hashes[n-1][j]]
-        let hashes_transposed: [Vec<(bool, bool)>; NUM_PARTIES] =
-            array::from_fn(|j| hashes.iter().map(|vec| vec[j].clone()).collect());
-
-        let ts: [Vec<bool>; NUM_PARTIES] = array::from_fn(|i| {
-            let party = &parties[i];
-            fhaand_compute_ts(i, NUM_PARTIES, &party.xshare, &hashes_transposed[i])
-        });
-
-        // fstar!(r#"assert( ts_are_correct $NUM_PARTIES $NUM_TRIPLES $PROD $parties $ts)"#);
-
-        let vis = array::from_fn(|i| {
-            let party = &parties[i];
-            super::fhaand_compute_vi(i, NUM_PARTIES, &party.randomness, &ts[i])
-        });
-
-        vis
+    #[cfg_attr(hax, lemma)]
+    fn lemma_xor_distributivity<const LEN: usize>(
+        a: &[bool; LEN],
+        b: &[bool; LEN],
+    ) -> Proof<
+        {
+            xor_bits(&xor_zip(a.as_slice(), b.as_slice()))
+                == xor_bits(a.as_slice()) ^ xor_bits(b.as_slice())
+        },
+    > {
     }
 }
