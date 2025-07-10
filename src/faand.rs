@@ -1,7 +1,9 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::vec;
 
-use hax_lib::{ensures, exists, forall, implies, loop_invariant, requires, Prop};
+#[cfg(hax)]
+use hax_lib::{opaque, ensures, exists, forall, implies, lemma,
+    fstar, loop_invariant, requires, Prop};
 use maybe_async::maybe_async;
 use rand::{random, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -87,14 +89,14 @@ struct VectorU8(Vec<u8>);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 fn commit(value: &[u8]) -> Commitment {
     Commitment(blake3::hash(value).into())
 }
 
 /// Verifies if a given value matches a previously generated commitment.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
 }
@@ -127,7 +129,7 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
 
 /// Implements the verification step of broadcast with abort based on Goldwasser and Lindell's protocol.
 #[maybe_async(AFIT)]
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 pub(crate) async fn broadcast_verification<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -184,7 +186,7 @@ pub(crate) async fn broadcast_verification<
 /// for all parties at once, where each party sends its vector to all others.
 /// The function returns the vector received and verified by broadcast.
 #[maybe_async(AFIT)]
-#[cfg_attr(hax, hax_lib::opaque)]
+#[cfg_attr(hax, opaque)]
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -212,7 +214,7 @@ pub(crate) async fn broadcast<
 /// Implements same broadcast with abort as broadcast, but only the first element of the tuple in
 /// the vector is broadcasted, the second element is simply sent to all parties.
 #[maybe_async(AFIT)]
-#[cfg_attr(hax, hax_lib::opaque)]
+#[cfg_attr(hax, opaque)]
 pub(crate) async fn broadcast_first_send_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
@@ -250,7 +252,7 @@ pub(crate) async fn broadcast_first_send_second<
 /// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
 /// cryptographically secure random number generator.
 #[maybe_async(AFIT)]
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 pub(crate) async fn shared_rng(
     channel: &mut impl Channel,
     i: usize,
@@ -306,7 +308,7 @@ pub(crate) async fn shared_rng(
 /// This function generates a shared random number generator (RNG) between every two parties using
 /// two-party coin tossing for the two-party KOS OT protocol.
 #[maybe_async(AFIT)]
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 pub(crate) async fn shared_rng_pairwise(
     channel: &mut impl Channel,
     i: usize,
@@ -370,18 +372,18 @@ pub(crate) async fn shared_rng_pairwise(
     Ok(shared_two_by_two)
 }
 
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 fn zero_rng() -> ChaCha20Rng {
     ChaCha20Rng::from_seed([0u8; 32])
 }
 
 
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 fn rand_gen(rng: &mut ChaCha20Rng) -> bool {
     rng.gen()
 }
 
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 fn drop_func<T>(vec: Vec<T>) -> () {
     drop(vec)
 }
@@ -397,16 +399,6 @@ fn drop_func<T>(vec: Vec<T>) -> () {
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
 #[maybe_async(AFIT)]
-/*#[hax_lib::ensures(|result: (Vec<Share>, ChaCha20Rng)| 
-    hax_lib::Prop::and(
-        (result.0.len() == l).into(),
-        hax_lib::forall(|ll: usize| hax_lib::implies(
-            ll < l,
-            result.0[ll].1.0.len() == n
-        ))
-    )
-)]*/
-#[hax_lib::requires(l <= usize::MAX - 3 * RHO)]
 async fn fabitn(
     channel: &mut impl Channel,
     delta: Delta,
@@ -432,10 +424,11 @@ async fn fabitn(
     let mut shared_rand: Vec<ChaCha20Rng> = vec![zero_rng(); n];
 
     for k in 0..n {
-        hax_lib::loop_invariant!(|_: usize| hax_lib::Prop::from(keys.len() == n)
-            & hax_lib::forall(|j: usize| hax_lib::implies(0 <= j && j < n && keys.len() == n, keys[j].len() == l))
-            & hax_lib::Prop::from(macs.len() == n)
-            & hax_lib::forall(|j: usize| hax_lib::implies(0 <= j && j < n && macs.len() == n, macs[j].len() == l))
+        #[cfg(hax)]
+        loop_invariant!(|_: usize| Prop::from(keys.len() == n)
+            & forall(|j: usize| implies(0 <= j && j < n && keys.len() == n, keys[j].len() == l))
+            & Prop::from(macs.len() == n)
+            & forall(|j: usize| implies(0 <= j && j < n && macs.len() == n, macs[j].len() == l))
         );
 
         if k == i {
@@ -555,7 +548,7 @@ async fn fabitn(
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 
 #[maybe_async(AFIT)]
-#[hax_lib::requires(l <= usize::MAX - RHO)]
+#[cfg_attr(hax, requires(l <= usize::MAX - RHO))]
 pub(crate) async fn fashare(
     channel: &mut impl Channel,
     delta: Delta,
@@ -578,9 +571,10 @@ pub(crate) async fn fashare(
     let mut dmvec: Vec<VectorU8> = Vec::with_capacity(RHO);
 
     for r in 0..RHO {
-        hax_lib::loop_invariant!(|_: usize| hax_lib::Prop::and(
+#[cfg(hax)]
+        loop_invariant!(|_: usize| Prop::and(
             (xishares.len() == l + RHO).into(),
-            hax_lib::forall(|ll: usize| hax_lib::implies(
+            forall(|ll: usize| implies(
                 l <= ll && ll < l + RHO,
                 xishares[ll].1 .0.len() == n
             ))
@@ -589,14 +583,16 @@ pub(crate) async fn fashare(
         let mut dm = Vec::with_capacity(n * 16);
         dm.push(xishare.0 as u8);
         for k in 0..n {
-            hax_lib::loop_invariant!(|_: usize| hax_lib::Prop::and(
+#[cfg(hax)]
+            loop_invariant!(|_: usize| Prop::and(
                 (xishares.len() == l + RHO).into(),
-                hax_lib::forall(|ll: usize| hax_lib::implies(
+                forall(|ll: usize| implies(
                     l <= ll && ll < l + RHO,
                     xishares[ll].1 .0.len() == n
                 ))
             ));
-            //hax_lib::loop_invariant!(|_: usize| xishare.1 .0.len() == n);
+            #[cfg(hax)]//
+            loop_invariant!(|_: usize| xishare.1 .0.len() == n);
             if k == i {
                 continue;
             }
@@ -690,18 +686,18 @@ pub(crate) async fn fashare(
     Ok((xishares, multi_shared_rand))
 }
 
-#[hax_lib::opaque]
+#[cfg_attr(hax, opaque)]
 fn random_bool() -> bool {
     random()
 }
 
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::from(xshare.1.keys().len() >= n) & 
     Prop::from(randomness.len() >= n)
-)]
-#[ensures(
+))]
+#[cfg_attr(hax, ensures(
     |result|
-    Prop::from(result.len() == n))]
+    Prop::from(result.len() == n)))]
 fn fhaand_compute_hashes(
     delta: Delta,
     i: usize,
@@ -712,6 +708,7 @@ fn fhaand_compute_hashes(
 ) -> Vec<(bool, bool)> {
     let mut h0h1 = vec![(false, false); n];
     for j in 0..n {
+#[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(h0h1.len() == n));
         if j == i {
             continue;
@@ -742,6 +739,7 @@ fn fhaand_compute_hashes_l(
 
     // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
     for ll in 0..l {
+#[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(h0h1.len() == n)
             & forall(|j: usize| implies(0 <= j && j < n && h0h1.len() == n, h0h1[j].len() == l)));
 
@@ -759,7 +757,7 @@ fn fhaand_compute_hashes_l(
 
 fn lsb_of_hash<T: Into<u128>>(input: T) -> bool {
     #[inline(always)]
-    #[hax_lib::opaque]
+    #[cfg_attr(hax, opaque)]
     fn lsb_of_hash_inner(input: u128) -> bool {
         let hash = blake3::hash(&input.to_le_bytes());
         hash.as_bytes()[31] & 1 != 0
@@ -767,8 +765,8 @@ fn lsb_of_hash<T: Into<u128>>(input: T) -> bool {
     lsb_of_hash_inner(input.into())
 }
 
-#[requires(Prop::from(ts.len() == n) &
-           Prop::from(s.len() == n))
+#[cfg_attr(hax, requires(Prop::from(ts.len() == n) &
+    Prop::from(s.len() == n)))
 ]
 fn fhaand_compute_vi(i: usize, n: usize, s: &[bool], ts: &[bool]) -> bool {
     let mut vi = false;
@@ -781,11 +779,11 @@ fn fhaand_compute_vi(i: usize, n: usize, s: &[bool], ts: &[bool]) -> bool {
     vi
 }
 
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::from(ts.len() == l)
     & forall(|j: usize| implies(0 <= j && j < l && ts.len() == l, ts[j].len() >= n))
     & Prop::from(randomness.len() == n * l)
-)
+))
 ]
 fn fhaand_compute_vi_l(
     i: usize,
@@ -797,6 +795,7 @@ fn fhaand_compute_vi_l(
     // Step 2 b) Receive h0, h1 from all parties and compute vi.
     let mut vis = vec![false; l];
     for ll in 0..l {
+#[cfg(hax)]
         loop_invariant!(|_: usize| vis.len() == l);
         vis[ll] = fhaand_compute_vi(i, n, &randomness[ll * n..(ll + 1) * n], &ts[ll]);
     }
@@ -805,7 +804,7 @@ fn fhaand_compute_vi_l(
 }
 
 /// The below function computes step 2b) in Figure 16 of https://eprint.iacr.org/2017/189.pdf (page 29), for party `i` of `n` parties and `l` times.
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::from(xshares.len() >= l) &
 
     forall(|ll: usize| implies(
@@ -817,8 +816,8 @@ fn fhaand_compute_vi_l(
     forall(|j: usize| implies(
         0 <= j && j < n && h0h1_j.len() >= n,
         h0h1_j[j].len() >= l
-)))]
-#[ensures(|result|
+    ))))]
+#[cfg_attr(hax, ensures(|result|
     Prop::from(result.len() == n) &
     forall( |j:usize|
         implies(
@@ -843,7 +842,7 @@ fn fhaand_compute_vi_l(
                 )
             )
         )
-    ))]
+    )))]
 fn fhaand_compute_ts_l(
     i: usize,
     n: usize,
@@ -853,6 +852,7 @@ fn fhaand_compute_ts_l(
 ) -> Vec<Vec<bool>> {
     let mut ts = vec![vec![false; n]; l];
     for ll in 0..l {
+#[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(ts.len() == n)
             & forall(|j: usize| implies(0 <= j && j < n && ts.len() == n, ts[j].len() >= l)));
         ts[ll] = fhaand_compute_ts(i, n, &xshares[ll], &h0h1_j[ll]);
@@ -861,13 +861,14 @@ fn fhaand_compute_ts_l(
 }
 
 #[inline]
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::from(xshare.macs().len() >= n) &
-    Prop::from(h0h1_j.len() >= n) 
+    Prop::from(h0h1_j.len() >= n) )
 )]
 fn fhaand_compute_ts(i: usize, n: usize, xshare: &Share, h0h1_j: &[(bool, bool)]) -> Vec<bool> {
     let mut ts = vec![false; n];
     for j in 0..n {
+#[cfg(hax)]
         loop_invariant!(|_: usize| Prop::from(ts.len() == n));
         if j == i {
             continue;
@@ -905,7 +906,8 @@ fn compute_t_pointwise(x_i: bool, mac_by_j: Mac, h0h1_j: (bool, bool)) -> bool {
 }
 
 // XXX: We replace this, since there is a bug in hax that does not put preconditions on lemmas.
-#[hax_lib::fstar::replace(
+#[cfg(hax)]
+#[cfg_attr(hax, fstar::replace(
     r#"let lemma_compute_ts_pointwise
       (i j: usize)
       (share_at_i share_at_j: Polytune.Data_types.t_Share)
@@ -932,12 +934,12 @@ fn compute_t_pointwise(x_i: bool, mac_by_j: Mac, h0h1_j: (bool, bool)) -> bool {
         = Polytune.Faand.Spec.share_is_authenticated share_at_i share_at_j i j delta_j;
         ()
 "#
-)]
-#[hax_lib::lemma]
-#[hax_lib::requires(
+))]
+#[cfg_attr(hax, lemma)]
+#[cfg_attr(hax, requires(
         Prop::from(share_at_i.1.macs().len() > j) &
         Prop::from(share_at_j.1.keys().len() > i)
-    )]
+))]
 fn lemma_compute_ts_pointwise(
     i: usize,
     j: usize,
@@ -1008,7 +1010,7 @@ async fn fhaand(
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
 /// to be the case in all real-world usages of our protocol.
-#[cfg_attr(hax, hax_lib::opaque)]
+#[cfg_attr(hax, opaque)]
 fn hash128(input: u128) -> u128 {
     // debug_assert!(
     //     RHO > 64,
@@ -1023,7 +1025,7 @@ fn hash128(input: u128) -> u128 {
     u128::from_le_bytes(buf)
 }
 
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::and(
         (v.len() >= l).into(),
         Prop::and(
@@ -1043,7 +1045,7 @@ fn hash128(input: u128) -> u128 {
                                     yshares[ll].1.0.len() >= n
                 ))
         )))
-    ))]
+    )))]
 fn flaand_1(
     delta: Delta,
     xshares: &[Share],
@@ -1060,6 +1062,7 @@ fn flaand_1(
     let mut e = vec![false; l];
 
     for ll in 0..l {
+#[cfg(hax)]
         loop_invariant!(|_: usize| z.len() == l && e.len() == l);
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
         e[ll] = z[ll] ^ rshares[ll].0;
@@ -1070,8 +1073,10 @@ fn flaand_1(
     // Step 4) Compute phi.
     let mut phi = vec![0; l];
     for ll in 0..l {
+#[cfg(hax)]
         loop_invariant!(|_: usize| phi.len() == l);
         for k in 0..n {
+#[cfg(hax)]
             loop_invariant!(|_: usize| phi.len() == l);
             if k == i {
             } else {
@@ -1087,6 +1092,7 @@ fn flaand_1(
     let mut ki_xj_phi = vec![vec![0; l]; n];
     let mut ei_uij = vec![vec![]; n];
     for j in 0..n {
+#[cfg(hax)]
         loop_invariant!(|_: usize| Prop::and(
             (ki_xj_phi.len() == n && ei_uij.len() == n && phi.len() == l).into(),
             forall(|j: usize| implies(
@@ -1098,6 +1104,7 @@ fn flaand_1(
             continue;
         }
         for ll in 0..l {
+#[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 (ki_xj_phi.len() == n && ei_uij.len() == n && phi.len() == l).into(),
                 forall(|j: usize| implies(
@@ -1115,7 +1122,7 @@ fn flaand_1(
     Ok((ki_xj_phi, ei_uij, phi))
 }
 
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::and(
         (phi.len() >= l).into(),
         Prop::and(
@@ -1157,7 +1164,7 @@ fn flaand_1(
                 )
             )
         )
-    ))]
+    )))]
 fn flaand_2(
     delta: Delta,
     xshares: &[Share],
@@ -1171,6 +1178,7 @@ fn flaand_2(
     phi: &Vec<u128>,
 ) -> Result<(Vec<Commitment>, Vec<u128>), Error> {
     for j in 0..n {
+#[cfg(hax)]
         loop_invariant!(|_: usize| Prop::and(
             Prop::and(
                 (ki_xj_phi.len() >= n).into(),
@@ -1192,6 +1200,7 @@ fn flaand_2(
             continue;
         }
         for ll in 0..l {
+#[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 Prop::and(
                     (ki_xj_phi.len() >= n).into(),
@@ -1242,6 +1251,7 @@ fn flaand_2(
     let mut hi = vec![0; l];
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
+#[cfg(hax)]
         loop_invariant!(|ll: usize| Prop::and(
             (hi.len() == l && commhi.len() == ll).into(),
             Prop::and(
@@ -1253,6 +1263,7 @@ fn flaand_2(
             )
         ));
         for k in 0..n {
+#[cfg(hax)]
             loop_invariant!(|_: usize| Prop::and(
                 (hi.len() == l && commhi.len() == ll).into(),
                 Prop::and(
@@ -1275,7 +1286,7 @@ fn flaand_2(
     Ok((commhi, hi))
 }
 
-#[requires(
+#[cfg_attr(hax, requires(
     Prop::and(
         (xor_all_hi.len() == l).into(),
             Prop::and(
@@ -1292,7 +1303,7 @@ fn flaand_2(
                         hi_k_outer[k].len() >= l))
                 ),
             )
-    ))
+    )))
     ]
 fn flaand_3(
     i: usize,
@@ -1307,11 +1318,13 @@ fn flaand_3(
     let mut commitment_error = false;
     let mut xor_not_zero_error = false;
     for k in 0..n {
+#[cfg(hax)]
         loop_invariant!(|_: usize| xor_all_hi.len() == l);
         if k == i {
             continue;
         }
         for ll in 0..l {
+#[cfg(hax)]
             loop_invariant!(|_: usize| xor_all_hi.len() == l);
             if !open_commitment(&commhi_k[k][ll], &hi_k_outer[k][ll].to_be_bytes()) {
                 commitment_error = true;
@@ -1322,6 +1335,7 @@ fn flaand_3(
 
     // Step 7) Check that the xor of all his is zero.
     for i in 0..l {
+#[cfg(hax)]
         loop_invariant!(|_: usize| xor_all_hi.len() == l);
         if xor_all_hi[i] != 0 {
             xor_not_zero_error = true;
@@ -1643,12 +1657,12 @@ fn combine_bucket(
 }
 
 /// Combine two leaky ANDs into one non-leaky AND.
-#[hax_lib::requires(
+#[cfg_attr(hax, requires(
     x1.1.0.len() >= n &&
     x2.1.0.len() >= n &&
     z1.1.0.len() >= n &&
     z2.1.0.len() >= n
-)]
+))]
 fn combine_two_leaky_ands(
     i: usize,
     n: usize,
@@ -1663,7 +1677,8 @@ fn combine_two_leaky_ands(
     let xbit = x1.0 ^ x2.0;
     let mut xauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in 0..n {
-        hax_lib::loop_invariant!(|k: usize| xauth.0.len() == n);
+#[cfg(hax)]
+        loop_invariant!(|k: usize| xauth.0.len() == n);
         if k == i {
             continue;
         }
@@ -1676,7 +1691,8 @@ fn combine_two_leaky_ands(
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
     let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in 0..n {
-        hax_lib::loop_invariant!(|k: usize| zauth.0.len() == n);
+#[cfg(hax)]
+        loop_invariant!(|k: usize| zauth.0.len() == n);
         if k == i {
             continue;
         }
@@ -1693,7 +1709,36 @@ fn combine_two_leaky_ands(
     Ok((xshare, y1, zshare))
 }
 
-#[hax_lib::lemma]
+fn xor_bits(a:&[bool]) -> bool {
+    if a.len() == 0 {
+        false
+    } else {
+        a[0] ^ xor_bits(&a[1..])
+    }
+}
+
+#[cfg_attr(hax, requires(a.len() == b.len()))]
+#[cfg_attr(hax, ensures(|result| result.len() == a.len()))] 
+fn xor_zip(a: &[bool], b: &[bool]) -> Vec<bool> {
+    if a.len() == 0 {
+        Vec::new()
+    } else {
+        let mut rest = xor_zip(&a[1..], &b[1..]);
+        rest.extend_from_slice(&[a[0] ^ b[0]]);
+        rest
+    }
+}
+
+#[cfg(hax)]
+#[cfg_attr(hax, lemma)]
+fn lemma_xor_distributivity<const LEN:usize>(a: &[bool; LEN], b: &[bool; LEN]) -> Proof<{
+    xor_bits(&xor_zip(a.as_slice(),b.as_slice())) == xor_bits(a.as_slice()) ^ xor_bits(b.as_slice())
+}>{
+    
+}
+
+#[cfg(hax)]
+#[cfg_attr(hax, lemma)]
 // TODO: Safety pre-/post-conditions
 fn lemma_vis_correct<const NUM_PARTIES: usize>(
     parties: [spec::PartyState<NUM_PARTIES>; NUM_PARTIES],
@@ -1761,7 +1806,8 @@ mod spec {
     }
 
     // XXX: We replace this, since there is a bug in hax that does not put preconditions on lemmas.
-    #[hax_lib::fstar::replace(
+    #[cfg(hax)]
+    #[cfg_attr(hax, fstar::replace(
         r#"let share_is_authenticated
       (share_at_i share_at_j: Polytune.Data_types.t_Share)
       (i j: usize)
@@ -1782,12 +1828,12 @@ mod spec {
         else mac.Polytune.Data_types._0 =. key.Polytune.Data_types._0)) =
   let _:Prims.unit = admit () in
   ()"#
-    )]
-    #[hax_lib::lemma]
-    #[hax_lib::requires(
+    ))]
+    #[cfg_attr(hax, lemma)]
+    #[cfg_attr(hax, requires(
         Prop::from(share_at_i.1.macs().len() > j) &
         Prop::from(share_at_j.1.keys().len() > i)
-    )]
+    ))]
     pub(super) fn share_is_authenticated(
         share_at_i: &Share,
         share_at_j: &Share,
@@ -1806,7 +1852,7 @@ mod spec {
             }
         },
     > {
-        hax_lib::fstar!(r#"admit()"#);
+        fstar!(r#"admit()"#);
     }
 
     #[allow(unreachable_code)]
@@ -1832,7 +1878,7 @@ mod spec {
             fhaand_compute_ts(i, NUM_PARTIES, &party.xshare, &hashes_transposed[i])
         });
 
-        // hax_lib::fstar!(r#"assert( ts_are_correct $NUM_PARTIES $NUM_TRIPLES $PROD $parties $ts)"#);
+        // fstar!(r#"assert( ts_are_correct $NUM_PARTIES $NUM_TRIPLES $PROD $parties $ts)"#);
 
         let vis = array::from_fn(|i| {
             let party = &parties[i];

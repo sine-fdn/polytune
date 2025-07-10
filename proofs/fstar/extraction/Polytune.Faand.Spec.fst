@@ -3,14 +3,6 @@ module Polytune.Faand.Spec
 open Core
 open FStar.Mul
 
-type t_PartyState (v_NUM_PARTIES: usize) = {
-  f_delta:Polytune.Data_types.t_Delta;
-  f_xshare:Polytune.Data_types.t_Share;
-  f_yshare:Polytune.Data_types.t_Share;
-  f_rshare:Polytune.Data_types.t_Share;
-  f_randomness:t_Array bool v_NUM_PARTIES
-}
-
 let share_is_authenticated
       (share_at_i share_at_j: Polytune.Data_types.t_Share)
       (i j: usize)

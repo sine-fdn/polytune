@@ -9,6 +9,25 @@ let _ =
   let open Polytune.Data_types in
   ()
 
+/// Errors occurring during preprocessing.
+type t_Error =
+  | Error_ChannelErr : Polytune.Channel.t_Error -> t_Error
+  | Error_InvalidBitValue : t_Error
+  | Error_CommitmentCouldNotBeOpened : t_Error
+  | Error_EmptyVector : t_Error
+  | Error_ConversionErr : t_Error
+  | Error_EmptyBucket : t_Error
+  | Error_EmptyMsg : t_Error
+  | Error_InvalidLength : t_Error
+  | Error_InconsistentBroadcast : t_Error
+  | Error_ABitWrongMAC : t_Error
+  | Error_AShareWrongMAC : t_Error
+  | Error_LaANDXorNotZero : t_Error
+  | Error_AANDWrongMAC : t_Error
+  | Error_BeaverWrongMAC : t_Error
+  | Error_InvalidHashLength : t_Error
+  | Error_OtErr : Polytune.Swankyot.t_Error -> t_Error
+
 assume
 val lsb_of_hash__lsb_of_hash_inner': input: u128 -> bool
 
@@ -26,31 +45,6 @@ let lsb_of_hash
         input
       <:
       u128)
-
-let fhaand_compute_vi (i n: usize) (s ts: t_Slice bool)
-    : Prims.Pure bool
-      (requires
-        b2t ((Core.Slice.impl__len #bool ts <: usize) =. n <: bool) /\
-        b2t ((Core.Slice.impl__len #bool s <: usize) =. n <: bool))
-      (fun _ -> Prims.l_True) =
-  let vi:bool = false in
-  Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-    n
-    (fun vi temp_1_ ->
-        let vi:bool = vi in
-        let _:usize = temp_1_ in
-        true)
-    vi
-    (fun vi j ->
-        let vi:bool = vi in
-        let j:usize = j in
-        if j =. i <: bool
-        then vi
-        else
-          Core.Ops.Bit.f_bitxor (Core.Ops.Bit.f_bitxor vi (ts.[ j ] <: bool) <: bool)
-            (s.[ j ] <: bool)
-          <:
-          bool)
 
 let compute_hash_pointwise
       (delta: Polytune.Data_types.t_Delta)
@@ -77,106 +71,11 @@ let compute_hash_pointwise
   <:
   (bool & bool)
 
-let fhaand_compute_hashes
-      (delta: Polytune.Data_types.t_Delta)
-      (i n: usize)
-      (xshare: Polytune.Data_types.t_Share)
-      (yi: bool)
-      (randomness: t_Slice bool)
-    : Prims.Pure (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-      (requires
-        b2t
-        ((Alloc.Vec.impl_1__len #Polytune.Data_types.t_Key
-              #Alloc.Alloc.t_Global
-              (Polytune.Data_types.impl_Auth__keys xshare.Polytune.Data_types._1
-                <:
-                Alloc.Vec.t_Vec Polytune.Data_types.t_Key Alloc.Alloc.t_Global)
-            <:
-            usize) >=.
-          n
-          <:
-          bool) /\ b2t ((Core.Slice.impl__len #bool randomness <: usize) >=. n <: bool))
-      (ensures
-        fun result ->
-          let result:Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global = result in
-          b2t
-          ((Alloc.Vec.impl_1__len #(bool & bool) #Alloc.Alloc.t_Global result <: usize) =. n <: bool
-          )) =
-  let h0h1:Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global =
-    Alloc.Vec.from_elem #(bool & bool) (false, false <: (bool & bool)) n
-  in
-  Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-    n
-    (fun h0h1 temp_1_ ->
-        let h0h1:Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global = h0h1 in
-        let _:usize = temp_1_ in
-        b2t
-        ((Alloc.Vec.impl_1__len #(bool & bool) #Alloc.Alloc.t_Global h0h1 <: usize) =. n <: bool))
-    h0h1
-    (fun h0h1 j ->
-        let h0h1:Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global = h0h1 in
-        let j:usize = j in
-        if j =. i <: bool
-        then h0h1
-        else
-          let key_xj:Polytune.Data_types.t_Key = Polytune.Data_types.key_for xshare j in
-          let s_j:bool = randomness.[ j ] in
-          let h0, h1:(bool & bool) = compute_hash_pointwise delta yi key_xj s_j in
-          let h0h1:Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global =
-            Rust_primitives.Hax.Monomorphized_update_at.update_at_usize h0h1
-              j
-              ({ (h0h1.[ j ] <: (bool & bool)) with _1 = h0 } <: (bool & bool))
-          in
-          Rust_primitives.Hax.Monomorphized_update_at.update_at_usize h0h1
-            j
-            ({ (h0h1.[ j ] <: (bool & bool)) with _2 = h1 } <: (bool & bool)))
-
 let compute_t_pointwise (x_i: bool) (mac_by_j: Polytune.Data_types.t_Mac) (h0h1_j: (bool & bool))
     : bool =
   if x_i
   then Core.Ops.Bit.f_bitxor h0h1_j._2 (lsb_of_hash #Polytune.Data_types.t_Mac mac_by_j <: bool)
   else Core.Ops.Bit.f_bitxor h0h1_j._1 (lsb_of_hash #Polytune.Data_types.t_Mac mac_by_j <: bool)
-
-let fhaand_compute_ts
-      (i n: usize)
-      (xshare: Polytune.Data_types.t_Share)
-      (h0h1_j: t_Slice (bool & bool))
-    : Prims.Pure (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-      (requires
-        b2t
-        ((Alloc.Vec.impl_1__len #Polytune.Data_types.t_Mac
-              #Alloc.Alloc.t_Global
-              (Polytune.Data_types.impl_Share__macs xshare
-                <:
-                Alloc.Vec.t_Vec Polytune.Data_types.t_Mac Alloc.Alloc.t_Global)
-            <:
-            usize) >=.
-          n
-          <:
-          bool) /\ b2t ((Core.Slice.impl__len #(bool & bool) h0h1_j <: usize) >=. n <: bool))
-      (fun _ -> Prims.l_True) =
-  let ts:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global = Alloc.Vec.from_elem #bool false n in
-  Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-    n
-    (fun ts temp_1_ ->
-        let ts:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global = ts in
-        let _:usize = temp_1_ in
-        b2t ((Alloc.Vec.impl_1__len #bool #Alloc.Alloc.t_Global ts <: usize) =. n <: bool))
-    ts
-    (fun ts j ->
-        let ts:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global = ts in
-        let j:usize = j in
-        if j =. i <: bool
-        then ts
-        else
-          let mac_by_j:Polytune.Data_types.t_Mac = Polytune.Data_types.mac_by xshare j in
-          Rust_primitives.Hax.Monomorphized_update_at.update_at_usize ts
-            j
-            (compute_t_pointwise (Polytune.Data_types.impl_Share__bit xshare <: bool)
-                mac_by_j
-                (h0h1_j.[ j ] <: (bool & bool))
-              <:
-              bool))
 
 let lemma_compute_ts_pointwise
       (i j: usize)
@@ -204,151 +103,271 @@ let lemma_compute_ts_pointwise
         = Polytune.Faand.Spec.share_is_authenticated share_at_i share_at_j i j delta_j;
         ()
 
-let lemma_vis_correct
-      (v_NUM_PARTIES: usize)
-      (parties: t_Array (Polytune.Faand.Spec.t_PartyState v_NUM_PARTIES) v_NUM_PARTIES)
+/// Combine two leaky ANDs into one non-leaky AND.
+let combine_two_leaky_ands (i n: usize) (x1 y1 z1 x2 z2: Polytune.Data_types.t_Share) (d: bool)
+    : Prims.Pure
+      (Core.Result.t_Result
+          (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share)
+          t_Error)
+      (requires
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            x1.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n &&
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            x2.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n &&
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            z1.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n &&
+        (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+            #Alloc.Alloc.t_Global
+            z2.Polytune.Data_types._1.Polytune.Data_types._0
+          <:
+          usize) >=.
+        n)
+      (fun _ -> Prims.l_True) =
+  let xbit:bool = Core.Ops.Bit.f_bitxor x1.Polytune.Data_types._0 x2.Polytune.Data_types._0 in
+  let xauth:Polytune.Data_types.t_Auth =
+    Polytune.Data_types.Auth
+    (Alloc.Vec.from_elem #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+        ((Polytune.Data_types.Mac (mk_u128 0) <: Polytune.Data_types.t_Mac),
+          (Polytune.Data_types.Key (mk_u128 0) <: Polytune.Data_types.t_Key)
+          <:
+          (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key))
+        n)
+    <:
+    Polytune.Data_types.t_Auth
+  in
+  let xauth:Polytune.Data_types.t_Auth =
+    Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
+      n
+      (fun xauth k ->
+          let xauth:Polytune.Data_types.t_Auth = xauth in
+          let k:usize = k in
+          (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+              #Alloc.Alloc.t_Global
+              xauth.Polytune.Data_types._0
+            <:
+            usize) =.
+          n
+          <:
+          bool)
+      xauth
+      (fun xauth k ->
+          let xauth:Polytune.Data_types.t_Auth = xauth in
+          let k:usize = k in
+          if k =. i <: bool
+          then xauth
+          else
+            let mk_x1, ki_x1:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              x1.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            let mk_x2, ki_x2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              x2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            {
+              xauth with
+              Polytune.Data_types._0
+              =
+              Rust_primitives.Hax.Monomorphized_update_at.update_at_usize xauth
+                  .Polytune.Data_types._0
+                k
+                ((Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Mac
+                      #Polytune.Data_types.t_Mac
+                      #FStar.Tactics.Typeclasses.solve
+                      mk_x1
+                      mk_x2
+                    <:
+                    Polytune.Data_types.t_Mac),
+                  (Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Key
+                      #Polytune.Data_types.t_Key
+                      #FStar.Tactics.Typeclasses.solve
+                      ki_x1
+                      ki_x2
+                    <:
+                    Polytune.Data_types.t_Key)
+                  <:
+                  (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key))
+            }
+            <:
+            Polytune.Data_types.t_Auth)
+  in
+  let xshare:Polytune.Data_types.t_Share =
+    Polytune.Data_types.Share xbit xauth <: Polytune.Data_types.t_Share
+  in
+  let zbit:bool =
+    Core.Ops.Bit.f_bitxor (Core.Ops.Bit.f_bitxor z1.Polytune.Data_types._0 z2.Polytune.Data_types._0
+        <:
+        bool)
+      (Core.Ops.Bit.f_bitand d x2.Polytune.Data_types._0 <: bool)
+  in
+  let zauth:Polytune.Data_types.t_Auth =
+    Polytune.Data_types.Auth
+    (Alloc.Vec.from_elem #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+        ((Polytune.Data_types.Mac (mk_u128 0) <: Polytune.Data_types.t_Mac),
+          (Polytune.Data_types.Key (mk_u128 0) <: Polytune.Data_types.t_Key)
+          <:
+          (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key))
+        n)
+    <:
+    Polytune.Data_types.t_Auth
+  in
+  let zauth:Polytune.Data_types.t_Auth =
+    Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
+      n
+      (fun zauth k ->
+          let zauth:Polytune.Data_types.t_Auth = zauth in
+          let k:usize = k in
+          (Alloc.Vec.impl_1__len #(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key)
+              #Alloc.Alloc.t_Global
+              zauth.Polytune.Data_types._0
+            <:
+            usize) =.
+          n
+          <:
+          bool)
+      zauth
+      (fun zauth k ->
+          let zauth:Polytune.Data_types.t_Auth = zauth in
+          let k:usize = k in
+          if k =. i <: bool
+          then zauth
+          else
+            let mk_z1, ki_z1:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              z1.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            let mk_z2, ki_z2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              z2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            let mk_x2, ki_x2:(Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key) =
+              x2.Polytune.Data_types._1.Polytune.Data_types._0.[ k ]
+            in
+            {
+              zauth with
+              Polytune.Data_types._0
+              =
+              Rust_primitives.Hax.Monomorphized_update_at.update_at_usize zauth
+                  .Polytune.Data_types._0
+                k
+                ((Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Mac
+                      #Polytune.Data_types.t_Mac
+                      #FStar.Tactics.Typeclasses.solve
+                      (Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Mac
+                          #Polytune.Data_types.t_Mac
+                          #FStar.Tactics.Typeclasses.solve
+                          mk_z1
+                          mk_z2
+                        <:
+                        Polytune.Data_types.t_Mac)
+                      (Polytune.Data_types.Mac
+                        ((cast (d <: bool) <: u128) *! mk_x2.Polytune.Data_types._0 <: u128)
+                        <:
+                        Polytune.Data_types.t_Mac)
+                    <:
+                    Polytune.Data_types.t_Mac),
+                  (Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Key
+                      #Polytune.Data_types.t_Key
+                      #FStar.Tactics.Typeclasses.solve
+                      (Core.Ops.Bit.f_bitxor #Polytune.Data_types.t_Key
+                          #Polytune.Data_types.t_Key
+                          #FStar.Tactics.Typeclasses.solve
+                          ki_z1
+                          ki_z2
+                        <:
+                        Polytune.Data_types.t_Key)
+                      (Polytune.Data_types.Key
+                        ((cast (d <: bool) <: u128) *! ki_x2.Polytune.Data_types._0 <: u128)
+                        <:
+                        Polytune.Data_types.t_Key)
+                    <:
+                    Polytune.Data_types.t_Key)
+                  <:
+                  (Polytune.Data_types.t_Mac & Polytune.Data_types.t_Key))
+            }
+            <:
+            Polytune.Data_types.t_Auth)
+  in
+  let zshare:Polytune.Data_types.t_Share =
+    Polytune.Data_types.Share zbit zauth <: Polytune.Data_types.t_Share
+  in
+  Core.Result.Result_Ok
+  (xshare, y1, zshare
+    <:
+    (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share))
+  <:
+  Core.Result.t_Result
+    (Polytune.Data_types.t_Share & Polytune.Data_types.t_Share & Polytune.Data_types.t_Share)
+    t_Error
+
+let rec xor_bits (a: t_Slice bool) : bool =
+  if (Core.Slice.impl__len #bool a <: usize) =. mk_usize 0
+  then false
+  else
+    Core.Ops.Bit.f_bitxor (a.[ mk_usize 0 ] <: bool)
+      (xor_bits (a.[ { Core.Ops.Range.f_start = mk_usize 1 } <: Core.Ops.Range.t_RangeFrom usize ]
+            <:
+            t_Slice bool)
+        <:
+        bool)
+
+let rec xor_zip (a b: t_Slice bool)
+    : Prims.Pure (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+      (requires (Core.Slice.impl__len #bool a <: usize) =. (Core.Slice.impl__len #bool b <: usize))
+      (ensures
+        fun result ->
+          let result:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global = result in
+          (Alloc.Vec.impl_1__len #bool #Alloc.Alloc.t_Global result <: usize) =.
+          (Core.Slice.impl__len #bool a <: usize)) =
+  if (Core.Slice.impl__len #bool a <: usize) =. mk_usize 0
+  then Alloc.Vec.impl__new #bool ()
+  else
+    let rest:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global =
+      xor_zip (a.[ { Core.Ops.Range.f_start = mk_usize 1 } <: Core.Ops.Range.t_RangeFrom usize ]
+          <:
+          t_Slice bool)
+        (b.[ { Core.Ops.Range.f_start = mk_usize 1 } <: Core.Ops.Range.t_RangeFrom usize ]
+          <:
+          t_Slice bool)
+    in
+    let rest:Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global =
+      Alloc.Vec.impl_2__extend_from_slice #bool
+        #Alloc.Alloc.t_Global
+        rest
+        ((let list =
+              [Core.Ops.Bit.f_bitxor (a.[ mk_usize 0 ] <: bool) (b.[ mk_usize 0 ] <: bool)]
+            in
+            FStar.Pervasives.assert_norm (Prims.eq2 (List.Tot.length list) 1);
+            Rust_primitives.Hax.array_of_list 1 list)
+          <:
+          t_Slice bool)
+    in
+    rest
+
+let lemma_xor_distributivity (v_LEN: usize) (a b: t_Array bool v_LEN)
     : Lemma
     (ensures
-      (let (hashes: t_Array (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) v_NUM_PARTIES):t_Array
-          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) v_NUM_PARTIES =
-          Core.Array.from_fn #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-            v_NUM_PARTIES
-            (fun i ->
-                let i:usize = i in
-                let party:Polytune.Faand.Spec.t_PartyState v_NUM_PARTIES = parties.[ i ] in
-                let xshare:Polytune.Data_types.t_Share = party.Polytune.Faand.Spec.f_xshare in
-                let yi:bool =
-                  Polytune.Data_types.impl_Share__bit party.Polytune.Faand.Spec.f_yshare
-                in
-                fhaand_compute_hashes party.Polytune.Faand.Spec.f_delta
-                  i
-                  v_NUM_PARTIES
-                  xshare
-                  yi
-                  (party.Polytune.Faand.Spec.f_randomness <: t_Slice bool))
-        in
-        let
-        (hashes_transposed:
-          t_Array (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) v_NUM_PARTIES):t_Array
-          (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global) v_NUM_PARTIES =
-          Core.Array.from_fn #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-            v_NUM_PARTIES
-            (fun j ->
-                let j:usize = j in
-                Core.Iter.Traits.Iterator.f_collect #(Core.Iter.Adapters.Map.t_Map
-                      (Core.Slice.Iter.t_Iter (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global))
-                      (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global -> (bool & bool)))
-                  #FStar.Tactics.Typeclasses.solve
-                  #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-                  (Core.Iter.Traits.Iterator.f_map #(Core.Slice.Iter.t_Iter
-                        (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global))
-                      #FStar.Tactics.Typeclasses.solve
-                      #(bool & bool)
-                      (Core.Slice.impl__iter #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-                          (hashes <: t_Slice (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global))
-                        <:
-                        Core.Slice.Iter.t_Iter (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global))
-                      (fun vec ->
-                          let vec:Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global = vec in
-                          Core.Clone.f_clone #(bool & bool)
-                            #FStar.Tactics.Typeclasses.solve
-                            (vec.[ j ] <: (bool & bool))
-                          <:
-                          (bool & bool))
-                    <:
-                    Core.Iter.Adapters.Map.t_Map
-                      (Core.Slice.Iter.t_Iter (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global))
-                      (Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global -> (bool & bool)))
+      (xor_bits (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+              #FStar.Tactics.Typeclasses.solve
+              (xor_zip (Core.Array.impl_23__as_slice #bool v_LEN a <: t_Slice bool)
+                  (Core.Array.impl_23__as_slice #bool v_LEN b <: t_Slice bool)
                 <:
-                Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-        in
-        let (ts: t_Array (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) v_NUM_PARTIES):t_Array
-          (Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global) v_NUM_PARTIES =
-          Core.Array.from_fn #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-            v_NUM_PARTIES
-            (fun i ->
-                let i:usize = i in
-                let party:Polytune.Faand.Spec.t_PartyState v_NUM_PARTIES = parties.[ i ] in
-                fhaand_compute_ts i
-                  v_NUM_PARTIES
-                  party.Polytune.Faand.Spec.f_xshare
-                  (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global)
-                      #FStar.Tactics.Typeclasses.solve
-                      (hashes_transposed.[ i ] <: Alloc.Vec.t_Vec (bool & bool) Alloc.Alloc.t_Global
-                      )
-                    <:
-                    t_Slice (bool & bool)))
-        in
-        let (vis: t_Array bool v_NUM_PARTIES):t_Array bool v_NUM_PARTIES =
-          Core.Array.from_fn #bool
-            v_NUM_PARTIES
-            (fun i ->
-                let i:usize = i in
-                let party:Polytune.Faand.Spec.t_PartyState v_NUM_PARTIES = parties.[ i ] in
-                fhaand_compute_vi i
-                  v_NUM_PARTIES
-                  (party.Polytune.Faand.Spec.f_randomness <: t_Slice bool)
-                  (Core.Ops.Deref.f_deref #(Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-                      #FStar.Tactics.Typeclasses.solve
-                      (ts.[ i ] <: Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
-                    <:
-                    t_Slice bool))
-        in
-        let xor_vis:bool = false in
-        let xor_vis:bool =
-          Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-            v_NUM_PARTIES
-            (fun xor_vis temp_1_ ->
-                let xor_vis:bool = xor_vis in
-                let _:usize = temp_1_ in
-                true)
-            xor_vis
-            (fun xor_vis i ->
-                let xor_vis:bool = xor_vis in
-                let i:usize = i in
-                Core.Ops.Bit.f_bitxor xor_vis (vis.[ i ] <: bool) <: bool)
-        in
-        let expected_result:bool = false in
-        let expected_result:bool =
-          Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-            v_NUM_PARTIES
-            (fun expected_result temp_1_ ->
-                let expected_result:bool = expected_result in
-                let _:usize = temp_1_ in
-                true)
-            expected_result
-            (fun expected_result i ->
-                let expected_result:bool = expected_result in
-                let i:usize = i in
-                Rust_primitives.Hax.Folds.fold_range (mk_usize 0)
-                  v_NUM_PARTIES
-                  (fun expected_result temp_1_ ->
-                      let expected_result:bool = expected_result in
-                      let _:usize = temp_1_ in
-                      true)
-                  expected_result
-                  (fun expected_result j ->
-                      let expected_result:bool = expected_result in
-                      let j:usize = j in
-                      if i =. j <: bool
-                      then expected_result
-                      else
-                        let half_and_i_j:bool =
-                          Core.Ops.Bit.f_bitand (Polytune.Data_types.impl_Share__bit (parties.[ i ]
-                                  <:
-                                  Polytune.Faand.Spec.t_PartyState v_NUM_PARTIES)
-                                  .Polytune.Faand.Spec.f_xshare
-                              <:
-                              bool)
-                            (Polytune.Data_types.impl_Share__bit (parties.[ j ]
-                                  <:
-                                  Polytune.Faand.Spec.t_PartyState v_NUM_PARTIES)
-                                  .Polytune.Faand.Spec.f_yshare
-                              <:
-                              bool)
-                        in
-                        Core.Ops.Bit.f_bitxor expected_result half_and_i_j)
-                <:
-                bool)
-        in
-        xor_vis =. expected_result)) = ()
+                Alloc.Vec.t_Vec bool Alloc.Alloc.t_Global)
+            <:
+            t_Slice bool)
+        <:
+        bool) =.
+      (Core.Ops.Bit.f_bitxor (xor_bits (Core.Array.impl_23__as_slice #bool v_LEN a <: t_Slice bool)
+            <:
+            bool)
+          (xor_bits (Core.Array.impl_23__as_slice #bool v_LEN b <: t_Slice bool) <: bool)
+        <:
+        bool)) = ()
