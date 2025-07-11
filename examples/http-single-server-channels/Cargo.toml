@@ -2,11 +2,12 @@
 name = "polytune-http-single-server"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 axum = "0.7.4"
 clap = { version = "4.4.18", features = ["derive"] }
-polytune = { path = "../../", version = "0.1.0" }
+polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = { version = "0.12.20", features = ["json"] }
 tokio = { version = "1.46.1", features = ["macros", "rt", "rt-multi-thread"] }
 tower-http = { version = "0.6.6", features = ["fs", "trace"] }

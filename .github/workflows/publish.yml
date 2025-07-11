@@ -17,11 +17,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
         with:
           toolchain: stable
+      - name: Install taplo for extracting polytune version
+        uses: taiki-e/install-action@f3a27926ea13d7be3ee2f4cbb925883cf9442b56
+        with:
+          tool: taplo@0.10.0
+      - name: Check that crate version matches tag version
+        run: |
+          polytune_version=$(taplo get -f Cargo.toml 'package.version')
+          tag_version=$(echo "${{ github.ref_name }}" | sed 's/v//')
+          if [[ "$polytune_version" != "$tag_version" ]]; then
+            echo "::error:: Polytune version ${polytune_version} does not match tag version ${tag_version}"
+            exit 1
+          fi
       - run: cargo test --release
       - run: cargo clippy -- -Dwarnings
       - run: cargo publish --token ${CRATES_TOKEN}
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
-      - run: cargo owner --add github:sine-fdn:staff --token ${CRATES_TOKEN}
-        env:
-          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
