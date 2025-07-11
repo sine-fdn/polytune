@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use gloo_timers::future::TimeoutFuture;
 use polytune::{
-    channel::{Channel, RecvInfo, SendInfo},
+    channel::Channel,
     garble_lang::{compile, literal::Literal, token::SignedNumType},
     mpc,
 };
@@ -64,7 +64,7 @@ impl Channel for HttpChannel {
         &self,
         p: usize,
         msg: Vec<u8>,
-        _info: SendInfo,
+        _phase: &str,
     ) -> Result<(), Self::SendError> {
         let client = reqwest::Client::new();
         let url = format!("{}send/{}/{}", self.url, self.party, p);
@@ -83,7 +83,7 @@ impl Channel for HttpChannel {
         return Err(format!("Could not reach {url}"));
     }
 
-    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
+    async fn recv_bytes_from(&self, p: usize, _phase: &str) -> Result<Vec<u8>, Self::RecvError> {
         let client = reqwest::Client::new();
         let url = format!("{}recv/{}/{}", self.url, self.party, p);
         for _ in 0..50 {

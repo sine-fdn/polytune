@@ -8,7 +8,7 @@ use axum::{
 };
 use clap::Parser;
 use polytune::{
-    channel::{Channel, RecvInfo, SendInfo},
+    channel::Channel,
     garble_lang::{compile_with_constants, literal::Literal},
     mpc,
 };
@@ -373,25 +373,18 @@ impl Channel for HttpChannel {
         &self,
         p: usize,
         msg: Vec<u8>,
-        info: SendInfo,
+        phase: &str,
     ) -> Result<(), Self::SendError> {
         let simulated_delay_in_ms = 300;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        let i = info.sent();
-        let total = info.total();
-        let phase = info.phase();
-        if i == 1 {
-            info!("Sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total}...");
-        } else {
-            info!("  (sending msg {phase} to party {p} ({mb:.2}MB), {i}/{total})");
-        }
+        info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
         loop {
             sleep(Duration::from_millis(simulated_delay_in_ms)).await;
             let req = client.post(&url).body(msg.clone()).send();
             let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
-                warn!("  req timeout: chunk {}/{} for party {}", i + 1, total, p);
+                warn!("  req timeout: party {}", p);
                 continue;
             };
             match res.status() {
@@ -408,7 +401,7 @@ impl Channel for HttpChannel {
         }
     }
 
-    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, Self::RecvError> {
+    async fn recv_bytes_from(&self, p: usize, _phase: &str) -> Result<Vec<u8>, Self::RecvError> {
         let mut r = self.recv[p].lock().await;
         timeout(Duration::from_secs(30 * 60), r.recv())
             .await

@@ -9,11 +9,11 @@
 //! can switch between different channel implementations (network sockets, in-memory channels, etc.)
 //! without changing protocol code.
 //!
-//! ## Message Chunking
+//! ## Message Transport
 //!
-//! The module provides automatic chunking of large messages to avoid issues with message size
-//! limits. Messages are split into chunks, serialized, and reassembled on the receiving end
-//! transparently.
+//! Messages are serialized and transmitted in full. It is the responsibility of the caller to ensure
+//! message sizes do not exceed transport limitations, i.e., message chunking may need to be
+//! implemented.
 //!
 //! ## Serialization
 //!
@@ -26,7 +26,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::future::{try_join, try_join_all};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::{
     Mutex,
@@ -57,88 +57,6 @@ pub enum ErrorKind {
     InvalidLength,
 }
 
-/// A chunk of a message as bytes and the number of chunks remaining to be sent.
-#[derive(Debug, Serialize)]
-struct SendChunk<'a, T> {
-    /// A chunk of a full message.
-    chunk: &'a [T],
-    /// The number of chunks that remain to be sent after the current one.
-    remaining_chunks: usize,
-}
-
-/// A chunk of a message as bytes and the number of chunks remaining to be sent.
-#[derive(Debug, Deserialize)]
-struct RecvChunk<T> {
-    /// A chunk of a full message.
-    chunk: Vec<T>,
-    /// The number of chunks that remain to be sent after the current one.
-    remaining_chunks: usize,
-}
-
-/// Information about a sent message that can be useful for logging.
-#[derive(Debug, Clone)]
-pub struct SendInfo {
-    phase: String,
-    current_msg: usize,
-    remaining_msgs: usize,
-}
-
-impl SendInfo {
-    /// The name of the protocol phase that sent the message.
-    pub fn phase(&self) -> &str {
-        &self.phase
-    }
-
-    /// How many chunks have already been sent, 1 for the first message, 2 for the second, etc.
-    pub fn sent(&self) -> usize {
-        self.current_msg + 1
-    }
-
-    /// How many chunks have yet to be sent for the full message to be transmitted.
-    pub fn remaining(&self) -> usize {
-        self.remaining_msgs
-    }
-
-    /// The total number of chunks that make up the full message.
-    pub fn total(&self) -> usize {
-        self.sent() + self.remaining()
-    }
-}
-
-/// Information about a received message that can be useful for logging.
-#[derive(Debug, Clone)]
-pub struct RecvInfo {
-    phase: String,
-    current_msg: usize,
-    remaining_msgs: Option<usize>,
-}
-
-impl RecvInfo {
-    /// The name of the protocol phase that sent the message.
-    pub fn phase(&self) -> &str {
-        &self.phase
-    }
-
-    /// How many chunks have already been sent, 1 for the first message, 2 for the second, etc.
-    pub fn sent(&self) -> usize {
-        self.current_msg + 1
-    }
-
-    /// How many chunks have yet to be sent for the full message to be transmitted.
-    ///
-    /// Will be `None` for the first message, before it is clear how many chunks need to be sent.
-    pub fn remaining(&self) -> Option<usize> {
-        self.remaining_msgs
-    }
-
-    /// The total number of chunks that make up the full message.
-    ///
-    /// Will be `None` for the first message, before it is clear how many chunks need to be sent.
-    pub fn total(&self) -> Option<usize> {
-        self.remaining().map(|remaining| self.sent() + remaining)
-    }
-}
-
 /// A communication channel used to send/receive messages to/from another party.
 ///
 /// This trait defines the core interface for message transport in the protocol.
@@ -158,17 +76,13 @@ pub trait Channel {
     async fn send_bytes_to(
         &self,
         party: usize,
-        chunk: Vec<u8>,
-        info: SendInfo,
+        data: Vec<u8>,
+        phase: &str,
     ) -> Result<(), Self::SendError>;
 
     /// Awaits a response from the party with the given index (must be between `0..participants`).
     #[allow(async_fn_in_trait)]
-    async fn recv_bytes_from(
-        &self,
-        party: usize,
-        info: RecvInfo,
-    ) -> Result<Vec<u8>, Self::RecvError>;
+    async fn recv_bytes_from(&self, party: usize, phase: &str) -> Result<Vec<u8>, Self::RecvError>;
 }
 
 /// Serializes and sends an MPC message to the other party.
@@ -178,35 +92,17 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     phase: &str,
     msg: &[S],
 ) -> Result<(), Error> {
-    let chunk_size = 5_000_000;
-    let mut chunks: Vec<_> = msg.chunks(chunk_size).collect();
-    if chunks.is_empty() {
-        chunks.push(&[]);
-    }
-    let length = chunks.len();
-    for (i, chunk) in chunks.into_iter().enumerate() {
-        let remaining_chunks = length - i - 1;
-        let chunk = SendChunk {
-            chunk,
-            remaining_chunks,
-        };
-        let chunk = bincode::serialize(&chunk).map_err(|e| Error {
-            phase: format!("sending {phase}"),
-            reason: ErrorKind::SerdeError(format!("{e:?}")),
-        })?;
-        let info = SendInfo {
+    let data = bincode::serialize(&msg).map_err(|e| Error {
+        phase: format!("sending {phase}"),
+        reason: ErrorKind::SerdeError(format!("{e:?}")),
+    })?;
+    channel
+        .send_bytes_to(party, data, phase)
+        .await
+        .map_err(|e| Error {
             phase: phase.to_string(),
-            current_msg: i,
-            remaining_msgs: remaining_chunks,
-        };
-        channel
-            .send_bytes_to(party, chunk, info)
-            .await
-            .map_err(|e| Error {
-                phase: phase.to_string(),
-                reason: ErrorKind::SendError(format!("{e:?}")),
-            })?;
-    }
+            reason: ErrorKind::SendError(format!("{e:?}")),
+        })?;
     Ok(())
 }
 
@@ -216,36 +112,18 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
     party: usize,
     phase: &str,
 ) -> Result<Vec<T>, Error> {
-    let mut msg = vec![];
-    let mut i = 0;
-    let mut remaining = None;
-    loop {
-        let info = RecvInfo {
+    let data = channel
+        .recv_bytes_from(party, phase)
+        .await
+        .map_err(|e| Error {
             phase: phase.to_string(),
-            current_msg: i,
-            remaining_msgs: remaining,
-        };
-        let chunk = channel
-            .recv_bytes_from(party, info)
-            .await
-            .map_err(|e| Error {
-                phase: phase.to_string(),
-                reason: ErrorKind::RecvError(format!("{e:?}")),
-            })?;
-        let RecvChunk {
-            chunk,
-            remaining_chunks,
-        }: RecvChunk<T> = bincode::deserialize(&chunk).map_err(|e| Error {
-            phase: format!("receiving {phase}"),
-            reason: ErrorKind::SerdeError(format!("{e:?}")),
+            reason: ErrorKind::RecvError(format!("{e:?}")),
         })?;
-        msg.extend(chunk);
-        if remaining_chunks == 0 {
-            return Ok(msg);
-        }
-        remaining = Some(remaining_chunks);
-        i += 1;
-    }
+    let msg: Vec<T> = bincode::deserialize(&data).map_err(|e| Error {
+        phase: format!("receiving {phase}"),
+        reason: ErrorKind::SerdeError(format!("{e:?}")),
+    })?;
+    Ok(msg)
 }
 
 /// Receives and deserializes a Vec from the other party (while checking the length).
@@ -456,17 +334,12 @@ impl Channel for SimpleChannel {
         &self,
         p: usize,
         msg: Vec<u8>,
-        info: SendInfo,
+        phase: &str,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<Vec<u8>>> {
         self.bytes_sent
             .fetch_add(msg.len() as u64, Ordering::Relaxed);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        let i = info.sent();
-        if i == 1 {
-            trace!(size = mb, "Sending msg");
-        } else {
-            trace!(size = mb, "  (continued sending msg)");
-        }
+        trace!(size = mb, "Sending msg");
         self.s[p]
             .as_ref()
             .unwrap_or_else(|| panic!("No sender for party {p}"))
@@ -474,19 +347,19 @@ impl Channel for SimpleChannel {
             .await
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), fields(info = ?_info))]
-    async fn recv_bytes_from(&self, p: usize, _info: RecvInfo) -> Result<Vec<u8>, AsyncRecvError> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), fields(phase = ?_phase))]
+    async fn recv_bytes_from(&self, p: usize, _phase: &str) -> Result<Vec<u8>, AsyncRecvError> {
         let mut r = self.r[p]
             .as_ref()
             .unwrap_or_else(|| panic!("No receiver for party {p}"))
             .lock()
             .await;
-        let chunk = r.recv();
-        match tokio::time::timeout(std::time::Duration::from_secs(10 * 60), chunk).await {
-            Ok(Some(chunk)) => {
-                let mb = chunk.len() as f64 / 1024.0 / 1024.0;
-                trace!(size = mb, "Received chunk");
-                Ok(chunk)
+        let data = r.recv();
+        match tokio::time::timeout(std::time::Duration::from_secs(10 * 60), data).await {
+            Ok(Some(data)) => {
+                let mb = data.len() as f64 / 1024.0 / 1024.0;
+                trace!(size = mb, "Received data");
+                Ok(data)
             }
             Ok(None) => Err(AsyncRecvError::Closed),
             Err(_) => Err(AsyncRecvError::TimeoutElapsed),
