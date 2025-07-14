@@ -350,7 +350,7 @@ async fn fabitn(
     i: usize,
     n: usize,
     l: usize,
-    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
+    shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
 ) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
@@ -494,7 +494,7 @@ pub(crate) async fn fashare(
     i: usize,
     n: usize,
     l: usize,
-    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
+    shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
 ) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
     // Step 1) Pick random bit-string x (input).
 
@@ -823,7 +823,7 @@ async fn faand(
     n: usize,
     l: usize, //num_and_gates
     shared_rand: &mut ChaCha20Rng,
-    xyr_shares: Vec<Share>,
+    xyr_shares: &[Share],
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     let b = bucket_size(l);
     let lprime = l * b;
@@ -872,12 +872,12 @@ async fn faand(
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
 pub(crate) async fn beaver_aand(
     (channel, delta): (&impl Channel, Delta),
-    alpha_beta_shares: Vec<(Share, Share)>,
+    alpha_beta_shares: &[(Share, Share)],
     i: usize,
     n: usize,
     l: usize, //num_and_gates
     shared_rand: &mut ChaCha20Rng,
-    abc_shares: Vec<Share>,
+    abc_shares: &[Share],
 ) -> Result<Vec<Share>, Error> {
     if alpha_beta_shares.len() != l {
         //abc_shares length is checked in function faand
