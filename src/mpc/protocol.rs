@@ -38,6 +38,7 @@ use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::{SeedableRng, random};
 use rand_chacha::ChaCha20Rng;
+use tracing::debug;
 
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
@@ -433,6 +434,8 @@ async fn gen_auth_bits(
         // TODO choose correct batch_size?
         let batch_size = (and_shares.len().div_ceil(3 * 5)).clamp(1_000, 320_000);
         for and_shares in and_shares.chunks(batch_size) {
+            debug!(size = and_shares.len(), "Generating auth bits batch");
+
             // TODO choose BATCH_SIZE to minimize bucket_size
             let b = bucket_size(and_shares.len());
 
