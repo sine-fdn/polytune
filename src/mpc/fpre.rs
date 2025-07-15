@@ -221,8 +221,10 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
 mod tests {
     use crate::{
         channel::{SimpleChannel, recv_from, recv_vec_from, send_to},
-        mpc::fpre::{Auth, Delta, Error, Key, Mac, Share, fpre},
-        mpc::protocol::{_mpc, Preprocessor},
+        mpc::{
+            fpre::{Auth, Delta, Error, Key, Mac, Share, fpre},
+            protocol::{_mpc, Context, Preprocessor},
+        },
     };
     use garble_lang::{circuit::Circuit, compile};
 
@@ -454,7 +456,7 @@ mod tests {
             let inputs = inputs.to_vec();
             let output_parties = output_parties.to_vec();
             computation.spawn(async move {
-                match _mpc(
+                let ctx = Context::new(
                     &channel,
                     &circuit,
                     &inputs,
@@ -462,9 +464,8 @@ mod tests {
                     p_eval,
                     p_own,
                     &output_parties,
-                )
-                .await
-                {
+                );
+                match _mpc(&ctx).await {
                     Ok(res) => {
                         println!(
                             "Party {p_own} sent {:.2}MB of messages",
@@ -479,7 +480,7 @@ mod tests {
                 }
             });
         }
-        let eval_result = _mpc(
+        let ctx = Context::new(
             &eval_channel,
             circuit,
             inputs,
@@ -487,8 +488,8 @@ mod tests {
             p_eval,
             p_eval,
             output_parties,
-        )
-        .await;
+        );
+        let eval_result = _mpc(&ctx).await;
         match eval_result {
             Err(e) => {
                 eprintln!("SMPC protocol failed for Evaluator: {e:?}");
