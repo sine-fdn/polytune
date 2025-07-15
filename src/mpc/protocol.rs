@@ -371,7 +371,7 @@ pub(crate) async fn _mpc(
     }
 
     let mut auth_bits = auth_bits.into_iter();
-    let mut table_shares = vec![None; num_gates];
+    let mut table_shares = vec![];
     let mut garbled_gates = vec![];
     if is_contrib {
         let mut preprocessed_gates = vec![None; num_gates];
@@ -431,6 +431,7 @@ pub(crate) async fn _mpc(
             }
         }))
         .await?;
+        table_shares = vec![None; num_gates];
         for (w, gate) in circuit.wires().enumerate() {
             let gate = &gate;
             if let Wire::And(x, y) = gate {
