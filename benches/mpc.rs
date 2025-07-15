@@ -6,9 +6,10 @@ use criterion::{
 };
 use garble_lang::circuit::{Circuit, Gate};
 use polytune::{channel, mpc};
+use polytune_test_utils::peak_alloc::create_instrumented_runtime;
 use tokio::{runtime::Runtime, sync::oneshot};
 
-use crate::memory_tracking::{MemoryMeasurement, create_instrumented_runtime};
+use crate::memory_tracking::MemoryMeasurement;
 
 pub fn mpc_benchmarks(c: &mut Criterion) {
     let rt0 = create_instrumented_runtime(0);
