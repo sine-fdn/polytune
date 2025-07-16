@@ -32,6 +32,7 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
+use std::ops::{Index, IndexMut};
 use std::{cmp, sync::Mutex};
 
 use futures::future::{try_join, try_join_all};
@@ -291,20 +292,42 @@ pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<
     let (shares, labels, and_shares) = init_labels_and_shares(ctx, delta, random_shares)?;
     let auth_bits =
         gen_auth_bits(ctx, delta, and_shares, shared_two_by_two, multi_shared_rand).await?;
-    let (table_shares, garbled_gates) = garble(ctx, delta, &shares, &labels, auth_bits).await?;
-
     // input processing:
     let (masked_inputs, input_labels) = input_processing(ctx, delta, &shares, &labels).await?;
 
-    // circuit evaluation:
-    let (values, labels_eval) = evaluate(
-        ctx,
-        delta,
-        table_shares,
-        garbled_gates,
-        masked_inputs,
-        input_labels,
-    )?;
+    let batches = 10;
+    let batch_size = ctx.num_gates().div_ceil(batches);
+
+    let mut values = vec![];
+    let mut labels_eval = vec![];
+    let mut auth_bits = auth_bits.iter().cloned();
+    for batch in 0..batches {
+        let offset = batch * batch_size;
+
+        let (table_shares, garbled_gates) = garble(
+            ctx,
+            delta,
+            &shares,
+            &labels,
+            auth_bits.by_ref(),
+            offset,
+            batch_size,
+        )
+        .await?;
+        // circuit evaluation:
+        evaluate(
+            ctx,
+            delta,
+            table_shares,
+            garbled_gates,
+            &masked_inputs,
+            &input_labels,
+            &mut values,
+            &mut labels_eval,
+            offset,
+            batch_size,
+        )?;
+    }
 
     // output determination:
     let outputs = output(ctx, delta, shares, labels, values, labels_eval).await?;
@@ -397,7 +420,7 @@ fn init_labels_and_shares(
             let Some(share) = random_shares.next() else {
                 return Err(MpcError::MissingPreprocessingShareForWire(w).into());
             };
-            shares[w] = share.clone();
+            shares[w] = share;
             if is_contrib {
                 labels[w] = Label(random());
             }
@@ -490,13 +513,46 @@ async fn gen_auth_bits(
     Ok(auth_bits)
 }
 
+struct OffsetIndex<I> {
+    offset: usize,
+    data: I,
+}
+
+impl<T> OffsetIndex<Vec<T>> {
+    fn get(&self, index: usize) -> Option<&T> {
+        self.data.get(index - self.offset)
+    }
+}
+
+impl<I: Index<usize>> Index<usize> for OffsetIndex<I> {
+    type Output = I::Output;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index - self.offset]
+    }
+}
+
+impl<I: IndexMut<usize>> IndexMut<usize> for OffsetIndex<I> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.data[index - self.offset]
+    }
+}
+
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
     delta: Delta,
     shares: &[Share],
     labels: &[Label],
-    auth_bits: Vec<Share>,
-) -> Result<(Vec<Option<[Share; 4]>>, Vec<Vec<Option<GarbledGate>>>), Error> {
+    mut auth_bits: impl Iterator<Item = Share>,
+    offset: usize,
+    batch_size: usize,
+) -> Result<
+    (
+        OffsetIndex<Vec<Option<[Share; 4]>>>,
+        Vec<OffsetIndex<Vec<Option<GarbledGate>>>>,
+    ),
+    Error,
+> {
     let &Context {
         channel,
         circ,
@@ -505,13 +561,20 @@ async fn garble(
         p_max,
         ..
     } = ctx;
-    let num_gates = ctx.num_gates();
-    let mut auth_bits = auth_bits.into_iter();
-    let mut table_shares = vec![];
+    // let num_gates = ctx.num_gates();
+    // TODO get rid of cloned?
+    // let mut auth_bits = auth_bits.iter().cloned();
+    let mut table_shares = OffsetIndex {
+        offset: 0,
+        data: vec![],
+    };
     let mut garbled_gates = vec![];
     if is_contrib {
-        let mut preprocessed_gates = vec![None; num_gates];
-        for (w, gate) in circ.wires().enumerate() {
+        let mut preprocessed_gates = OffsetIndex {
+            offset,
+            data: vec![None; batch_size],
+        };
+        for (w, gate) in circ.wires().enumerate().skip(offset).take(batch_size) {
             if let Wire::And(x, y) = gate {
                 let Share(r_x, mac_r_x_key_s_x) = shares[x].clone();
                 let Share(r_y, mac_r_y_key_s_y) = shares[y].clone();
@@ -556,18 +619,31 @@ async fn garble(
             }
         }
 
-        send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+        send_to(
+            channel,
+            p_eval,
+            "preprocessed gates",
+            &preprocessed_gates.data,
+        )
+        .await?;
     } else {
         garbled_gates = try_join_all((0..p_max).map(async |p| {
             if p != p_eval {
-                recv_vec_from(channel, p, "preprocessed gates", num_gates).await
+                let data = recv_vec_from(channel, p, "preprocessed gates", batch_size).await?;
+                Ok::<_, Error>(OffsetIndex { offset, data })
             } else {
-                Ok(vec![])
+                Ok(OffsetIndex {
+                    offset,
+                    data: vec![],
+                })
             }
         }))
         .await?;
-        table_shares = vec![None; num_gates];
-        for (w, gate) in circ.wires().enumerate() {
+        table_shares = OffsetIndex {
+            offset,
+            data: vec![None; batch_size],
+        };
+        for (w, gate) in circ.wires().enumerate().skip(offset).take(batch_size) {
             if let Wire::And(x, y) = gate {
                 let x = shares[x].clone();
                 let y = shares[y].clone();
@@ -694,14 +770,19 @@ async fn input_processing(
     Ok((masked_inputs, input_labels))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
-    table_shares: Vec<Option<[Share; 4]>>,
-    garbled_gates: Vec<Vec<Option<GarbledGate>>>,
-    masked_inputs: Vec<Option<bool>>,
-    input_labels: Vec<Option<Vec<Label>>>,
-) -> Result<(Vec<bool>, Vec<Vec<Label>>), Error> {
+    table_shares: OffsetIndex<Vec<Option<[Share; 4]>>>,
+    garbled_gates: Vec<OffsetIndex<Vec<Option<GarbledGate>>>>,
+    masked_inputs: &[Option<bool>],
+    input_labels: &[Option<Vec<Label>>],
+    values: &mut Vec<bool>,
+    labels_eval: &mut Vec<Vec<Label>>,
+    offset: usize,
+    batch_size: usize,
+) -> Result<(), Error> {
     let &Context {
         circ,
         is_contrib,
@@ -709,10 +790,8 @@ fn evaluate(
         p_max,
         ..
     } = ctx;
-    let mut values: Vec<bool> = vec![];
-    let mut labels_eval: Vec<Vec<Label>> = vec![];
     if !is_contrib {
-        for (w, gate) in circ.wires().enumerate() {
+        for (w, gate) in circ.wires().enumerate().skip(offset).take(batch_size) {
             let (input, label) = match gate {
                 Wire::Input(_) => {
                     let input = masked_inputs
@@ -791,7 +870,7 @@ fn evaluate(
             labels_eval.push(label);
         }
     }
-    Ok((values, labels_eval))
+    Ok(())
 }
 
 async fn output(
