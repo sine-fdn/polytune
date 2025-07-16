@@ -6,13 +6,13 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.79"
-axum = "0.7.4"
+axum = "0.8.4"
 blake3 = "1.5.1"
-clap = { version = "4.5.41", features = ["derive"] }
+clap = { version = "4.5.42", features = ["derive"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = { version = "0.12.22", features = ["blocking", "json"] }
 serde = "1.0.197"
-tokio = { version = "1.46.1", features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1.47.1", features = ["macros", "rt", "rt-multi-thread"] }
 tower = { version = "0.5.1", features = ["util"] }
 tower-http = { version = "0.6.6", features = ["fs", "trace"] }
 tracing = "0.1.40"

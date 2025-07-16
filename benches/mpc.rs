@@ -99,7 +99,7 @@ fn bench_memory_for_party(rt1: &Runtime, rt2: &Runtime, party: usize) {
         .without_plots()
         .configure_from_args();
 
-    let input_sizes = [100, 1_000, 10_000];
+    let input_sizes = [100, 1_000, 10_000, 100_000];
     for inputs in input_sizes {
         let mut g = c.benchmark_group("mpc");
         let bench_id = BenchmarkId::new(format!("memory for large inputs (Party {party})"), inputs);
@@ -117,6 +117,27 @@ fn bench_memory_for_party(rt1: &Runtime, rt2: &Runtime, party: usize) {
                 // Output should be all true because we compute ANDs of `true` inputs
                 assert!(res1.iter().all(|b| *b));
                 assert!(res2.iter().all(|b| *b));
+            },
+        );
+    }
+
+    let input_sizes = [100, 1_000, 10_000, 100_000];
+    for inputs in input_sizes {
+        let mut g = c.benchmark_group("mpc");
+        let bench_id = BenchmarkId::new(format!("memory for chained ANDs (Party {party})"), inputs);
+        let circ = and_chain(inputs);
+
+        bench_circuit_two_parties(
+            &mut g,
+            &measurement,
+            rt1,
+            rt2,
+            bench_id,
+            circ,
+            [vec![true], vec![true]],
+            |res1, res2| {
+                assert!(res1[0]);
+                assert!(res2[0]);
             },
         );
     }

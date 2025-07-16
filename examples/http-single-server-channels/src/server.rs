@@ -17,10 +17,10 @@ pub(crate) async fn serve() {
     let sessions = Arc::new(Mutex::new(HashMap::<String, Session>::new()));
 
     let app = Router::new()
-        .route("/join/:session/:party", put(join))
-        .route("/participants/:session", get(participants))
-        .route("/send/:session/:from/:to", post(send))
-        .route("/recv/:session/:from/:to", post(recv))
+        .route("/join/{session}/{party}", put(join))
+        .route("/participants/{session}", get(participants))
+        .route("/send/{session}/{from}/{to}", post(send))
+        .route("/recv/{session}/{from}/{to}", post(recv))
         .with_state(sessions)
         .layer(TraceLayer::new_for_http());
 

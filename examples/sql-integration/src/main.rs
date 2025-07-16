@@ -153,9 +153,9 @@ async fn async_main(cli: Cli, policy: Policy) -> Result<(), Error> {
         // to kick off an MPC session:
         .route("/run", post(run))
         // to receive constants from other parties:
-        .route("/consts/:from", post(consts))
+        .route("/consts/{from}", post(consts))
         // to receive MPC messages during the execution of the core protocol:
-        .route("/msg/:from", post(msg))
+        .route("/msg/{from}", post(msg))
         .with_state((policy.clone(), Arc::clone(&state)))
         .layer(DefaultBodyLimit::disable())
         .layer(ServiceBuilder::new().layer(log_layer));
@@ -706,17 +706,15 @@ impl Channel for HttpChannel {
         msg: Vec<u8>,
         phase: &str,
     ) -> Result<(), Self::SendError> {
-        let simulated_delay_in_ms = 300;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
         loop {
-            sleep(Duration::from_millis(simulated_delay_in_ms)).await;
             let req = client.post(&url).body(msg.clone()).send();
-            let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
+            let Ok(Ok(res)) = timeout(Duration::from_secs(1000), req).await else {
                 warn!("  req timeout: party {}", p);
-                continue;
+                panic!("timout code is buggy see issue #112");
             };
             match res.status() {
                 StatusCode::OK => break Ok(()),

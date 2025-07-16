@@ -49,16 +49,18 @@ futures = { version = "0.3.31", default-features = false, features = [
     "alloc",
     "async-await",
 ] }
-garble_lang = { version = "0.6.1", features = ["serde"] }
+garble_lang = { git = "https://github.com/sine-fdn/garble-lang.git", rev = "59bccd06d19b", version = "0.7.0", features = [
+    "serde",
+] }
 hybrid-array = { version = "0.3.1", features = ["bytemuck", "serde"] }
-rand = "0.9.1"
+rand = "0.9.2"
 rand_chacha = "0.9.0"
 rand_core_0_6 = { package = "rand_core", version = "0.6" }
 seq-macro = "0.3.6"
 serde = { version = "1.0.195", features = ["derive"] }
 subtle = "2.6.1"
 thiserror = "2.0.12"
-tokio = { version = "1.46.1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.47.1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1.41"
 wide = { version = "0.7.33", features = ["serde"] }
 
@@ -77,10 +79,10 @@ getrandom_0_3 = { package = "getrandom", version = "0.3", features = [
 cpufeatures = "0.2.17"
 
 [dev-dependencies]
-criterion = { version = "0.6.0", features = ["async_tokio"] }
+criterion = { version = "0.7.0", features = ["async_tokio"] }
 polytune-test-utils = { path = "crates/polytune-test-utils" }
 proptest = "1.7.0"
-tokio = { version = "1.46.1", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [[bench]]
