@@ -712,9 +712,9 @@ impl Channel for HttpChannel {
         info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
         loop {
             let req = client.post(&url).body(msg.clone()).send();
-            let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
+            let Ok(Ok(res)) = timeout(Duration::from_secs(1000), req).await else {
                 warn!("  req timeout: party {}", p);
-                continue;
+                panic!("timout code is buggy see issue #112");
             };
             match res.status() {
                 StatusCode::OK => break Ok(()),
