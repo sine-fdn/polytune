@@ -17,6 +17,9 @@ use polytune::{
     },
     mpc,
 };
+use polytune_test_utils::peak_alloc::{
+    PeakAllocator, create_instrumented_runtime, scale_memory_denom_unit,
+};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -47,6 +50,9 @@ use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use url::Url;
+
+#[global_allocator]
+static ALLOCATOR: PeakAllocator = PeakAllocator::new();
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
@@ -104,22 +110,30 @@ struct MpcComms {
 
 type MpcState = Arc<Mutex<MpcComms>>;
 
-#[tokio::main]
-async fn main() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
     install_default_drivers();
-    let Cli { addr, port, config } = Cli::parse();
-    let Ok(policy) = fs::read_to_string(&config).await else {
-        error!("Could not find '{}', exiting...", config.display());
+    let cli = Cli::parse();
+    let Ok(policy) = std::fs::read_to_string(&cli.config) else {
+        error!("Could not find '{}', exiting...", cli.config.display());
         exit(-1);
     };
     let policy = match serde_json::from_str::<Policy>(&policy) {
         Ok(policy) => policy,
         Err(e) => {
-            bail!("'{}' has an invalid format: {e}", config.display());
+            bail!("'{}' has an invalid format: {e}", cli.config.display());
         }
     };
 
+    ALLOCATOR.enable();
+    let party = policy.party;
+    let rt = create_instrumented_runtime(party);
+    rt.block_on(async_main(cli, policy))?;
+    Ok(())
+}
+
+async fn async_main(cli: Cli, policy: Policy) -> Result<(), Error> {
+    let Cli { addr, port, .. } = cli;
     let state = Arc::new(Mutex::new(MpcComms {
         consts: HashMap::new(),
         senders: vec![],
@@ -570,11 +584,14 @@ async fn execute_mpc(
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();
     let elapsed = now.elapsed();
+    let memory_peak = ALLOCATOR.peak(policy.party) as f64;
+    let (denom, unit) = scale_memory_denom_unit(memory_peak);
     info!(
-        "MPC computation for party {party} took {} hour(s), {} minute(s), {} second(s)",
+        "MPC computation for party {party} took {} hour(s), {} minute(s), {} second(s). Peak memory: {} {unit}",
         elapsed.as_secs() / 60 / 60,
         (elapsed.as_secs() % (60 * 60)) / 60,
         elapsed.as_secs() % 60,
+        memory_peak / denom,
     );
     if output.is_empty() {
         Ok(None)
@@ -691,17 +708,15 @@ impl Channel for HttpChannel {
         msg: Vec<u8>,
         phase: &str,
     ) -> Result<(), Self::SendError> {
-        let simulated_delay_in_ms = 300;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
         loop {
-            sleep(Duration::from_millis(simulated_delay_in_ms)).await;
             let req = client.post(&url).body(msg.clone()).send();
-            let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
+            let Ok(Ok(res)) = timeout(Duration::from_secs(1000), req).await else {
                 warn!("  req timeout: party {}", p);
-                continue;
+                panic!("timout code is buggy see issue #112");
             };
             match res.status() {
                 StatusCode::OK => break Ok(()),
