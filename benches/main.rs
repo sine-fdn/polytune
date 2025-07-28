@@ -1,7 +1,6 @@
 use criterion::Criterion;
+use polytune_test_utils::peak_alloc::PeakAllocator;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
-
-use crate::memory_tracking::PeakAllocator;
 
 mod join;
 mod memory_tracking;
