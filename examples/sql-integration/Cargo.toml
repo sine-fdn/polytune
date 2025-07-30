@@ -21,7 +21,7 @@ sqlx = { version = "0.8.6", features = [
     "runtime-tokio",
     "sqlite",
 ] }
-tokio = { version = "1.46.1", features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1.47.0", features = ["macros", "rt", "rt-multi-thread"] }
 tower = { version = "0.5.1", features = ["util"] }
 tower-http = { version = "0.6.6", features = ["fs", "trace"] }
 tracing = "0.1.40"
