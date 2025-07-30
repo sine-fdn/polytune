@@ -70,7 +70,7 @@ async fn serve(port: u16, parties: usize) -> Result<Vec<Mutex<Receiver<Vec<u8>>>
     }
 
     let app = Router::new()
-        .route("/msg/:from", post(msg))
+        .route("/msg/{from}", post(msg))
         .with_state(senders)
         .layer(TraceLayer::new_for_http());
 
