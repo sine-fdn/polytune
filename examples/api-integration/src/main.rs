@@ -1,10 +1,17 @@
+use aide::{
+    axum::{
+        ApiRouter, IntoApiResponse,
+        routing::{get, post},
+    },
+    openapi::{Info, OpenApi},
+};
 use anyhow::{Context, Error, anyhow, bail};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
+    handler::HandlerWithoutStateExt,
     http::{Request, Response},
-    routing::{get, post},
 };
 use clap::Parser;
 use polytune::{
@@ -13,9 +20,10 @@ use polytune::{
     mpc,
 };
 use reqwest::StatusCode;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::BorrowMut,
+    borrow::{BorrowMut, Cow},
     collections::HashMap,
     env,
     net::{IpAddr, SocketAddr},
@@ -49,7 +57,7 @@ struct Cli {
 }
 
 /// A policy containing everything necessary to run an MPC session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 struct Policy {
     participants: Vec<Url>,
     program: String,
@@ -61,7 +69,7 @@ struct Policy {
 }
 
 /// HTTP request coming from another party to start an MPC session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
 struct PolicyRequest {
     participants: Vec<Url>,
     program_hash: String,
@@ -103,20 +111,34 @@ async fn main() -> Result<(), Error> {
             },
         );
 
-    let app = Router::new()
+    let app = ApiRouter::new()
         // to check whether a server is running:
         .route("/ping", get(ping))
         // to start an MPC session as a leader:
-        .route("/launch", post(launch))
+        .api_route("/launch", post(launch))
         // to kick off an MPC session:
-        .route("/run", post(run))
+        .api_route("/run", post(run))
         // to receive constants from other parties:
-        .route("/consts/{from}", post(consts))
+        .route("/consts/{from}", axum::routing::post(consts))
         // to receive MPC messages during the execution of the core protocol:
         .route("/msg/{from}", post(msg))
+        .route("/api.json", get(serve_api))
         .with_state(Arc::clone(&state))
         .layer(DefaultBodyLimit::disable())
         .layer(ServiceBuilder::new().layer(log_layer));
+
+    let mut api = OpenApi {
+        info: Info {
+            title: "Polytune API Deployment".to_string(),
+            description: Some(
+                "An example Polytune deployment which provides an API to start MPC computations."
+                    .to_string(),
+            ),
+            version: "0.1.0".to_string(),
+            ..Info::default()
+        },
+        ..OpenApi::default()
+    };
 
     let addr = if let Ok(socket_addr) = env::var("SOCKET_ADDRESS") {
         SocketAddr::from_str(&socket_addr)
@@ -134,8 +156,18 @@ async fn main() -> Result<(), Error> {
     };
     info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.finish_api(&mut api)
+            .layer(Extension(api))
+            .into_make_service(),
+    )
+    .await?;
     Ok(())
+}
+
+async fn serve_api(Extension(api): Extension<OpenApi>) -> impl IntoApiResponse {
+    Json(api)
 }
 
 async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>, Error> {

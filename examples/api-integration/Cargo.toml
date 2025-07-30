@@ -5,12 +5,15 @@ edition = "2024"
 publish = false
 
 [dependencies]
+aide = { version = "0.15.0", features = ["axum", "axum-json"] }
 anyhow = "1.0.79"
 axum = "0.8.4"
 blake3 = "1.5.1"
 clap = { version = "4.5.42", features = ["derive"] }
+garble_lang = { version = "0.7.0", features = ["json_schema"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = { version = "0.12.22", features = ["blocking", "json"] }
+schemars = { version = "0.9", features = ["url2"] }
 serde = "1.0.197"
 tokio = { version = "1.47.1", features = ["macros", "rt", "rt-multi-thread"] }
 tower = { version = "0.5.1", features = ["util"] }
