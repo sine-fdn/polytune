@@ -49,7 +49,9 @@ futures = { version = "0.3.31", default-features = false, features = [
     "alloc",
     "async-await",
 ] }
-garble_lang = { version = "0.6.1", features = ["serde"] }
+garble_lang = { git = "https://github.com/sine-fdn/garble-lang.git", rev = "59bccd06d19b", version = "0.7.0", features = [
+    "serde",
+] }
 hybrid-array = { version = "0.3.1", features = ["bytemuck", "serde"] }
 rand = "0.9.2"
 rand_chacha = "0.9.0"
