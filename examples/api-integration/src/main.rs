@@ -111,9 +111,9 @@ async fn main() -> Result<(), Error> {
         // to kick off an MPC session:
         .route("/run", post(run))
         // to receive constants from other parties:
-        .route("/consts/:from", post(consts))
+        .route("/consts/{from}", post(consts))
         // to receive MPC messages during the execution of the core protocol:
-        .route("/msg/:from", post(msg))
+        .route("/msg/{from}", post(msg))
         .with_state(Arc::clone(&state))
         .layer(DefaultBodyLimit::disable())
         .layer(ServiceBuilder::new().layer(log_layer));

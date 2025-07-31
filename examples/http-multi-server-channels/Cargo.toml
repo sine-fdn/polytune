@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.79"
-axum = "0.7.4"
+axum = "0.8.4"
 clap = { version = "4.5.41", features = ["derive"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = "0.12.22"
