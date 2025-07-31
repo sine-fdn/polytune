@@ -49,3 +49,6 @@ Let's assume that party 0 is listening at `http://1.2.3.4:8000` and party 1 at `
   ...
 }
 ```
+
+## OpenAPI spec
+The server provides an OpenAPI spec at `/api.json` and a Swagger UI for the spec at `/swagger`.

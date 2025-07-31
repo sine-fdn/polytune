@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-aide = { version = "0.15.0", features = ["axum", "axum-json"] }
+aide = { version = "0.15.0", features = ["axum", "axum-json", "swagger"] }
 anyhow = "1.0.79"
 axum = "0.8.4"
 blake3 = "1.5.1"
