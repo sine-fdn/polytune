@@ -37,8 +37,7 @@ use std::sync::Mutex;
 
 use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use rand::{SeedableRng, random};
-use rand_chacha::ChaCha20Rng;
+use rand::random;
 
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
@@ -265,13 +264,9 @@ pub(crate) async fn _mpc(
     let num_gates = num_input_gates + circuit.gates.len();
     let secret_bits = num_input_gates + num_and_gates;
 
-    let b = bucket_size(num_and_gates);
-    let lprime = num_and_gates * b;
-
     let delta: Delta;
-    let mut shared_rand: rand_chacha::ChaCha20Rng = ChaCha20Rng::from_os_rng();
     let random_shares: Vec<Share>;
-    let mut xyz_shares = vec![];
+    let mut shared_two_by_two = None;
 
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         send_to::<()>(channel, p_fpre, "delta", &[]).await?;
@@ -284,43 +279,40 @@ pub(crate) async fn _mpc(
         random_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
     } else {
         delta = Delta(random());
-        let shared_two_by_two = shared_rng_pairwise(channel, p_own, p_max).await?;
+        shared_two_by_two = Some(shared_rng_pairwise(channel, p_own, p_max).await?);
 
-        let (rand_shares, multi_shared_rand) = fashare(
+        (random_shares, _) = fashare(
             (channel, delta),
             p_own,
             p_max,
-            secret_bits + 3 * lprime,
-            shared_two_by_two,
+            secret_bits,
+            shared_two_by_two.as_mut().expect("Set above"),
         )
         .await?;
-        shared_rand = multi_shared_rand;
-
-        let (random_shares_vec, xyzbits_vec) = rand_shares.split_at(secret_bits);
-        random_shares = random_shares_vec.to_vec();
-        xyz_shares = xyzbits_vec.to_vec();
     }
 
     let mut random_shares = random_shares.into_iter();
     let mut shares = vec![Share(false, Auth(vec![])); num_gates];
     let mut labels = vec![Label(0); num_gates];
 
-    for (w, gate) in circuit.wires().iter().enumerate() {
+    for (w, gate) in circuit.wires().enumerate() {
         if let Wire::Input(_) | Wire::And(_, _) = gate {
             let Some(share) = random_shares.next() else {
                 return Err(MpcError::MissingPreprocessingShareForWire(w).into());
             };
-            shares[w] = share;
+            shares[w] = share.clone();
             if is_contrib {
                 labels[w] = Label(random());
             }
         }
     }
+    drop(random_shares);
 
     // fn-dependent preprocessing:
 
     let mut and_shares = Vec::new();
-    for (w, gate) in circuit.wires().iter().enumerate() {
+    for (w, gate) in circuit.wires().enumerate() {
+        let gate = &gate;
         match gate {
             Wire::Input(_) => {}
             Wire::Not(x) => {
@@ -344,17 +336,37 @@ pub(crate) async fn _mpc(
             recv_vec_from(channel, p_fpre, "AND shares", num_and_gates),
         )
         .await?;
-    } else if !xyz_shares.is_empty() {
-        auth_bits = beaver_aand(
-            (channel, delta),
-            and_shares.clone(),
-            p_own,
-            p_max,
-            num_and_gates,
-            &mut shared_rand,
-            xyz_shares,
-        )
-        .await?;
+    } else {
+        // Generate the authenticated bits in batches. This reduces peak memory consumption,
+        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1000
+        // auth bits, we need 15000 random Shares (b = 5).
+        // TODO choose correct batch_size?
+        let batch_size = (and_shares.len().div_ceil(3 * 5)).clamp(1_000, 320_000);
+        for and_shares in and_shares.chunks(batch_size) {
+            // TODO choose BATCH_SIZE to minimize bucket_size
+            let b = bucket_size(and_shares.len());
+
+            let (xyz_shares, mut shared_rand) = fashare(
+                (channel, delta),
+                p_own,
+                p_max,
+                // * 3 because we turn these into beaver triples?
+                and_shares.len() * b * 3,
+                shared_two_by_two.as_mut().expect("Set earlier"),
+            )
+            .await?;
+            let batch_auth_bits = beaver_aand(
+                (channel, delta),
+                and_shares,
+                p_own,
+                p_max,
+                and_shares.len(),
+                &mut shared_rand,
+                &xyz_shares,
+            )
+            .await?;
+            auth_bits.extend_from_slice(&batch_auth_bits);
+        }
     }
 
     let mut auth_bits = auth_bits.into_iter();
@@ -362,7 +374,8 @@ pub(crate) async fn _mpc(
     let mut garbled_gates = vec![];
     if is_contrib {
         let mut preprocessed_gates = vec![None; num_gates];
-        for (w, gate) in circuit.wires().iter().enumerate() {
+        for (w, gate) in circuit.wires().enumerate() {
+            let gate = &gate;
             if let Wire::And(x, y) = gate {
                 let Share(r_x, mac_r_x_key_s_x) = shares[*x].clone();
                 let Share(r_y, mac_r_y_key_s_y) = shares[*y].clone();
@@ -417,7 +430,8 @@ pub(crate) async fn _mpc(
             }
         }))
         .await?;
-        for (w, gate) in circuit.wires().iter().enumerate() {
+        for (w, gate) in circuit.wires().enumerate() {
+            let gate = &gate;
             if let Wire::And(x, y) = gate {
                 let x = shares[*x].clone();
                 let y = shares[*y].clone();
@@ -444,14 +458,14 @@ pub(crate) async fn _mpc(
     // input processing:
 
     let mut wire_shares_for_others = vec![vec![None; num_gates]; p_max];
-    for (w, gate) in circuit.wires().iter().enumerate() {
+    for (w, gate) in circuit.wires().enumerate() {
         if let Wire::Input(i) = gate {
             let Share(bit, Auth(macs_and_keys)) = shares[w].clone();
-            let Some((mac, _)) = macs_and_keys.get(*i) else {
-                return Err(MpcError::MissingSharesForInput(*i).into());
+            let Some((mac, _)) = macs_and_keys.get(i) else {
+                return Err(MpcError::MissingSharesForInput(i).into());
             };
             if *mac != Mac(0) {
-                wire_shares_for_others[*i][w] = Some((bit, *mac));
+                wire_shares_for_others[i][w] = Some((bit, *mac));
             }
         }
     }
@@ -461,9 +475,9 @@ pub(crate) async fn _mpc(
 
     let mut inputs = inputs.iter();
     let mut masked_inputs = vec![None; num_gates];
-    for (w, gate) in circuit.wires().iter().enumerate() {
+    for (w, gate) in circuit.wires().enumerate() {
         if let Wire::Input(p_input) = gate {
-            if p_own == *p_input {
+            if p_own == p_input {
                 let Some(input) = inputs.next() else {
                     return Err(MpcError::WireWithoutInput(w).into());
                 };
@@ -535,7 +549,8 @@ pub(crate) async fn _mpc(
     let mut values: Vec<bool> = vec![];
     let mut labels_eval: Vec<Vec<Label>> = vec![];
     if !is_contrib {
-        for (w, gate) in circuit.wires().iter().enumerate() {
+        for (w, gate) in circuit.wires().enumerate() {
+            let gate = &gate;
             let (input, label) = match gate {
                 Wire::Input(_) => {
                     let input = masked_inputs

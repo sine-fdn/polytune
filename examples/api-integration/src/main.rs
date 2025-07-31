@@ -1,10 +1,18 @@
+use aide::{
+    axum::{
+        ApiRouter, IntoApiResponse,
+        routing::{get, post, post_with},
+    },
+    openapi::{Info, OpenApi},
+    swagger::Swagger,
+    transform::TransformOperation,
+};
 use anyhow::{Context, Error, anyhow, bail};
 use axum::{
-    Json, Router,
+    Extension, Json,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
     http::{Request, Response},
-    routing::{get, post},
 };
 use clap::Parser;
 use polytune::{
@@ -13,6 +21,7 @@ use polytune::{
     mpc,
 };
 use reqwest::StatusCode;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::BorrowMut,
@@ -49,19 +58,32 @@ struct Cli {
 }
 
 /// A policy containing everything necessary to run an MPC session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 struct Policy {
+    /// The URLs at which we can reach the other parties. Their position in
+    /// in this array needs to be identical for all parties and will correspond
+    /// to their party ID (e.g. used for the leader).
     participants: Vec<Url>,
+    /// The program as [Garble](https://garble-lang.org/) source code.
     program: String,
+    /// The id of the leader of the computation.
     leader: usize,
+    /// Our own party ID. Corresponds to our adress at participants[party].
     party: usize,
+    /// The input to the Garble program as a serialized Garble `Literal` value.
     input: Literal,
-    output: Option<String>,
+    /// The optional output URL to which the output of the MPC computation is provided
+    /// as a json serialized Garble `Literal` value.
+    output: Option<Url>,
+    /// The constants needed of this party for the MPC computation. Note that the
+    /// identifier must not contain the `PARTY_{ID}::` prefix, but only the name.
+    /// E.g. if the Garble program contains `const ROWS_0: usize = PARTY_0::ROWS;`
+    /// this should contain e.g. `"ROWS": { "NumUnsigned": [200, "Usize"]}`.
     constants: HashMap<String, Literal>,
 }
 
 /// HTTP request coming from another party to start an MPC session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
 struct PolicyRequest {
     participants: Vec<Url>,
     program_hash: String,
@@ -103,20 +125,35 @@ async fn main() -> Result<(), Error> {
             },
         );
 
-    let app = Router::new()
+    let app = ApiRouter::new()
         // to check whether a server is running:
         .route("/ping", get(ping))
         // to start an MPC session as a leader:
-        .route("/launch", post(launch))
+        .api_route("/launch", post_with(launch, launch_docs))
         // to kick off an MPC session:
         .route("/run", post(run))
         // to receive constants from other parties:
-        .route("/consts/{from}", post(consts))
+        .route("/consts/{from}", axum::routing::post(consts))
         // to receive MPC messages during the execution of the core protocol:
         .route("/msg/{from}", post(msg))
+        .route("/swagger", Swagger::new("/api.json").axum_route())
+        .route("/api.json", get(serve_api))
         .with_state(Arc::clone(&state))
         .layer(DefaultBodyLimit::disable())
         .layer(ServiceBuilder::new().layer(log_layer));
+
+    let mut api = OpenApi {
+        info: Info {
+            title: "Polytune API Deployment".to_string(),
+            description: Some(
+                "An example Polytune deployment which provides an API to start MPC computations."
+                    .to_string(),
+            ),
+            version: "0.1.0".to_string(),
+            ..Info::default()
+        },
+        ..OpenApi::default()
+    };
 
     let addr = if let Ok(socket_addr) = env::var("SOCKET_ADDRESS") {
         SocketAddr::from_str(&socket_addr)
@@ -134,11 +171,22 @@ async fn main() -> Result<(), Error> {
     };
     info!("listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.finish_api(&mut api)
+            .layer(Extension(api))
+            .into_make_service(),
+    )
+    .await?;
     Ok(())
 }
 
+async fn serve_api(Extension(api): Extension<OpenApi>) -> impl IntoApiResponse {
+    Json(api)
+}
+
 async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>, Error> {
+    info!("executing MPC");
     let Policy {
         program,
         leader,
@@ -256,6 +304,12 @@ async fn ping() -> &'static str {
     "pong"
 }
 
+fn launch_docs(t: TransformOperation) -> TransformOperation {
+    t.id("launchMpcSession")
+        .description("Launch a new MPC session. This needs to be called for all contributors before it is called for the leader.")
+}
+
+// TODO Errors need to be returned to the caller of `/launch` and not only logged
 async fn launch(State(state): State<MpcState>, Json(policy): Json<Policy>) {
     {
         let mut state = state.lock().await;
@@ -305,7 +359,7 @@ async fn launch(State(state): State<MpcState>, Json(policy): Json<Policy>) {
             info!("MPC Output: {output}");
             if let Some(endpoint) = policy.output {
                 info!("Sending {output} to {endpoint}");
-                if let Err(e) = client.post(&endpoint).json(&output).send().await {
+                if let Err(e) = client.post(endpoint.clone()).json(&output).send().await {
                     error!("Could not send output to {endpoint}: {e}");
                 }
             }
@@ -317,6 +371,7 @@ async fn launch(State(state): State<MpcState>, Json(policy): Json<Policy>) {
     }
 }
 
+// TODO errors should be returned to the caller of `/run` and not only logged
 async fn run(State(state): State<MpcState>, Json(body): Json<PolicyRequest>) {
     let Some(policy) = state.lock().await.policy.clone() else {
         return error!("Trying to start MPC execution without policy");
@@ -347,6 +402,7 @@ async fn consts(
     state.consts.insert(format!("PARTY_{from}"), body.consts);
 }
 
+// TODO errors should be returned to the caller of `/run` and not only logged
 async fn msg(State(state): State<MpcState>, Path(from): Path<u32>, body: Bytes) {
     let state = state.lock().await;
     if state.senders.len() > from as usize {
@@ -383,6 +439,7 @@ impl Channel for HttpChannel {
         loop {
             sleep(Duration::from_millis(simulated_delay_in_ms)).await;
             let req = client.post(&url).body(msg.clone()).send();
+            // TODO change timeout, this is much too short and bugged
             let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
                 warn!("  req timeout: party {}", p);
                 continue;
@@ -390,6 +447,7 @@ impl Channel for HttpChannel {
             match res.status() {
                 StatusCode::OK => break Ok(()),
                 StatusCode::NOT_FOUND => {
+                    // TODO this could end in an infinite loop i think
                     error!("Could not reach party {p} at {url}...");
                     sleep(Duration::from_millis(1000)).await;
                 }
