@@ -36,15 +36,19 @@ use std::sync::Mutex;
 
 use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
-use rand::{SeedableRng, random};
+use rand::random;
 use rand_chacha::ChaCha20Rng;
 use tracing::debug;
 
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
-    mpc::data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
-    mpc::faand::{self, beaver_aand, broadcast, bucket_size, fashare, shared_rng_pairwise},
-    mpc::garble::{self, GarblingKey, decrypt, encrypt},
+    mpc::{
+        data_types::{Auth, Delta, GarbledGate, Key, Label, Mac, Share},
+        faand::{
+            self, beaver_aand, broadcast, bucket_size, fashare, shared_rng, shared_rng_pairwise,
+        },
+        garble::{self, GarblingKey, decrypt, encrypt},
+    },
 };
 
 fn xor_labels(a: &[Label], b: &[Label]) -> Vec<Label> {
@@ -280,11 +284,13 @@ pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<
     validate(ctx)?;
 
     // fn-independent preprocessing:
-    let (delta, shared_two_by_two, random_shares) = fn_independent_pre(ctx).await?;
+    let (delta, random_shares, shared_two_by_two, multi_shared_rand) =
+        fn_independent_pre(ctx).await?;
 
     // fn-dependent preprocessing:
     let (shares, labels, and_shares) = init_labels_and_shares(ctx, delta, random_shares)?;
-    let auth_bits = gen_auth_bits(ctx, delta, shared_two_by_two, and_shares).await?;
+    let auth_bits =
+        gen_auth_bits(ctx, delta, and_shares, shared_two_by_two, multi_shared_rand).await?;
     let (table_shares, garbled_gates) = garble(ctx, delta, &shares, &labels, auth_bits).await?;
 
     // input processing:
@@ -331,11 +337,20 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
 
 async fn fn_independent_pre(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
-) -> Result<(Delta, Option<Vec<Vec<Option<ChaCha20Rng>>>>, Vec<Share>), Error> {
+) -> Result<
+    (
+        Delta,
+        Vec<Share>,
+        Option<Vec<Vec<Option<ChaCha20Rng>>>>,
+        Option<ChaCha20Rng>,
+    ),
+    Error,
+> {
     let secret_bits = ctx.num_input_gates + ctx.num_and_gates;
     let delta: Delta;
     let random_shares: Vec<Share>;
     let mut shared_two_by_two = None;
+    let mut multi_shared_rand = None;
     if let Preprocessor::TrustedDealer(p_fpre) = ctx.p_fpre {
         send_to::<()>(ctx.channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(ctx.channel, p_fpre, "delta")
@@ -348,17 +363,19 @@ async fn fn_independent_pre(
     } else {
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(ctx.channel, ctx.p_own, ctx.p_max).await?);
+        multi_shared_rand = Some(shared_rng(ctx.channel, ctx.p_own, ctx.p_max).await?);
 
-        (random_shares, _) = fashare(
+        random_shares = fashare(
             (ctx.channel, delta),
             ctx.p_own,
             ctx.p_max,
             secret_bits,
             shared_two_by_two.as_mut().expect("Set above"),
+            multi_shared_rand.as_mut().expect("Set above"),
         )
         .await?;
     }
-    Ok((delta, shared_two_by_two, random_shares))
+    Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
 // TODO simplify types
@@ -409,8 +426,9 @@ fn init_labels_and_shares(
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
     and_shares: Vec<(Share, Share)>,
+    mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
+    mut multi_shared_rand: Option<ChaCha20Rng>,
 ) -> Result<Vec<Share>, Error> {
     let &Context {
         channel,
@@ -432,20 +450,28 @@ async fn gen_auth_bits(
         // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1000
         // auth bits, we need 15000 random Shares (b = 5).
         // TODO choose correct batch_size?
-        let batch_size = (and_shares.len().div_ceil(3 * 5)).clamp(1_000, 320_000);
+        let batch_size = and_shares.len().div_ceil(3 * 5).max(1_000);
+        let shared_two_by_two = shared_two_by_two
+            .as_mut()
+            .expect("Set in fn_independent_pre");
+        let multi_shared_rand = multi_shared_rand
+            .as_mut()
+            .expect("Set in fn_independent_pre");
         for and_shares in and_shares.chunks(batch_size) {
             debug!(size = and_shares.len(), "Generating auth bits batch");
 
-            // TODO choose BATCH_SIZE to minimize bucket_size
+            // TODO choose batch_size to minimize bucket_size?
+            // Do we even need to choose the bucket size depending on the batch size or can
+            // it be done depending on the number of and_shares?
             let b = bucket_size(and_shares.len());
-
-            let (xyz_shares, mut shared_rand) = fashare(
+            let xyz_shares = fashare(
                 (channel, delta),
                 p_own,
                 p_max,
                 // * 3 because we turn these into beaver triples?
                 and_shares.len() * b * 3,
-                shared_two_by_two.as_mut().expect("Set earlier"),
+                shared_two_by_two,
+                multi_shared_rand,
             )
             .await?;
             let batch_auth_bits = beaver_aand(
@@ -454,7 +480,7 @@ async fn gen_auth_bits(
                 p_own,
                 p_max,
                 and_shares.len(),
-                &mut shared_rand,
+                multi_shared_rand,
                 &xyz_shares,
             )
             .await?;
