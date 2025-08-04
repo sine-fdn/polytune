@@ -58,7 +58,7 @@ seq-macro = "0.3.6"
 serde = { version = "1.0.195", features = ["derive"] }
 subtle = "2.6.1"
 thiserror = "2.0.12"
-tokio = { version = "1.47.0", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.47.1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1.41"
 wide = { version = "0.7.33", features = ["serde"] }
 
@@ -80,7 +80,7 @@ cpufeatures = "0.2.17"
 criterion = { version = "0.7.0", features = ["async_tokio"] }
 polytune-test-utils = { path = "crates/polytune-test-utils" }
 proptest = "1.7.0"
-tokio = { version = "1.47.0", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [[bench]]
