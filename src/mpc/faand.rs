@@ -351,7 +351,8 @@ async fn fabitn(
     n: usize,
     l: usize,
     shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
-) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
+    multi_shared_rand: &mut ChaCha20Rng,
+) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
@@ -409,7 +410,6 @@ async fn fabitn(
 
     // Step 3) Verification of MACs and keys.
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
-    let mut multi_shared_rand = shared_rng(channel, i, n).await?;
     let r: Vec<Vec<bool>> = (0..three_rho)
         .map(|_| (0..lprime).map(|_| multi_shared_rand.random()).collect())
         .collect();
@@ -473,7 +473,7 @@ async fn fabitn(
         }
         res.push(Share(*xi, Auth(authvec)));
     }
-    Ok((res, multi_shared_rand))
+    Ok(res)
 }
 
 /// Protocol PI_aShare that performs F_aShare from the paper
@@ -495,12 +495,20 @@ pub(crate) async fn fashare(
     n: usize,
     l: usize,
     shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
-) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
+    multi_shared_rand: &mut ChaCha20Rng,
+) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x (input).
 
     // Step 2) Run Pi_aBit^n to compute shares.
-    let (mut xishares, multi_shared_rand) =
-        fabitn((channel, delta), i, n, l + RHO, shared_two_by_two).await?;
+    let mut xishares = fabitn(
+        (channel, delta),
+        i,
+        n,
+        l + RHO,
+        shared_two_by_two,
+        multi_shared_rand,
+    )
+    .await?;
 
     // Step 3) Compute commitments and verify consistency.
     // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
@@ -587,7 +595,7 @@ pub(crate) async fn fashare(
 
     // Step 4) Return first l objects.
     xishares.truncate(l);
-    Ok((xishares, multi_shared_rand))
+    Ok(xishares)
 }
 
 /// Protocol Pi_HaAND that performs F_HaAND from the paper
