@@ -375,13 +375,11 @@ impl Channel for HttpChannel {
         msg: Vec<u8>,
         phase: &str,
     ) -> Result<(), Self::SendError> {
-        let simulated_delay_in_ms = 300;
         let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
         loop {
-            sleep(Duration::from_millis(simulated_delay_in_ms)).await;
             let req = client.post(&url).body(msg.clone()).send();
             let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
                 warn!("  req timeout: party {}", p);
