@@ -98,4 +98,4 @@ debug = true
 inherits = "release"
 
 [patch.crates-io]
-garble_lang = { git = "https://github.com/sine-fdn/garble-lang.git", rev = "4253bab74b8d" }
+garble_lang = { git = "https://github.com/sine-fdn/garble-lang.git", branch = "join-inbuilt-func" }

@@ -928,7 +928,7 @@ dependencies = [
 [[package]]
 name = "garble_lang"
 version = "0.7.0"
-source = "git+https://github.com/sine-fdn/garble-lang.git?rev=4253bab74b8d#4253bab74b8d904bada5cc120bff3ba43170400e"
+source = "git+https://github.com/sine-fdn/garble-lang.git?branch=join-inbuilt-func#820fa1a76b5e1e2a9e8dfff94e67de3c1921992e"
 dependencies = [
  "schemars",
  "serde",
