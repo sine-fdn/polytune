@@ -8,7 +8,7 @@ version = "0.1.0"
 anyhow = "1.0.79"
 axum = "0.8.4"
 blake3 = "1.5.1"
-clap = { version = "4.5.41", features = ["derive"] }
+clap = { version = "4.5.42", features = ["derive"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 polytune-test-utils = { path = "../../crates/polytune-test-utils" }
 reqwest = { version = "0.12.22", features = ["json"] }
