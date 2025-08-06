@@ -350,8 +350,9 @@ async fn fabitn(
     i: usize,
     n: usize,
     l: usize,
-    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
-) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
+    shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
+    multi_shared_rand: &mut ChaCha20Rng,
+) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
@@ -409,7 +410,6 @@ async fn fabitn(
 
     // Step 3) Verification of MACs and keys.
     // Step 3 a) Sample 2 * RHO random l'-bit strings r.
-    let mut multi_shared_rand = shared_rng(channel, i, n).await?;
     let r: Vec<Vec<bool>> = (0..three_rho)
         .map(|_| (0..lprime).map(|_| multi_shared_rand.random()).collect())
         .collect();
@@ -473,7 +473,7 @@ async fn fabitn(
         }
         res.push(Share(*xi, Auth(authvec)));
     }
-    Ok((res, multi_shared_rand))
+    Ok(res)
 }
 
 /// Protocol PI_aShare that performs F_aShare from the paper
@@ -494,13 +494,21 @@ pub(crate) async fn fashare(
     i: usize,
     n: usize,
     l: usize,
-    shared_two_by_two: Vec<Vec<Option<ChaCha20Rng>>>,
-) -> Result<(Vec<Share>, ChaCha20Rng), Error> {
+    shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
+    multi_shared_rand: &mut ChaCha20Rng,
+) -> Result<Vec<Share>, Error> {
     // Step 1) Pick random bit-string x (input).
 
     // Step 2) Run Pi_aBit^n to compute shares.
-    let (mut xishares, multi_shared_rand) =
-        fabitn((channel, delta), i, n, l + RHO, shared_two_by_two).await?;
+    let mut xishares = fabitn(
+        (channel, delta),
+        i,
+        n,
+        l + RHO,
+        shared_two_by_two,
+        multi_shared_rand,
+    )
+    .await?;
 
     // Step 3) Compute commitments and verify consistency.
     // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
@@ -587,7 +595,7 @@ pub(crate) async fn fashare(
 
     // Step 4) Return first l objects.
     xishares.truncate(l);
-    Ok((xishares, multi_shared_rand))
+    Ok(xishares)
 }
 
 /// Protocol Pi_HaAND that performs F_HaAND from the paper
@@ -823,7 +831,7 @@ async fn faand(
     n: usize,
     l: usize, //num_and_gates
     shared_rand: &mut ChaCha20Rng,
-    xyr_shares: Vec<Share>,
+    xyr_shares: &[Share],
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     let b = bucket_size(l);
     let lprime = l * b;
@@ -872,12 +880,12 @@ async fn faand(
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
 pub(crate) async fn beaver_aand(
     (channel, delta): (&impl Channel, Delta),
-    alpha_beta_shares: Vec<(Share, Share)>,
+    alpha_beta_shares: &[(Share, Share)],
     i: usize,
     n: usize,
     l: usize, //num_and_gates
     shared_rand: &mut ChaCha20Rng,
-    abc_shares: Vec<Share>,
+    abc_shares: &[Share],
 ) -> Result<Vec<Share>, Error> {
     if alpha_beta_shares.len() != l {
         //abc_shares length is checked in function faand

@@ -1,6 +1,7 @@
 name: bench-large-join
 
 on:
+  - push
   - workflow_dispatch
 
 env:
@@ -10,7 +11,7 @@ env:
 jobs:
   bench_large_join:
     runs-on: ubicloud-standard-30-ubuntu-2404
-    timeout-minutes: 30
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: examples/api-integration
@@ -34,9 +35,9 @@ jobs:
       - name: Install and cache heaptrack master version
         run: |
           nix profile install github:sine-fdn/heaptrack#heaptrack-cli 
-      - uses: ubicloud/rust-cache@65b3ff06b9bcc69d88c25e212f1ae3d14a0953c3
+      # - uses: ubicloud/rust-cache@65b3ff06b9bcc69d88c25e212f1ae3d14a0953c3
       # use gnu time instead of bash built-in for memory reporting
-      - run: cargo test --profile debug-release -- --nocapture
+      - run: cargo test --profile debug-release --verbose -- --nocapture
         env:
           POLYTUNE_API_INTEGRATION_BIG: 1
           POLYTUNE_API_INTEGRATION_HEAPTRACK: 1
