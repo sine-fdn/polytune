@@ -503,37 +503,36 @@ mod tests {
     use super::*;
     use garble_lang::token::UnsignedNumType;
 
+    /// Create the large policies `policy0-big.json` and `policy1-big.json`.
+    ///
+    /// If you want to change these policies, you can adapt this test case and
+    /// execute it with
+    /// `cargo t --bin polytune-api-integration -- create_big_policy --include-ignored`
     #[ignore]
     #[test]
     fn create_big_policy() {
+        let size1 = 1000;
+        let size2 = 1000;
         let zero_id =
             Literal::ArrayRepeat(Box::new(Literal::NumUnsigned(0, UnsignedNumType::U8)), 16);
         let one_id =
             Literal::ArrayRepeat(Box::new(Literal::NumUnsigned(1, UnsignedNumType::U8)), 16);
-        let dataset1 = Literal::ArrayRepeat(Box::new(zero_id.clone()), 1000);
-        let mut dataset2 = vec![one_id; 9990];
-        dataset2.push(zero_id);
-        let dataset2 = Literal::Array(dataset2);
-        let consts1 = HashMap::from_iter([
-            (
-                "ROWS".into(),
-                Literal::NumUnsigned(1000, UnsignedNumType::Usize),
-            ),
-            (
-                "ID_LEN".into(),
-                Literal::NumUnsigned(16, UnsignedNumType::Usize),
-            ),
-        ]);
-        let consts2 = HashMap::from_iter([
-            (
-                "ROWS".into(),
-                Literal::NumUnsigned(10000, UnsignedNumType::Usize),
-            ),
-            (
-                "ID_LEN".into(),
-                Literal::NumUnsigned(16, UnsignedNumType::Usize),
-            ),
-        ]);
+        let dataset1 = Literal::ArrayRepeat(Box::new(zero_id.clone()), size1);
+        let dataset2 = Literal::ArrayRepeat(Box::new(one_id.clone()), size2);
+        let consts = |rows| {
+            HashMap::from_iter([
+                (
+                    "ROWS".into(),
+                    Literal::NumUnsigned(rows as u64, UnsignedNumType::Usize),
+                ),
+                (
+                    "ID_LEN".into(),
+                    Literal::NumUnsigned(16, UnsignedNumType::Usize),
+                ),
+            ])
+        };
+        let consts1 = consts(size1);
+        let consts2 = consts(size2);
         let participants = vec![
             "http://localhost:8000".parse().unwrap(),
             "http://localhost:8001".parse().unwrap(),
