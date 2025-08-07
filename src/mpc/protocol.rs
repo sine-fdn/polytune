@@ -462,33 +462,32 @@ pub(crate) async fn _mpc(
     let mut inputs = inputs.iter();
     let mut masked_inputs = vec![None; num_gates];
     for (w, gate) in circuit.wires().enumerate() {
-        if let Wire::Input(p_input) = gate {
-            if p_own == p_input {
-                let Some(input) = inputs.next() else {
-                    return Err(MpcError::WireWithoutInput(w).into());
-                };
-                let Share(own_share, Auth(own_macs_and_keys)) = shares[w].clone();
-                let mut masked_input = *input ^ own_share;
-                for p in 0..p_max {
-                    if let Some((_, key)) = own_macs_and_keys.get(p).copied() {
-                        if key != Key(0) {
-                            let Some(other_shares) = wire_shares_from_others.get(p) else {
-                                return Err(MpcError::InvalidInputMacOnWire(w).into());
-                            };
-                            let Some((other_share, mac)) = other_shares.get(w).copied().flatten()
-                            else {
-                                return Err(MpcError::InvalidInputMacOnWire(w).into());
-                            };
-                            if mac != key ^ (other_share & delta) {
-                                return Err(MpcError::InvalidInputMacOnWire(w).into());
-                            } else {
-                                masked_input ^= other_share;
-                            }
-                        }
+        if let Wire::Input(p_input) = gate
+            && p_own == p_input
+        {
+            let Some(input) = inputs.next() else {
+                return Err(MpcError::WireWithoutInput(w).into());
+            };
+            let Share(own_share, Auth(own_macs_and_keys)) = shares[w].clone();
+            let mut masked_input = *input ^ own_share;
+            for p in 0..p_max {
+                if let Some((_, key)) = own_macs_and_keys.get(p).copied()
+                    && key != Key(0)
+                {
+                    let Some(other_shares) = wire_shares_from_others.get(p) else {
+                        return Err(MpcError::InvalidInputMacOnWire(w).into());
+                    };
+                    let Some((other_share, mac)) = other_shares.get(w).copied().flatten() else {
+                        return Err(MpcError::InvalidInputMacOnWire(w).into());
+                    };
+                    if mac != key ^ (other_share & delta) {
+                        return Err(MpcError::InvalidInputMacOnWire(w).into());
+                    } else {
+                        masked_input ^= other_share;
                     }
                 }
-                masked_inputs[w] = Some(masked_input)
             }
+            masked_inputs[w] = Some(masked_input)
         }
     }
     let masked_inputs_from_other_party =
@@ -600,10 +599,10 @@ pub(crate) async fn _mpc(
                     }
                     for p_i in (0..p_max).filter(|p_i| *p_i != p_eval) {
                         for p_j in (0..p_max).filter(|p_j| *p_j != p_i) {
-                            if let Some(macs) = macs.get(p_j) {
-                                if let Some(mac) = macs.get(p_i).copied() {
-                                    label[p_i] = label[p_i] ^ mac
-                                }
+                            if let Some(macs) = macs.get(p_j)
+                                && let Some(mac) = macs.get(p_i).copied()
+                            {
+                                label[p_i] = label[p_i] ^ mac
                             }
                         }
                     }
