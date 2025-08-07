@@ -449,9 +449,9 @@ async fn gen_auth_bits(
         // Generate the authenticated bits in batches. This reduces peak memory consumption,
         // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
         // auth bits, we need 9M random Shares (b = 3).
-        // TODO choose correct batch_size?
         // The minimum batch size is 1k. For small circuits it does not make sense to go lower.
         // This is done by taking the max of the potential batch size and 1k
+        // TODO choose correct batch_size?
         let batch_size = cmp::max(and_shares.len().div_ceil(3 * 3), 1_000);
         let shared_two_by_two = shared_two_by_two
             .as_mut()
@@ -463,14 +463,12 @@ async fn gen_auth_bits(
             debug!(size = and_shares.len(), "Generating auth bits batch");
 
             // TODO choose batch_size to minimize bucket_size?
-            // Do we even need to choose the bucket size depending on the batch size or can
-            // it be done depending on the number of and_shares?
             let b = bucket_size(and_shares.len());
             let xyz_shares = fashare(
                 (channel, delta),
                 p_own,
                 p_max,
-                // * 3 because we turn these into beaver triples?
+                // * 3 because we turn these into beaver triples
                 and_shares.len() * b * 3,
                 shared_two_by_two,
                 multi_shared_rand,
