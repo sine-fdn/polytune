@@ -32,7 +32,7 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
-use std::sync::Mutex;
+use std::{cmp, sync::Mutex};
 
 use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
@@ -447,10 +447,12 @@ async fn gen_auth_bits(
         .await?;
     } else {
         // Generate the authenticated bits in batches. This reduces peak memory consumption,
-        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1000
-        // auth bits, we need 15000 random Shares (b = 5).
+        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
+        // auth bits, we need 9M random Shares (b = 3).
         // TODO choose correct batch_size?
-        let batch_size = and_shares.len().div_ceil(3 * 5).max(1_000);
+        // The minimum batch size is 1k. For small circuits it does not make sense to go lower.
+        // This is done by taking the max of the potential batch size and 1k
+        let batch_size = cmp::max(and_shares.len().div_ceil(3 * 3), 1_000);
         let shared_two_by_two = shared_two_by_two
             .as_mut()
             .expect("Set in fn_independent_pre");
