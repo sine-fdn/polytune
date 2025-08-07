@@ -1,0 +1,40 @@
+{
+  "participants": [
+    "http://localhost:8000/",
+    "http://localhost:8001/"
+  ],
+  "program": "const ROWS_0: usize = PARTY_0::ROWS;\nconst ROWS_1: usize = PARTY_1::ROWS;\nconst ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);\n\npub fn main(\n    measles_cases: [[u8; ID_LEN]; ROWS_0],\n    school_examinations: [[u8; ID_LEN]; ROWS_1],\n) -> [(bool, [u8; ID_LEN]); const { ROWS_0 + ROWS_1 - 1usize}] {\n    bitonic_join(measles_cases, school_examinations)\n}\n",
+  "leader": 0,
+  "party": 1,
+  "input": {
+    "ArrayRepeat": [
+      {
+        "ArrayRepeat": [
+          {
+            "NumUnsigned": [
+              1,
+              "U8"
+            ]
+          },
+          16
+        ]
+      },
+      1000
+    ]
+  },
+  "output": null,
+  "constants": {
+    "ROWS": {
+      "NumUnsigned": [
+        1000,
+        "Usize"
+      ]
+    },
+    "ID_LEN": {
+      "NumUnsigned": [
+        16,
+        "Usize"
+      ]
+    }
+  }
+}

@@ -1,0 +1,47 @@
+name: bench-large-join
+
+on:
+  - workflow_dispatch
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_LOG: info
+
+jobs:
+  bench_large_join:
+    runs-on: ubicloud-standard-30-ubuntu-2404
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: examples/api-integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
+        with:
+          toolchain: stable
+      - name: CPU information
+        run: lscpu
+      - name: Install Nix
+        uses: cachix/install-nix-action@fc6e360bedc9ee72d75e701397f0bb30dce77568
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad
+        with:
+          name: sine-fdn
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+      - name: Install and cache heaptrack master version
+        run: |
+          nix profile install github:sine-fdn/heaptrack#heaptrack-cli 
+      - uses: ubicloud/rust-cache@65b3ff06b9bcc69d88c25e212f1ae3d14a0953c3
+      - run: cargo test --profile debug-release -- --nocapture
+        env:
+          POLYTUNE_API_INTEGRATION_BIG: 1
+          POLYTUNE_API_INTEGRATION_HEAPTRACK: 1
+      - name: Upload heaptrack profile files
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heaptrack-profiles
+          path: examples/api-integration/heaptrack.*
