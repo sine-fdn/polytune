@@ -7,7 +7,7 @@ use aide::{
     swagger::Swagger,
     transform::TransformOperation,
 };
-use anyhow::{Context, Error, anyhow, bail};
+use anyhow::{Error, anyhow, bail};
 use axum::{
     Extension, Json,
     body::Bytes,
@@ -38,11 +38,11 @@ use tokio::{
         Mutex,
         mpsc::{Receiver, Sender, channel},
     },
-    time::{sleep, timeout},
+    time::sleep,
 };
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::{Span, error, info, warn};
+use tracing::{Span, error, info};
 use url::Url;
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
@@ -274,7 +274,12 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
             receivers.push(Mutex::new(r));
         }
 
+        let client = reqwest::ClientBuilder::new()
+            .tcp_user_timeout(Duration::from_secs(10 * 60))
+            .build()?;
+
         HttpChannel {
+            client,
             urls: participants.clone(),
             party: *party,
             recv: receivers,
@@ -416,6 +421,7 @@ async fn msg(State(state): State<MpcState>, Path(from): Path<u32>, body: Bytes) 
 }
 
 struct HttpChannel {
+    client: reqwest::Client,
     urls: Vec<Url>,
     party: usize,
     recv: Vec<Mutex<Receiver<Vec<u8>>>>,
@@ -431,23 +437,17 @@ impl Channel for HttpChannel {
         msg: Vec<u8>,
         phase: &str,
     ) -> Result<(), Self::SendError> {
-        let simulated_delay_in_ms = 300;
-        let client = reqwest::Client::new();
         let url = format!("{}msg/{}", self.urls[p], self.party);
         let mb = msg.len() as f64 / 1024.0 / 1024.0;
         info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
+        let mut retries = 0;
         loop {
-            sleep(Duration::from_millis(simulated_delay_in_ms)).await;
-            let req = client.post(&url).body(msg.clone()).send();
-            // TODO change timeout, this is much too short and bugged
-            let Ok(Ok(res)) = timeout(Duration::from_secs(1), req).await else {
-                warn!("  req timeout: party {}", p);
-                continue;
-            };
+            let res = self.client.post(&url).body(msg.clone()).send().await?;
             match res.status() {
                 StatusCode::OK => break Ok(()),
-                StatusCode::NOT_FOUND => {
-                    // TODO this could end in an infinite loop i think
+                // retry for 10 minutes
+                StatusCode::NOT_FOUND if retries < 10 * 60 => {
+                    retries += 1;
                     error!("Could not reach party {p} at {url}...");
                     sleep(Duration::from_millis(1000)).await;
                 }
@@ -461,9 +461,8 @@ impl Channel for HttpChannel {
 
     async fn recv_bytes_from(&self, p: usize, _phase: &str) -> Result<Vec<u8>, Self::RecvError> {
         let mut r = self.recv[p].lock().await;
-        timeout(Duration::from_secs(30 * 60), r.recv())
+        r.recv()
             .await
-            .context(format!("recv_bytes_from(p = {p})"))?
             .ok_or_else(|| anyhow!("Expected a message, but received `None`!"))
     }
 }

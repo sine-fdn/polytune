@@ -47,7 +47,7 @@ fn simulate() {
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
             println!("party0> {line}");
-            if line.contains("Sending [(1, 3)] to http://localhost:8002/output") {
+            if line.contains("Sending [(false, [0]), (false, [0]), (false, [0]), (true, [0]), (true, [1]), (true, [2])] to http://localhost:8002/output") {
                 return s.send(()).unwrap();
             }
         }

@@ -1,28 +1,13 @@
 {
   "participants": ["http://localhost:8000", "http://localhost:8001"],
-  "program": "const ROWS_0: usize = PARTY_0::ROWS;\nconst ROWS_1: usize = PARTY_1::ROWS;\nconst ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);\n\nenum ScreeningStatus {\n    Recent,\n    OutOfDate,\n    Missing,\n}\n\npub fn main(\n    screenings: [([u8; ID_LEN], ScreeningStatus); ROWS_0],\n    school_examinations: [([u8; ID_LEN], u8); ROWS_1],\n) -> [(u16, u16); 1] {\n    let mut missing_screenings_with_special_ed_needs = 0u16;\n    let mut total = ROWS_1 as u16;\n    for joined in join(screenings, school_examinations) {\n        let ((_, screening), (_, special_ed_needs)) = joined;\n        if special_ed_needs <= 2u8 {\n            match screening {\n                ScreeningStatus::Missing => {\n                    missing_screenings_with_special_ed_needs =\n                        missing_screenings_with_special_ed_needs + 1u16;\n                }\n                _ => {}\n            }\n        }\n    }\n    [(missing_screenings_with_special_ed_needs, total)]\n}\n",
+  "program": "const ROWS_0: usize = PARTY_0::ROWS;\nconst ROWS_1: usize = PARTY_1::ROWS;\nconst ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);\n\npub fn main(\n    measles_cases: [[u8; ID_LEN]; ROWS_0],\n    school_examinations: [[u8; ID_LEN]; ROWS_1],\n) -> [(bool, [u8; ID_LEN]); const { ROWS_0 + ROWS_1 - 1usize}] {\n    bitonic_join(measles_cases, school_examinations)\n}\n",
   "leader": 0,
   "party": 1,
   "input": {
     "Array": [
-      {
-        "Tuple": [
-          { "Array": [{ "NumUnsigned": [0, "U8"] }] },
-          { "NumUnsigned": [1, "U8"] }
-        ]
-      },
-      {
-        "Tuple": [
-          { "Array": [{ "NumUnsigned": [1, "U8"] }] },
-          { "NumUnsigned": [3, "U8"] }
-        ]
-      },
-      {
-        "Tuple": [
-          { "Array": [{ "NumUnsigned": [2, "U8"] }] },
-          { "NumUnsigned": [5, "U8"] }
-        ]
-      }
+        { "Array": [{ "NumUnsigned": [0, "U8"] }] },
+        { "Array": [{ "NumUnsigned": [1, "U8"] }] },
+        { "Array": [{ "NumUnsigned": [2, "U8"] }] }
     ]
   },
   "constants": {

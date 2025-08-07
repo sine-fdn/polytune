@@ -4,9 +4,7 @@ name: Pull Request Checks
 # the merge commit before it is added to main. This ensures
 # that the pipeline won't break after the merge.
 on:
-  pull_request:
-    branches:
-      - "main"
+  - pull_request
 
 env:
   CARGO_TERM_COLOR: always
