@@ -20,6 +20,7 @@ use polytune::{
     garble_lang::{compile_with_constants, literal::Literal},
     mpc,
 };
+use polytune_test_utils::peak_alloc::{PeakAllocator, create_instrumented_runtime, scale_memory};
 use reqwest::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,7 @@ use std::{
     result::Result,
     str::FromStr,
     sync::Arc,
+    thread,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -44,6 +46,9 @@ use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::{Span, error, info};
 use url::Url;
+
+#[global_allocator]
+static ALLOCATOR: PeakAllocator = PeakAllocator::new();
 
 /// A CLI for Multi-Party Computation using the Parlay engine.
 #[derive(Debug, Parser)]
@@ -104,8 +109,25 @@ struct MpcComms {
 
 type MpcState = Arc<Mutex<MpcComms>>;
 
-#[tokio::main]
-async fn main() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
+    // because we actually run this example as two processes, we can just use 0 for both
+    let rt = create_instrumented_runtime(0);
+    thread::spawn(|| {
+        loop {
+            let memory_peak = ALLOCATOR.peak(0) as f64;
+            let (denom, unit) = scale_memory(memory_peak);
+            info!(
+                "Current peak memory consumption: {} {}",
+                memory_peak / denom,
+                unit
+            );
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+    rt.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
     let Cli { addr, port } = Cli::parse();
 
@@ -238,7 +260,8 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
             );
         }
     }
-
+    let compile_now = Instant::now();
+    ALLOCATOR.enable();
     // After receiving the constants, we can finally compile the circuit:
     let prg = {
         let locked = state.lock().await;
@@ -251,11 +274,14 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
         compile_with_constants(program, locked.consts.clone())
             .map_err(|e| anyhow!(e.prettify(program)))?
     };
-
+    let memory_peak = ALLOCATOR.peak(0) as f64;
+    let (denom, unit) = scale_memory(memory_peak);
     info!(
-        "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates)",
+        "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates). Compilation took {:?}. Peak memory: {} {unit}",
         prg.circuit.gates.len() as f64 / 1000.0 / 1000.0,
-        prg.circuit.and_gates() as f64 / 1000.0 / 1000.0
+        prg.circuit.and_gates() as f64 / 1000.0 / 1000.0,
+        compile_now.elapsed(),
+        memory_peak / denom
     );
     let input = prg.literal_arg(*party, input.clone())?.as_bits();
 
@@ -292,11 +318,14 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();
     let elapsed = now.elapsed();
+    let memory_peak = ALLOCATOR.peak(0) as f64;
+    let (denom, unit) = scale_memory(memory_peak);
     info!(
-        "MPC computation for party {party} took {} hour(s), {} minute(s), {} second(s)",
+        "MPC computation for party {party} took {} hour(s), {} minute(s), {} second(s). Peak memory: {} {unit}",
         elapsed.as_secs() / 60 / 60,
         (elapsed.as_secs() % (60 * 60)) / 60,
         elapsed.as_secs() % 60,
+        memory_peak / denom
     );
     if output.is_empty() {
         Ok(None)
@@ -464,5 +493,70 @@ impl Channel for HttpChannel {
         r.recv()
             .await
             .ok_or_else(|| anyhow!("Expected a message, but received `None`!"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+
+    use super::*;
+    use garble_lang::token::UnsignedNumType;
+
+    /// Create the large policies `policy0-big.json` and `policy1-big.json`.
+    ///
+    /// If you want to change these policies, you can adapt this test case and
+    /// execute it with
+    /// `cargo t --bin polytune-api-integration -- create_big_policy --include-ignored`
+    #[ignore]
+    #[test]
+    fn create_big_policy() {
+        let size1 = 1000;
+        let size2 = 1000;
+        let zero_id =
+            Literal::ArrayRepeat(Box::new(Literal::NumUnsigned(0, UnsignedNumType::U8)), 16);
+        let one_id =
+            Literal::ArrayRepeat(Box::new(Literal::NumUnsigned(1, UnsignedNumType::U8)), 16);
+        let dataset1 = Literal::ArrayRepeat(Box::new(zero_id.clone()), size1);
+        let dataset2 = Literal::ArrayRepeat(Box::new(one_id.clone()), size2);
+        let consts = |rows| {
+            HashMap::from_iter([
+                (
+                    "ROWS".into(),
+                    Literal::NumUnsigned(rows as u64, UnsignedNumType::Usize),
+                ),
+                (
+                    "ID_LEN".into(),
+                    Literal::NumUnsigned(16, UnsignedNumType::Usize),
+                ),
+            ])
+        };
+        let consts1 = consts(size1);
+        let consts2 = consts(size2);
+        let participants = vec![
+            "http://localhost:8000".parse().unwrap(),
+            "http://localhost:8001".parse().unwrap(),
+        ];
+        let program = include_str!("../.example.garble.rs").to_string();
+        let pol0 = Policy {
+            participants: participants.clone(),
+            program: program.clone(),
+            leader: 0,
+            party: 0,
+            input: dataset1,
+            output: None,
+            constants: consts1,
+        };
+        let pol1 = Policy {
+            participants,
+            program,
+            leader: 0,
+            party: 1,
+            input: dataset2,
+            output: None,
+            constants: consts2,
+        };
+        serde_json::to_writer_pretty(File::create("policy0-big.json").unwrap(), &pol0).unwrap();
+        serde_json::to_writer_pretty(File::create("policy1-big.json").unwrap(), &pol1).unwrap();
     }
 }
