@@ -9,7 +9,7 @@ The example uses two parties, which communicate over MPC without the need for a 
 The easiest way to run the example is as a test that orchestrates the two parties:
 
 ```
-cargo test --release -- --nocapture
+cargo t --profile debug-release
 ```
 
 ## How to Deploy the Engine
