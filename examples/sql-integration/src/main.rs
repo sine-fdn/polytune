@@ -10,8 +10,9 @@ use clap::Parser;
 use polytune::{
     channel::Channel,
     garble_lang::{
+        CircuitKind, CompileOptions,
         ast::{Type, Variant},
-        compile_with_constants,
+        compile_with_options,
         literal::{Literal, VariantLiteral},
         token::{SignedNumType, UnsignedNumType},
     },
@@ -365,8 +366,15 @@ async fn execute_mpc(
                 info!("{p}::{k}: {v:?}");
             }
         }
-        compile_with_constants(&code, locked.consts.clone())
-            .map_err(|e| anyhow!(e.prettify(&code)))?
+        compile_with_options(
+            &code,
+            CompileOptions {
+                circuit_kind: CircuitKind::Register,
+                consts: locked.consts.clone(),
+                ..Default::default()
+            },
+        )
+        .map_err(|e| anyhow!(e.prettify(&code)))?
     };
 
     // Now we need to load our input rows from the DB and convert it to a Garble array:
@@ -379,10 +387,11 @@ async fn execute_mpc(
     let Type::Tuple(field_types) = row_type.as_ref() else {
         bail!("Expected an array of tuples as input type for party {party}, but found {input_ty}");
     };
+    let circuit = prg.circuit.unwrap_register_ref();
     info!(
-        "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates)",
-        prg.circuit.gates.len() as f64 / 1000.0 / 1000.0,
-        prg.circuit.and_gates() as f64 / 1000.0 / 1000.0
+        "Trying to execute circuit with {:.2}M instructions  ({:.2}M AND ops)",
+        circuit.insts.len() as f64 / 1000.0 / 1000.0,
+        circuit.and_ops as f64 / 1000.0 / 1000.0
     );
     let mut rows_as_literals = vec![];
     for (r, row) in rows.iter().enumerate() {
@@ -577,7 +586,7 @@ async fn execute_mpc(
     };
 
     // We run the computation using MPC, which might take some time...
-    let output = mpc(&channel, &prg.circuit, &input, 0, *party, &p_out).await?;
+    let output = mpc(&channel, &circuit, &input, 0, *party, &p_out).await?;
 
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();

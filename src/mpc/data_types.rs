@@ -17,7 +17,7 @@ impl BitAnd<Delta> for bool {
 }
 
 /// A message authentication code held by a party together with an authenticated bit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Mac(pub(crate) u128);
 
 impl BitXor<Delta> for Mac {
@@ -37,7 +37,7 @@ impl BitXor for Mac {
 }
 
 /// A key used to authenticate (together with the [Delta] global key) a bit for the other party.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Key(pub(crate) u128);
 
 impl BitXor<Delta> for Key {
@@ -61,7 +61,7 @@ impl BitXor for Key {
 /// Party A holds (`r`, [Mac]_r, [Key]_s) and party B holds (`s`, [Mac]_s, [Key]_r), so that each
 /// party holds bit + MAC, with the other holding key + global key for the corresponding half of the
 /// bit.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Share(pub(crate) bool, pub(crate) Auth);
 
 impl BitXor for &Share {
@@ -88,7 +88,7 @@ impl Share {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Auth(pub(crate) Vec<(Mac, Key)>);
 
 impl BitXor for &Auth {

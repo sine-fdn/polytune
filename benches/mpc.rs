@@ -4,7 +4,8 @@ use criterion::{
     BenchmarkGroup, BenchmarkId, Criterion,
     measurement::{Measurement, WallTime},
 };
-use garble_lang::circuit::{Circuit, Gate};
+use garble_lang::circuit::Gate;
+use garble_lang::register_circuit::Circuit;
 use polytune::{channel, mpc};
 use polytune_test_utils::peak_alloc::create_instrumented_runtime;
 use tokio::{runtime::Runtime, sync::oneshot};
@@ -220,11 +221,12 @@ fn and_chain(gates: usize) -> Circuit {
     let gates = (2..=out_idx).map(|i| Gate::And(i - 2, i - 1)).collect();
     let output_gates = vec![out_idx];
 
-    Circuit {
+    let ssa_circ = garble_lang::circuit::Circuit {
         input_gates: vec![inputs; num_parties],
         gates,
         output_gates,
-    }
+    };
+    ssa_circ.into()
 }
 
 /// Creates a circuit with inputs many inputs, where for each two
@@ -243,9 +245,10 @@ fn large_input_circ(inputs: usize) -> Circuit {
         .collect();
     let output_gates = (inputs..inputs + inputs / 2).collect();
 
-    Circuit {
+    let ssa_circ = garble_lang::circuit::Circuit {
         input_gates,
         gates,
         output_gates,
-    }
+    };
+    ssa_circ.into()
 }

@@ -6,7 +6,11 @@ use axum::{
     routing::post,
 };
 use clap::Parser;
-use polytune::{channel::Channel, garble_lang::compile, mpc};
+use polytune::{
+    channel::Channel,
+    garble_lang::{CircuitKind, CompileOptions, compile_with_options},
+    mpc,
+};
 use reqwest::StatusCode;
 use std::{net::SocketAddr, path::PathBuf, result::Result, time::Duration};
 use tokio::{
@@ -47,11 +51,26 @@ async fn main() -> Result<(), Error> {
         input,
     } = Cli::parse();
     let code = fs::read_to_string(&program).await?;
-    let prg = compile(&code).map_err(|e| anyhow!(e.prettify(&code)))?;
+    let prg = compile_with_options(
+        &code,
+        CompileOptions {
+            circuit_kind: CircuitKind::Register,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| anyhow!(e.prettify(&code)))?;
     let input = prg.parse_arg(party, &input)?.as_bits();
     let p_out: Vec<_> = (0..urls.len()).collect();
     let channel = HttpChannel::new(urls, party).await?;
-    let output = mpc(&channel, &prg.circuit, &input, 0, party, &p_out).await?;
+    let output = mpc(
+        &channel,
+        prg.circuit.unwrap_register_ref(),
+        &input,
+        0,
+        party,
+        &p_out,
+    )
+    .await?;
     if !output.is_empty() {
         println!("\nThe result is {}", prg.parse_output(&output)?);
     }
