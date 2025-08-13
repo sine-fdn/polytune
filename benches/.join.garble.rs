@@ -13,7 +13,7 @@ pub fn main(
 ) -> [(u16, u16); 1] {
     let mut missing_screenings_with_special_ed_needs = 0u16;
     let mut total = ROWS_1 as u16;
-    for joined in join(screenings, school_examinations) {
+    for joined in join_iter(screenings, school_examinations) {
         let ((_, screening), (_, special_ed_needs)) = joined;
         if special_ed_needs <= 2u8 {
             match screening {
