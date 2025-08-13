@@ -300,9 +300,15 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
             receivers.push(Mutex::new(r));
         }
 
-        let client = reqwest::ClientBuilder::new()
-            .tcp_user_timeout(Duration::from_secs(10 * 60))
-            .build()?;
+        #[allow(unused_mut)]
+        let mut builder = reqwest::ClientBuilder::new();
+
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+        {
+            builder = builder.tcp_user_timeout(Duration::from_secs(10 * 60));
+        }
+
+        let client = builder.build()?;
 
         HttpChannel {
             client,
