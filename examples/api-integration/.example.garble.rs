@@ -6,5 +6,5 @@ pub fn main(
     measles_cases: [[u8; ID_LEN]; ROWS_0],
     school_examinations: [[u8; ID_LEN]; ROWS_1],
 ) -> [(bool, [u8; ID_LEN]); const { ROWS_0 + ROWS_1 - 1usize}] {
-    bitonic_join(measles_cases, school_examinations)
+    join(measles_cases, school_examinations)
 }

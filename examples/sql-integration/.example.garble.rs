@@ -7,7 +7,7 @@ pub fn main(
     disability: [([u8; ID_LEN], u8); ROWS_1],
 ) -> [u16; 10] {
     let mut result: [u16; 10] = [0u16; 10];
-    for joined in join(location, disability) {
+    for joined in join_iter(location, disability) {
         let ((_, loc), (_, care_level)) = joined;
         if care_level >= 4 {
             result[loc as usize] += 1u16;
