@@ -5,6 +5,7 @@ use futures::future::try_join_all;
 use rand::{Rng, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tracing::{Level, debug, instrument};
 
 use crate::{
     block::Block,
@@ -225,11 +226,13 @@ pub(crate) async fn broadcast_first_scatter_second<
 /// to the randomness generation, and all contributions are combined securely to generate
 /// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
 /// cryptographically secure random number generator.
+#[instrument(level=Level::DEBUG, skip_all)]
 pub(crate) async fn shared_rng(
     channel: &impl Channel,
     i: usize,
     n: usize,
 ) -> Result<ChaCha20Rng, Error> {
+    debug!(party_id = i, num_parties = n, "Multi-party RNG generation");
     // Step 1 Generate a random 256-bit seed for multi-party cointossing and commit to it.
     let buf = random::<[u8; 32]>();
     let mut buf_id = [0u8; 34]; // with 16 bits for the id
@@ -285,11 +288,13 @@ pub(crate) async fn shared_rng(
 ///
 /// This function generates a shared random number generator (RNG) between every two parties using
 /// two-party coin tossing for the two-party KOS OT protocol.
+#[instrument(level=Level::DEBUG, skip_all)]
 pub(crate) async fn shared_rng_pairwise(
     channel: &impl Channel,
     i: usize,
     n: usize,
 ) -> Result<Vec<Vec<Option<ChaCha20Rng>>>, Error> {
+    debug!(party_id = i, num_parties = n, "Pairwise RNG generation");
     // Step 1 b) Generate a random 256-bit seed for every other party for the pairwise
     // cointossing and commit to it.
     let bufvec: Vec<Vec<u8>> = (0..n).map(|_| random::<[u8; 32]>().to_vec()).collect();
@@ -345,6 +350,9 @@ pub(crate) async fn shared_rng_pairwise(
 /// each pair of parties and then checking the validity of the MACs and keys by checking the XOR
 /// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
 /// where RHO is the statistical security parameter.
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_auth_bits = l,
+))]
 async fn fabitn(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -353,11 +361,13 @@ async fn fabitn(
     shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
     multi_shared_rand: &mut ChaCha20Rng,
 ) -> Result<Vec<Share>, Error> {
+    debug!("PI_aBit^n protocol of WRK17b");
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
 
     let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
+    debug!("Generated local bitstring x of length {}", lprime);
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
     let deltas = vec![Block::from(delta.0.to_be_bytes()); lprime];
@@ -387,6 +397,7 @@ async fn fabitn(
         // the channel implementation can't distinguish between the messages intended for the ot
         // sender and for the ot receiver. We would likely need a notion of sub-channels over
         // an existing channel for this.
+        debug!("Starting pairwise OT with party {}", k);
         if let Some(shared) = &mut rng {
             if i < k {
                 let keys = kos_ot_sender(channel, &deltas, k, shared).await?;
@@ -489,6 +500,9 @@ async fn fabitn(
 ///    - They then verify these commitments by performing decommitments and checking the validity of the
 ///      MACs against the commitments.
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_auth_shares = l,
+))]
 pub(crate) async fn fashare(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -500,6 +514,7 @@ pub(crate) async fn fashare(
     // Step 1) Pick random bit-string x (input).
 
     // Step 2) Run Pi_aBit^n to compute shares.
+    debug!("PI_aShare protocol of WRK17b");
     let mut xishares = fabitn(
         (channel, delta),
         i,
@@ -595,6 +610,7 @@ pub(crate) async fn fashare(
 
     // Step 4) Return first l objects.
     xishares.truncate(l);
+    debug!("Returning first {} authenticated shares", l);
     Ok(xishares)
 }
 
@@ -604,6 +620,7 @@ pub(crate) async fn fashare(
 /// This protocol computes the half-authenticated AND of two bit strings.
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
+#[instrument(level=Level::DEBUG, skip_all)]
 async fn fhaand(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -612,6 +629,8 @@ async fn fhaand(
     xshares: &[Share],
     yi: Vec<bool>,
 ) -> Result<Vec<bool>, Error> {
+    debug!("PI_HaAND protocol of WRK17b");
+
     // Step 1) Obtain x shares (input).
     if xshares.len() != l {
         return Err(Error::InvalidLength);
@@ -702,6 +721,9 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
 /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
 /// the XOR of the output values z.
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_leaky_auth_ands = l,
+))]
 async fn flaand(
     (channel, delta): (&impl Channel, Delta),
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
@@ -709,6 +731,7 @@ async fn flaand(
     n: usize,
     l: usize,
 ) -> Result<Vec<Share>, Error> {
+    debug!("PI_LaAND protocol of WRK17b");
     // Triple computation.
     // Step 1) Triple computation [random authenticated shares as input parameters xshares, yshares, rshares].
     if xshares.len() != l || yshares.len() != l || rshares.len() != l {
@@ -825,6 +848,9 @@ type Bucket<'a> = Vec<(&'a Share, &'a Share, &'a Share)>;
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_auth_ands = l,
+))]
 async fn faand(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -833,6 +859,8 @@ async fn faand(
     shared_rand: &mut ChaCha20Rng,
     xyr_shares: &[Share],
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
+    debug!("PI_aAND protocol of WRK17b");
+
     let b = bucket_size(l);
     let lprime = l * b;
     if xyr_shares.len() != 3 * lprime {
@@ -861,6 +889,11 @@ async fn faand(
                 .collect()
         })
         .collect();
+    debug!(
+        "Distributed shares into {} buckets of size {}",
+        buckets.len(),
+        b
+    );
 
     // Step 3) For each bucket, combine b leaky ANDs into a single non-leaky AND.
     let d_values = check_dvalue((channel, delta), i, n, &buckets).await?;
@@ -878,6 +911,9 @@ async fn faand(
 }
 
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_auth_ands = l,
+))]
 pub(crate) async fn beaver_aand(
     (channel, delta): (&impl Channel, Delta),
     alpha_beta_shares: &[(Share, Share)],
@@ -887,12 +923,17 @@ pub(crate) async fn beaver_aand(
     shared_rand: &mut ChaCha20Rng,
     abc_shares: &[Share],
 ) -> Result<Vec<Share>, Error> {
+    debug!(
+        "Protocol for transforming precomputed AND triples using Beaver's method for {} triples",
+        l
+    );
     if alpha_beta_shares.len() != l {
         //abc_shares length is checked in function faand
         return Err(Error::InvalidLength);
     }
 
     let abc_triples = faand((channel, delta), i, n, l, shared_rand, abc_shares).await?;
+    debug!("Received {} AND triples from faand", abc_triples.len());
     let len = abc_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.
@@ -965,6 +1006,7 @@ pub(crate) async fn beaver_aand(
 }
 
 /// Check and return d-values for a vector of shares.
+#[instrument(level=Level::DEBUG, skip_all)]
 async fn check_dvalue(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
