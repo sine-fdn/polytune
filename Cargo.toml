@@ -57,7 +57,7 @@ rand_core_0_6 = { package = "rand_core", version = "0.6" }
 seq-macro = "0.3.6"
 serde = { version = "1.0.195", features = ["derive"] }
 subtle = "2.6.1"
-thiserror = "2.0.12"
+thiserror = "2.0.15"
 tokio = { version = "1.47.1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1.41"
 wide = { version = "0.7.33", features = ["serde"] }
