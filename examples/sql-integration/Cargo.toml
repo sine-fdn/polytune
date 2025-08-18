@@ -5,7 +5,7 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
-anyhow = "1.0.79"
+anyhow = "1.0.99"
 axum = "0.8.4"
 blake3 = "1.5.1"
 clap = { version = "4.5.43", features = ["derive"] }
