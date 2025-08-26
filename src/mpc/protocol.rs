@@ -38,7 +38,7 @@ use futures::future::{try_join, try_join_all};
 use garble_lang::circuit::{Circuit, CircuitError, Wire};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
-use tracing::debug;
+use tracing::{Level, debug, instrument};
 
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
@@ -219,6 +219,9 @@ pub(crate) enum Preprocessor {
 /// 3. Input processing: handles sharing and masking of private inputs
 /// 4. Circuit evaluation: performed by the evaluator party only
 /// 5. Output determination: reveals the computation result to designated output parties
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    party_id = p_own
+))]
 pub async fn mpc(
     channel: &impl Channel,
     circuit: &Circuit,
@@ -281,6 +284,11 @@ impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
 }
 
 pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<Vec<bool>, Error> {
+    debug!(
+        "MPC protocol execution with {} parties, of which output parties have indices {:?} and the circuit has {} AND gates",
+        ctx.p_max, ctx.p_out, ctx.num_and_gates
+    );
+
     validate(ctx)?;
 
     // fn-independent preprocessing:
@@ -312,6 +320,7 @@ pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<
     Ok(outputs)
 }
 
+#[instrument(level=Level::DEBUG, skip(ctx))]
 fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
     ctx.circ.validate()?;
     let Some(expected_inputs) = ctx.circ.input_gates.get(ctx.p_own) else {
@@ -335,6 +344,7 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
     Ok(())
 }
 
+#[instrument(level=Level::DEBUG, skip(ctx))]
 async fn fn_independent_pre(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
 ) -> Result<
@@ -352,6 +362,7 @@ async fn fn_independent_pre(
     let mut shared_two_by_two = None;
     let mut multi_shared_rand = None;
     if let Preprocessor::TrustedDealer(p_fpre) = ctx.p_fpre {
+        debug!("Using trusted dealer for preprocessing to receive delta and random shares");
         send_to::<()>(ctx.channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(ctx.channel, p_fpre, "delta")
             .await?
@@ -361,6 +372,7 @@ async fn fn_independent_pre(
         send_to(ctx.channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
         random_shares = recv_vec_from(ctx.channel, p_fpre, "random shares", secret_bits).await?;
     } else {
+        debug!("Using untrusted preprocessing, generating delta and random shares");
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(ctx.channel, ctx.p_own, ctx.p_max).await?);
         multi_shared_rand = Some(shared_rng(ctx.channel, ctx.p_own, ctx.p_max).await?);
@@ -378,6 +390,9 @@ async fn fn_independent_pre(
     Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    random_shares_len = random_shares.len(),
+))]
 // TODO simplify types
 #[allow(clippy::type_complexity)]
 fn init_labels_and_shares(
@@ -423,6 +438,9 @@ fn init_labels_and_shares(
     Ok((shares, labels, and_shares))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_and_shares = and_shares.len(),
+))]
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -490,6 +508,12 @@ async fn gen_auth_bits(
     Ok(auth_bits)
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_shares = shares.len(),
+    num_labels = labels.len(),
+    num_auth_ands = auth_bits.len(),
+    num_and_gates = ctx.num_and_gates
+))]
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -510,6 +534,7 @@ async fn garble(
     let mut table_shares = vec![];
     let mut garbled_gates = vec![];
     if is_contrib {
+        debug!("Contributing party to garbled circuit");
         let mut preprocessed_gates = vec![None; num_gates];
         for (w, gate) in circ.wires().enumerate() {
             if let Wire::And(x, y) = gate {
@@ -558,6 +583,7 @@ async fn garble(
 
         send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
     } else {
+        debug!("Evaluator party, receiving preprocessed gates");
         garbled_gates = try_join_all((0..p_max).map(async |p| {
             if p != p_eval {
                 recv_vec_from(channel, p, "preprocessed gates", num_gates).await
@@ -593,6 +619,9 @@ async fn garble(
     Ok((table_shares, garbled_gates))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_inputs = ctx.num_input_gates,
+))]
 async fn input_processing(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -669,6 +698,7 @@ async fn input_processing(
     }
     let input_labels = Mutex::new(vec![None; num_gates]);
     if is_contrib {
+        debug!("Contributing party, sending masked inputs and labels");
         let labels_of_other_inputs: Vec<Option<Label>> = masked_inputs
             .iter()
             .enumerate()
@@ -676,6 +706,7 @@ async fn input_processing(
             .collect();
         send_to(channel, p_eval, "labels", &labels_of_other_inputs).await?;
     } else {
+        debug!("Evaluator party, receiving masked inputs and labels");
         try_join_all((0..p_max).filter(|p| *p != p_own).map(async |p| {
             let labels_of_own_inputs =
                 recv_vec_from::<Option<Label>>(channel, p, "labels", num_gates).await?;
@@ -694,6 +725,12 @@ async fn input_processing(
     Ok((masked_inputs, input_labels))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_table_shares = table_shares.len(),
+    num_garbled_gates = garbled_gates.len(),
+    num_masked_inputs = masked_inputs.len(),
+    num_input_labels = input_labels.len(),
+))]
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
@@ -712,6 +749,7 @@ fn evaluate(
     let mut values: Vec<bool> = vec![];
     let mut labels_eval: Vec<Vec<Label>> = vec![];
     if !is_contrib {
+        debug!("Evaluator party, performing circuit evaluation");
         for (w, gate) in circ.wires().enumerate() {
             let (input, label) = match gate {
                 Wire::Input(_) => {
@@ -794,6 +832,9 @@ fn evaluate(
     Ok((values, labels_eval))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_output_wires = ctx.circ.output_gates.len(),
+))]
 async fn output(
     ctx: &Context<'_, '_, '_, '_, impl Channel>,
     delta: Delta,

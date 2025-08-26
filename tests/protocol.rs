@@ -3,6 +3,7 @@ use garble_lang::{
     compile,
 };
 use polytune::{Error, channel, mpc};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 fn simulate_mpc(
@@ -10,6 +11,10 @@ fn simulate_mpc(
     inputs: &[&[bool]],
     output_parties: &[usize],
 ) -> Result<Vec<bool>, Error> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .init();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
