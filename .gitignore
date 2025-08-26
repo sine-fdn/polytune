@@ -1,6 +1,7 @@
 /target
 
 heaptrack*.zst
+.tmp*
 *.tmp
 # samply output
 *.json.gz
