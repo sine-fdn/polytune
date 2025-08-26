@@ -32,13 +32,18 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Seek};
+use std::iter;
 use std::{cmp, sync::Mutex};
 
+use bincode::Options;
 use futures::future::{try_join, try_join_all};
 use garble_lang::register_circuit::CircuitError;
 use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
+use tempfile::{TempDir, tempdir_in};
 use tracing::debug;
 
 use crate::{
@@ -290,10 +295,6 @@ impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
             num_inputs,
         }
     }
-
-    fn num_insts(&self) -> usize {
-        self.circ.insts.len()
-    }
 }
 
 pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<Vec<bool>, Error> {
@@ -517,8 +518,8 @@ async fn garble(
     random_shares: &[Share],
 ) -> Result<
     (
-        Vec<Option<[Share; 4]>>,
-        Vec<Vec<Option<GarbledGate>>>,
+        Vec<[Share; 4]>,
+        (Option<TempDir>, Vec<File>),
         Vec<Share>,
         Vec<Label>,
         Vec<Label>,
@@ -533,17 +534,18 @@ async fn garble(
         p_max,
         ..
     } = ctx;
-    let num_insts = ctx.num_insts();
-
     let mut random_shares = random_shares.iter();
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
     let mut labels = vec![Label(0); circ.max_reg_count];
     let mut input_labels = vec![];
     let mut auth_bits = auth_bits.into_iter();
     let mut table_shares = vec![];
-    let mut garbled_gates = vec![];
+    let mut tmp_dir = None;
+    let mut files = vec![];
+    let max_garbled_gates_per_chunk = std::cmp::max(1000, circ.and_ops / 10);
+
     if is_contrib {
-        let mut preprocessed_gates = vec![None; num_insts];
+        let mut preprocessed_gates = vec![];
         for (w, inst) in circ.insts.iter().enumerate() {
             match inst.op {
                 Op::And(And(x, y)) => {
@@ -587,10 +589,13 @@ async fn garble(
                     let garbled2 = encrypt(&k2, (row2.bit(), row2.macs(), row2_label))?;
                     let garbled3 = encrypt(&k3, (row3.bit(), row3.macs(), row3_label))?;
 
-                    preprocessed_gates[w] =
-                        Some(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
+                    preprocessed_gates.push(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
                     shares[inst.out] = rand_share;
                     labels[inst.out] = label_gamma_0;
+                    if preprocessed_gates.len() >= max_garbled_gates_per_chunk {
+                        send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+                        preprocessed_gates.clear();
+                    }
                 }
                 Op::Xor(Xor(x, y)) => {
                     shares[inst.out] = &shares[x] ^ &shares[y];
@@ -608,18 +613,46 @@ async fn garble(
                 }
             }
         }
-
-        send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+        if preprocessed_gates.len() != 0 {
+            send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+        }
     } else {
-        garbled_gates = try_join_all((0..p_max).map(async |p| {
+        tmp_dir = Some(tempdir_in("./").unwrap());
+        files = try_join_all((0..p_max).map(async |p| {
+            let f = File::options()
+                .create(true)
+                .truncate(true)
+                .read(true)
+                .write(true)
+                .open(tmp_dir.as_ref().unwrap().path().join(format!("garble-{p}")))
+                .unwrap();
             if p != p_eval {
-                recv_vec_from(channel, p, "preprocessed gates", num_insts).await
+                let mut f = BufWriter::new(f);
+                let full_chunks = circ.and_ops / max_garbled_gates_per_chunk;
+                let last_chunk = circ.and_ops % max_garbled_gates_per_chunk;
+                let last_chunk = if last_chunk != 0 {
+                    Some(last_chunk)
+                } else {
+                    None
+                };
+                let chunk_sizes =
+                    iter::repeat_n(max_garbled_gates_per_chunk, full_chunks).chain(last_chunk);
+                for chunk_size in chunk_sizes {
+                    let gates =
+                        recv_vec_from::<GarbledGate>(channel, p, "preprocessed gates", chunk_size)
+                            .await?;
+                    bincode::options()
+                        .allow_trailing_bytes()
+                        .serialize_into(&mut f, &gates)
+                        .unwrap();
+                }
+                Ok::<_, Error>(f.into_inner().unwrap())
             } else {
-                Ok(vec![])
+                Ok(f)
             }
         }))
         .await?;
-        table_shares = vec![None; num_insts];
+        table_shares = vec![];
         for (w, inst) in circ.insts.iter().enumerate() {
             match inst.op {
                 Op::And(And(x, y)) => {
@@ -641,7 +674,7 @@ async fn garble(
                     let row1 = Share(s ^ s_x, mac_s_key_r_1.clone());
                     let row2 = Share(s ^ s_y, &mac_s_key_r_0 ^ &mac_s_y_key_r_y);
                     let row3 = Share(s ^ s_x ^ s_y ^ true, &mac_s_key_r_1 ^ &mac_s_y_key_r_y);
-                    table_shares[w] = Some([row0, row1, row2, row3]);
+                    table_shares.push([row0, row1, row2, row3]);
                     shares[inst.out] = rand_share;
                 }
                 Op::Xor(Xor(x, y)) => {
@@ -656,7 +689,7 @@ async fn garble(
             }
         }
     }
-    Ok((table_shares, garbled_gates, shares, labels, input_labels))
+    Ok((table_shares, (tmp_dir, files), shares, labels, input_labels))
 }
 
 async fn input_processing(
@@ -769,8 +802,8 @@ async fn input_processing(
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
-    table_shares: Vec<Option<[Share; 4]>>,
-    garbled_gates: Vec<Vec<Option<GarbledGate>>>,
+    table_shares: Vec<[Share; 4]>,
+    (_tmp_dir, garble_files): (Option<TempDir>, Vec<File>),
     masked_inputs: Vec<Option<bool>>,
     input_labels: Vec<Option<Vec<Label>>>,
 ) -> Result<(Vec<bool>, Vec<Vec<Label>>), Error> {
@@ -784,6 +817,48 @@ fn evaluate(
     } = ctx;
     let mut values: Vec<bool> = vec![false; circ.max_reg_count];
     let mut labels_eval: Vec<Vec<Label>> = vec![vec![]; circ.max_reg_count];
+    struct GarbleGateIter {
+        f: BufReader<File>,
+        chunk_iter: std::vec::IntoIter<GarbledGate>,
+    }
+    impl Iterator for GarbleGateIter {
+        type Item = GarbledGate;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(gate) = self.chunk_iter.next() {
+                return Some(gate);
+            }
+            let opts = bincode::options().allow_trailing_bytes();
+            match opts.deserialize_from::<_, Vec<GarbledGate>>(&mut self.f) {
+                Ok(chunk) => {
+                    self.chunk_iter = chunk.into_iter();
+                    return self.next();
+                }
+                Err(err) => {
+                    match &*err {
+                        bincode::ErrorKind::Io(io) => match io.kind() {
+                            std::io::ErrorKind::UnexpectedEof => return None,
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                    panic!("{err:?}")
+                }
+            }
+        }
+    }
+    let mut garbled_gates: Vec<_> = garble_files
+        .into_iter()
+        .map(|mut file| {
+            file.rewind().unwrap();
+            GarbleGateIter {
+                f: BufReader::new(file),
+                chunk_iter: Default::default(),
+            }
+        })
+        .collect();
+
+    let mut table_shares = table_shares.into_iter();
     if !is_contrib {
         for (w, inst) in circ.insts.iter().enumerate() {
             let (value, label) = match inst.op {
@@ -818,7 +893,7 @@ fn evaluate(
                     let input_y = values[y];
                     let label_y = &labels_eval[y];
                     let i = 2 * (input_x as usize) + (input_y as usize);
-                    let Some(table_shares) = &table_shares[w] else {
+                    let Some(table_shares) = &table_shares.next() else {
                         return Err(MpcError::MissingTableShareForInst(w).into());
                     };
 
@@ -832,7 +907,7 @@ fn evaluate(
                         if p == p_own {
                             continue;
                         }
-                        let Some(Some(GarbledGate(garbled_gate))) = &garbled_gates[p].get(w) else {
+                        let Some(GarbledGate(garbled_gate)) = &garbled_gates[p].next() else {
                             return Err(MpcError::MissingGarbledGate(w).into());
                         };
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
