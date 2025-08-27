@@ -9,7 +9,7 @@ env:
 
 jobs:
   bench_large_join:
-    runs-on: ubicloud-standard-30-ubuntu-2404
+    runs-on: ubicloud-standard-8-ubuntu-2404
     timeout-minutes: 30
     defaults:
       run:

@@ -488,7 +488,7 @@ async fn gen_auth_bits(
     and_shares: Vec<(Share, Share)>,
     mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
     mut multi_shared_rand: Option<ChaCha20Rng>,
-) -> Result<Vec<Share>, Error> {
+) -> Result<MaybeFileBuf<Share>, Error> {
     let &Context {
         channel,
         p_fpre,
@@ -497,12 +497,13 @@ async fn gen_auth_bits(
         num_and_ops,
         ..
     } = ctx;
-    let mut auth_bits: Vec<Share> = vec![];
+    let mut auth_bits = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
-        (_, auth_bits) = try_join(
-            send_to(channel, p_fpre, "AND shares", &and_shares),
-            recv_vec_from(channel, p_fpre, "AND shares", num_and_ops),
-        )
+        (_, auth_bits) = try_join(send_to(channel, p_fpre, "AND shares", &and_shares), async {
+            Ok(MaybeFileBuf::Memory {
+                data: recv_vec_from(channel, p_fpre, "AND shares", num_and_ops).await?,
+            })
+        })
         .await?;
     } else {
         // Generate the authenticated bits in batches. This reduces peak memory consumption,
@@ -543,7 +544,7 @@ async fn gen_auth_bits(
                 &xyz_shares,
             )
             .await?;
-            auth_bits.extend_from_slice(&batch_auth_bits);
+            auth_bits.write_chunk(&batch_auth_bits)?;
         }
     }
     Ok(auth_bits)
@@ -552,7 +553,7 @@ async fn gen_auth_bits(
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    auth_bits: Vec<Share>,
+    mut auth_bits: MaybeFileBuf<Share>,
     random_shares: &[Share],
 ) -> Result<
     (
@@ -577,7 +578,7 @@ async fn garble(
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
     let mut labels = vec![Label(0); circ.max_reg_count];
     let mut input_labels = vec![];
-    let mut auth_bits = auth_bits.into_iter();
+    let mut auth_bits = auth_bits.iter()?;
     let mut table_shares = vec![];
     let mut files = vec![];
     let max_garbled_gates_per_chunk = std::cmp::max(1000, circ.and_ops / 10);
@@ -591,8 +592,12 @@ async fn garble(
                     let Share(r_y, mac_r_y_key_s_y) = shares[y].clone();
                     let rand_share = random_shares.next().unwrap().clone();
                     let Share(r_gamma, mac_r_gamma_key_s_gamma) = rand_share.clone();
-                    let Some(sigma) = auth_bits.next() else {
-                        return Err(MpcError::MissingAndShareForInst(w).into());
+                    let sigma = match auth_bits.next() {
+                        Some(Ok(sigma)) => sigma,
+                        Some(err @ Err(_)) => err?,
+                        None => {
+                            return Err(MpcError::MissingAndShareForInst(w).into());
+                        }
                     };
                     let Share(r_sig, mac_r_sig_key_s_sig) = sigma;
                     let r = r_sig ^ r_gamma;
@@ -690,8 +695,12 @@ async fn garble(
                     let Share(s_x, mac_s_x_key_r_x) = x;
                     let Share(s_y, mac_s_y_key_r_y) = y;
                     let Share(s_gamma, mac_s_gamma_key_r_gamma) = gamma;
-                    let Some(sigma) = auth_bits.next() else {
-                        return Err(MpcError::MissingAndShareForInst(w).into());
+                    let sigma = match auth_bits.next() {
+                        Some(Ok(sigma)) => sigma,
+                        Some(err @ Err(_)) => err?,
+                        None => {
+                            return Err(MpcError::MissingAndShareForInst(w).into());
+                        }
                     };
                     let Share(s_sig, mac_s_sig_key_r_sig) = sigma;
                     let s = s_sig ^ s_gamma;
