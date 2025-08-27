@@ -4,6 +4,7 @@ use garble_lang::{
     register_circuit::Circuit as RegisterCircuit,
 };
 use polytune::{Error, channel, mpc};
+use tempfile::tempdir;
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 fn simulate_mpc(
@@ -40,7 +41,17 @@ async fn simulate_mpc_async(
         let inputs = inputs.to_vec();
         let output_parties = output_parties.to_vec();
         computation.spawn(async move {
-            match mpc(&channel, &circuit, &inputs, p_eval, p_own, &output_parties).await {
+            match mpc(
+                &channel,
+                &circuit,
+                &inputs,
+                p_eval,
+                p_own,
+                &output_parties,
+                Some(tempdir().unwrap().path()),
+            )
+            .await
+            {
                 Ok(res) => {
                     println!(
                         "Party {p_own} sent {:.2}MB of messages",
@@ -62,6 +73,7 @@ async fn simulate_mpc_async(
         p_eval,
         p_eval,
         output_parties,
+        Some(tempdir().unwrap().path()),
     )
     .await;
     match eval_result {
