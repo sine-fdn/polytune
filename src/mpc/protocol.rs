@@ -32,9 +32,12 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
+use std::fmt::Debug;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Seek};
+use std::io::{BufReader, BufWriter, Seek, Write};
 use std::iter;
+use std::path::Path;
+use std::sync::Arc;
 use std::{cmp, sync::Mutex};
 
 use bincode::Options;
@@ -43,7 +46,9 @@ use garble_lang::register_circuit::CircuitError;
 use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
-use tempfile::{TempDir, tempdir_in};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use tempfile::tempfile_in;
 use tracing::debug;
 
 use crate::{
@@ -93,6 +98,10 @@ pub enum Error {
     InvalidOutputParty(usize),
     /// A message was sent, but it contained no data.
     EmptyMsg,
+    /// An error occured while using a temporary file.
+    TempFile(std::io::Error),
+    /// An error occured while serializing to/deserializing from a temporary file.
+    TempFileSerDe(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl std::error::Error for Error {}
@@ -112,6 +121,13 @@ impl std::fmt::Display for Error {
             Error::MissingOutputParties => write!(f, "Output parties are missing"),
             Error::InvalidOutputParty(p) => write!(f, "Party {p} is not a valid output party"),
             Error::EmptyMsg => f.write_str("The message sent by the other party was empty"),
+            Error::TempFile(e) => {
+                write!(f, "An error occured while using a temporary file: {e:?}")
+            }
+            Error::TempFileSerDe(e) => write!(
+                f,
+                "An error occured while serializing to/deserializing from a temporary file: {e:?}",
+            ),
         }
     }
 }
@@ -137,6 +153,18 @@ impl From<garble::Error> for Error {
 impl From<faand::Error> for Error {
     fn from(e: faand::Error) -> Self {
         Self::PreprocessingError(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::TempFile(e)
+    }
+}
+
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Self::TempFileSerDe(Box::new(e))
     }
 }
 
@@ -201,6 +229,8 @@ pub(crate) enum Preprocessor {
 /// * `p_eval` - Index of the party that will evaluate the garbled circuit
 /// * `p_own` - Index of the current party executing this function
 /// * `p_out` - Indices of parties that will receive the computation output
+/// * `tmp_dir` - An optional directory path where Polytune will store
+///     indermediate data if provided. This improves peak memory consumption.
 ///
 /// # Returns
 ///
@@ -248,13 +278,16 @@ pub async fn mpc(
     p_eval: usize,
     p_own: usize,
     p_out: &[usize],
+    tmp_dir: Option<&Path>,
 ) -> Result<Vec<bool>, Error> {
     let p_fpre = Preprocessor::Untrusted;
-    let ctx = Context::new(channel, circuit, inputs, p_fpre, p_eval, p_own, p_out);
+    let ctx = Context::new(
+        channel, circuit, inputs, p_fpre, p_eval, p_own, p_out, tmp_dir,
+    );
     _mpc(&ctx).await
 }
 
-pub(crate) struct Context<'circ, 'inp, 'out, 'ch, C: Channel> {
+pub(crate) struct Context<'circ, 'inp, 'out, 'ch, 'p, C: Channel> {
     channel: &'ch C,
     circ: &'circ Circuit,
     inputs: &'inp [bool],
@@ -266,9 +299,10 @@ pub(crate) struct Context<'circ, 'inp, 'out, 'ch, C: Channel> {
     p_out: &'out [usize],
     num_and_ops: usize,
     num_inputs: usize,
+    tmp_dir: Option<&'p Path>,
 }
 
-impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
+impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p, C> {
     pub(crate) fn new(
         channel: &'ch C,
         circ: &'circ Circuit,
@@ -277,6 +311,7 @@ impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
         p_eval: usize,
         p_own: usize,
         p_out: &'out [usize],
+        tmp_dir: Option<&'p Path>,
     ) -> Self {
         let p_max = circ.input_regs.len();
         let is_contrib = p_own != p_eval;
@@ -293,11 +328,14 @@ impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
             p_out,
             num_and_ops: circ.and_ops,
             num_inputs,
+            tmp_dir,
         }
     }
 }
 
-pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<Vec<bool>, Error> {
+pub(crate) async fn _mpc(
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+) -> Result<Vec<bool>, Error> {
     validate(ctx)?;
     // fn-independent preprocessing:
     let (delta, random_shares, shared_two_by_two, multi_shared_rand) =
@@ -362,7 +400,7 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
 }
 
 async fn fn_independent_pre(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<
     (
         Delta,
@@ -445,7 +483,7 @@ fn init_and_shares(
 }
 
 async fn gen_auth_bits(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     and_shares: Vec<(Share, Share)>,
     mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
@@ -512,14 +550,14 @@ async fn gen_auth_bits(
 }
 
 async fn garble(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     auth_bits: Vec<Share>,
     random_shares: &[Share],
 ) -> Result<
     (
         Vec<[Share; 4]>,
-        (Option<TempDir>, Vec<File>),
+        Vec<MaybeFileBuf<GarbledGate>>,
         Vec<Share>,
         Vec<Label>,
         Vec<Label>,
@@ -532,6 +570,7 @@ async fn garble(
         is_contrib,
         p_eval,
         p_max,
+        num_and_ops,
         ..
     } = ctx;
     let mut random_shares = random_shares.iter();
@@ -540,7 +579,6 @@ async fn garble(
     let mut input_labels = vec![];
     let mut auth_bits = auth_bits.into_iter();
     let mut table_shares = vec![];
-    let mut tmp_dir = None;
     let mut files = vec![];
     let max_garbled_gates_per_chunk = std::cmp::max(1000, circ.and_ops / 10);
 
@@ -617,17 +655,9 @@ async fn garble(
             send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
         }
     } else {
-        tmp_dir = Some(tempdir_in("./").unwrap());
         files = try_join_all((0..p_max).map(async |p| {
-            let f = File::options()
-                .create(true)
-                .truncate(true)
-                .read(true)
-                .write(true)
-                .open(tmp_dir.as_ref().unwrap().path().join(format!("garble-{p}")))
-                .unwrap();
+            let mut f = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
             if p != p_eval {
-                let mut f = BufWriter::new(f);
                 let full_chunks = circ.and_ops / max_garbled_gates_per_chunk;
                 let last_chunk = circ.and_ops % max_garbled_gates_per_chunk;
                 let last_chunk = if last_chunk != 0 {
@@ -641,12 +671,9 @@ async fn garble(
                     let gates =
                         recv_vec_from::<GarbledGate>(channel, p, "preprocessed gates", chunk_size)
                             .await?;
-                    bincode::options()
-                        .allow_trailing_bytes()
-                        .serialize_into(&mut f, &gates)
-                        .unwrap();
+                    f.write_chunk(&gates)?;
                 }
-                Ok::<_, Error>(f.into_inner().unwrap())
+                Ok::<_, Error>(f)
             } else {
                 Ok(f)
             }
@@ -689,11 +716,11 @@ async fn garble(
             }
         }
     }
-    Ok((table_shares, (tmp_dir, files), shares, labels, input_labels))
+    Ok((table_shares, files, shares, labels, input_labels))
 }
 
 async fn input_processing(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     input_labels: &[Label],
     random_shares: &[Share],
@@ -803,7 +830,7 @@ fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
     table_shares: Vec<[Share; 4]>,
-    (_tmp_dir, garble_files): (Option<TempDir>, Vec<File>),
+    mut garble_files: Vec<MaybeFileBuf<GarbledGate>>,
     masked_inputs: Vec<Option<bool>>,
     input_labels: Vec<Option<Vec<Label>>>,
 ) -> Result<(Vec<bool>, Vec<Vec<Label>>), Error> {
@@ -817,46 +844,10 @@ fn evaluate(
     } = ctx;
     let mut values: Vec<bool> = vec![false; circ.max_reg_count];
     let mut labels_eval: Vec<Vec<Label>> = vec![vec![]; circ.max_reg_count];
-    struct GarbleGateIter {
-        f: BufReader<File>,
-        chunk_iter: std::vec::IntoIter<GarbledGate>,
-    }
-    impl Iterator for GarbleGateIter {
-        type Item = GarbledGate;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            if let Some(gate) = self.chunk_iter.next() {
-                return Some(gate);
-            }
-            let opts = bincode::options().allow_trailing_bytes();
-            match opts.deserialize_from::<_, Vec<GarbledGate>>(&mut self.f) {
-                Ok(chunk) => {
-                    self.chunk_iter = chunk.into_iter();
-                    return self.next();
-                }
-                Err(err) => {
-                    match &*err {
-                        bincode::ErrorKind::Io(io) => match io.kind() {
-                            std::io::ErrorKind::UnexpectedEof => return None,
-                            _ => {}
-                        },
-                        _ => {}
-                    }
-                    panic!("{err:?}")
-                }
-            }
-        }
-    }
     let mut garbled_gates: Vec<_> = garble_files
-        .into_iter()
-        .map(|mut file| {
-            file.rewind().unwrap();
-            GarbleGateIter {
-                f: BufReader::new(file),
-                chunk_iter: Default::default(),
-            }
-        })
-        .collect();
+        .iter_mut()
+        .map(|file| file.iter())
+        .collect::<std::io::Result<_>>()?;
 
     let mut table_shares = table_shares.into_iter();
     if !is_contrib {
@@ -907,8 +898,12 @@ fn evaluate(
                         if p == p_own {
                             continue;
                         }
-                        let Some(GarbledGate(garbled_gate)) = &garbled_gates[p].next() else {
+                        let Some(res) = &garbled_gates[p].next() else {
                             return Err(MpcError::MissingGarbledGate(w).into());
+                        };
+                        let GarbledGate(garbled_gate) = match res {
+                            Ok(gate) => gate,
+                            Err(err) => panic!("{err:?}"),
                         };
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
                         let garbled_row = garbled_gate[i].clone();
@@ -944,7 +939,7 @@ fn evaluate(
 }
 
 async fn output(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     shares: Vec<Share>,
     labels: Vec<Label>,
@@ -1058,4 +1053,100 @@ async fn output(
         }
     }
     Ok(outputs)
+}
+
+enum MaybeFileBuf<T> {
+    ChunkedTmpFile { write: BufWriter<Arc<File>> },
+    Memory { data: Vec<T> },
+}
+
+enum MaybeFileBufIter<'a, T> {
+    ChunkedTmpFile {
+        read: BufReader<Arc<File>>,
+        chunk_iter: std::vec::IntoIter<T>,
+    },
+    Memory {
+        iter: std::slice::Iter<'a, T>,
+    },
+}
+
+impl<T> MaybeFileBuf<T> {
+    fn new(dir: Option<&Path>, capacity: usize) -> std::io::Result<Self> {
+        if let Some(dir) = dir {
+            let f = Arc::new(tempfile_in(dir)?);
+            let write = BufWriter::new(Arc::clone(&f));
+            Ok(Self::ChunkedTmpFile { write })
+        } else {
+            Ok(Self::Memory {
+                data: Vec::with_capacity(capacity),
+            })
+        }
+    }
+
+    fn iter(&mut self) -> std::io::Result<MaybeFileBufIter<'_, T>> {
+        match self {
+            MaybeFileBuf::ChunkedTmpFile { write } => {
+                write.flush()?;
+                let mut file = Arc::clone(write.get_ref());
+                file.rewind()?;
+                let read = BufReader::new(file);
+                Ok(MaybeFileBufIter::ChunkedTmpFile {
+                    read,
+                    chunk_iter: Default::default(),
+                })
+            }
+            MaybeFileBuf::Memory { data } => Ok(MaybeFileBufIter::Memory { iter: data.iter() }),
+        }
+    }
+
+    fn bincode() -> impl bincode::Options {
+        bincode::options().allow_trailing_bytes()
+    }
+}
+
+impl<T: Serialize + Clone> MaybeFileBuf<T> {
+    fn write_chunk(&mut self, chunk: &[T]) -> bincode::Result<()> {
+        match self {
+            MaybeFileBuf::ChunkedTmpFile { write, .. } => {
+                let opts = Self::bincode();
+                opts.serialize_into(write, chunk)?;
+            }
+            MaybeFileBuf::Memory { data } => {
+                data.extend_from_slice(chunk);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufIter<'a, T> {
+    type Item = bincode::Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            MaybeFileBufIter::ChunkedTmpFile { read, chunk_iter } => {
+                if let Some(gate) = chunk_iter.next() {
+                    return Some(Ok(gate));
+                }
+                let opts = MaybeFileBuf::<T>::bincode();
+                match opts.deserialize_from::<_, Vec<T>>(read) {
+                    Ok(chunk) => {
+                        *chunk_iter = chunk.into_iter();
+                        return self.next();
+                    }
+                    Err(err) => {
+                        match &*err {
+                            bincode::ErrorKind::Io(io) => match io.kind() {
+                                std::io::ErrorKind::UnexpectedEof => return None,
+                                _ => {}
+                            },
+                            _ => {}
+                        }
+                        return Some(Err(err));
+                    }
+                }
+            }
+            MaybeFileBufIter::Memory { iter } => iter.next().map(|e| Ok(e.clone())),
+        }
+    }
 }
