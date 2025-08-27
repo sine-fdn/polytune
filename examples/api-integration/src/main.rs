@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
-    env,
+    env::{self},
     net::{IpAddr, SocketAddr},
     result::Result,
     str::FromStr,
@@ -32,6 +32,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tempfile::tempdir_in;
 use tokio::{
     sync::{
         Mutex,
@@ -332,6 +333,7 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
         0,
         *party,
         &p_out,
+        Some(tempdir_in("./").expect("Unable to create tempdir").path()),
     )
     .await?;
 

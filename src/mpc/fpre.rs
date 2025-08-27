@@ -473,7 +473,7 @@ mod tests {
                     p_eval,
                     p_own,
                     &output_parties,
-                    None
+                    None,
                 );
                 match _mpc(&ctx).await {
                     Ok(res) => {
@@ -498,7 +498,7 @@ mod tests {
             p_eval,
             p_eval,
             output_parties,
-            None
+            None,
         );
         let eval_result = _mpc(&ctx).await;
         match eval_result {
