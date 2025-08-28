@@ -32,26 +32,19 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
-use std::borrow::Cow;
 use std::fmt::Debug;
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Seek, Write};
 use std::iter;
 use std::path::Path;
-use std::sync::Arc;
 use std::{cmp, sync::Mutex};
 
-use bincode::Options;
 use futures::future::{try_join, try_join_all};
 use garble_lang::register_circuit::CircuitError;
 use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use tempfile::tempfile_in;
 use tracing::debug;
 
+use crate::utils::maybe_file_buf::MaybeFileBuf;
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
     mpc::{
@@ -221,6 +214,13 @@ pub(crate) enum Preprocessor {
 /// This function implements a garbled circuit-based MPC protocol where parties cooperatively
 /// compute a function without revealing their private inputs. The protocol consists of several
 /// phases: preprocessing, input processing, circuit evaluation, and output determination.
+///
+/// When an optional `tmp_dir` path is provided, Polytune will create temporary files in the
+/// specified directory to reduce the peak memory consumption of the protocol evaluation.
+/// Note that files created under `/tmp` on many Linux systems are stored in a
+/// [tmpfs](https://www.kernel.org/doc/html/latest/filesystems/tmpfs.html) which will not
+/// actually write the files to disk. We recommend creating a temporary directory for example
+/// in `/var/tmp`.
 ///
 /// # Arguments
 ///
@@ -486,6 +486,8 @@ fn init_and_shares(
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
     let mut and_shares = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
+    // It is important that we use the and_share_batch_size as the max_chunk_size here, because we will directly
+    // read the chunks in the gen_auth_bits method.
     let max_chunk_size = ctx.and_share_batch_size();
     let mut chunk = Vec::with_capacity(std::cmp::min(max_chunk_size, num_and_ops));
     for (w, inst) in circ.insts.iter().enumerate() {
@@ -1115,149 +1117,4 @@ async fn output(
         }
     }
     Ok(outputs)
-}
-
-enum MaybeFileBuf<T> {
-    ChunkedTmpFile { write: BufWriter<Arc<File>> },
-    Memory { data: Vec<T> },
-}
-
-enum MaybeFileBufIter<'a, T> {
-    ChunkedTmpFile {
-        read: BufReader<Arc<File>>,
-        chunk_iter: std::vec::IntoIter<T>,
-    },
-    Memory {
-        iter: std::slice::Iter<'a, T>,
-    },
-}
-
-enum MaybeFileBufChunkIter<'a, T> {
-    ChunkedTmpFile { read: BufReader<Arc<File>> },
-    Memory { iter: std::slice::Chunks<'a, T> },
-}
-
-impl<T> MaybeFileBuf<T> {
-    fn new(dir: Option<&Path>, capacity: usize) -> std::io::Result<Self> {
-        if let Some(dir) = dir {
-            let f = Arc::new(tempfile_in(dir)?);
-            let write = BufWriter::new(Arc::clone(&f));
-            Ok(Self::ChunkedTmpFile { write })
-        } else {
-            Ok(Self::Memory {
-                data: Vec::with_capacity(capacity),
-            })
-        }
-    }
-
-    fn iter(&mut self) -> std::io::Result<MaybeFileBufIter<'_, T>> {
-        match self {
-            MaybeFileBuf::ChunkedTmpFile { write } => {
-                write.flush()?;
-                let mut file = Arc::clone(write.get_ref());
-                file.rewind()?;
-                let read = BufReader::new(file);
-                Ok(MaybeFileBufIter::ChunkedTmpFile {
-                    read,
-                    chunk_iter: Default::default(),
-                })
-            }
-            MaybeFileBuf::Memory { data } => Ok(MaybeFileBufIter::Memory { iter: data.iter() }),
-        }
-    }
-
-    fn chunks(&mut self, size: usize) -> std::io::Result<MaybeFileBufChunkIter<'_, T>> {
-        match self {
-            MaybeFileBuf::ChunkedTmpFile { write } => {
-                write.flush()?;
-                let mut file = Arc::clone(write.get_ref());
-                file.rewind()?;
-                let read = BufReader::new(file);
-                Ok(MaybeFileBufChunkIter::ChunkedTmpFile { read })
-            }
-            MaybeFileBuf::Memory { data } => Ok(MaybeFileBufChunkIter::Memory {
-                iter: data.chunks(size),
-            }),
-        }
-    }
-
-    fn bincode() -> impl bincode::Options {
-        bincode::options().allow_trailing_bytes()
-    }
-}
-
-impl<T> Default for MaybeFileBuf<T> {
-    fn default() -> Self {
-        Self::Memory { data: vec![] }
-    }
-}
-
-impl<T: Serialize + Clone> MaybeFileBuf<T> {
-    fn write_chunk(&mut self, chunk: &[T]) -> bincode::Result<()> {
-        match self {
-            MaybeFileBuf::ChunkedTmpFile { write, .. } => {
-                let opts = Self::bincode();
-                opts.serialize_into(write, chunk)?;
-            }
-            MaybeFileBuf::Memory { data } => {
-                data.extend_from_slice(chunk);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufIter<'a, T> {
-    type Item = bincode::Result<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            MaybeFileBufIter::ChunkedTmpFile { read, chunk_iter } => {
-                if let Some(gate) = chunk_iter.next() {
-                    return Some(Ok(gate));
-                }
-                let opts = MaybeFileBuf::<T>::bincode();
-                match opts.deserialize_from::<_, Vec<T>>(read) {
-                    Ok(chunk) => {
-                        *chunk_iter = chunk.into_iter();
-                        self.next()
-                    }
-                    Err(err) => {
-                        if let bincode::ErrorKind::Io(io) = &*err
-                            && std::io::ErrorKind::UnexpectedEof == io.kind()
-                        {
-                            return None;
-                        }
-
-                        Some(Err(err))
-                    }
-                }
-            }
-            MaybeFileBufIter::Memory { iter } => iter.next().map(|e| Ok(e.clone())),
-        }
-    }
-}
-
-impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufChunkIter<'a, T> {
-    type Item = bincode::Result<Cow<'a, [T]>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            MaybeFileBufChunkIter::ChunkedTmpFile { read } => {
-                let opts = MaybeFileBuf::<T>::bincode();
-                match opts.deserialize_from::<_, Vec<T>>(read) {
-                    Ok(chunk) => Some(Ok(Cow::Owned(chunk))),
-                    Err(err) => {
-                        if let bincode::ErrorKind::Io(io) = &*err
-                            && std::io::ErrorKind::UnexpectedEof == io.kind()
-                        {
-                            return None;
-                        }
-                        Some(Err(err))
-                    }
-                }
-            }
-            MaybeFileBufChunkIter::Memory { iter } => iter.next().map(|e| Ok(Cow::Borrowed(e))),
-        }
-    }
 }
