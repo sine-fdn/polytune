@@ -21,6 +21,7 @@ pub async fn mpc(
     p_eval: usize,
     p_own: usize,
     p_out: &[usize],
+    tmp_dir: Option<&Path>,
 ) -> Result<Vec<bool>, Error>
 ```
 
@@ -33,5 +34,6 @@ Let's look at the parameters in detail:
 - `p_eval`: The party responsible for evaluating the circuit.
 - `p_own`: The index of the current party executing the protocol.
 - `p_out`: The indices of parties who receive the output.
+- `tmp_dir` - An optional directory path where Polytune will store indermediate data if provided. This improves peak memory consumption.
 
 **Usage Scenario**: This is a low-level functionality with both inputs and outputs being vectors of bits. The `mpc` function is used when each party participates in an actual MPC execution, but usually accompanied by higher-level functions to translate data structures to/from their bit-level representations. We provide numerous example usages in the `examples` directory, and in our simulation example, `simulate_mpc`, in the `tests` directory.

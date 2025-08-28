@@ -183,7 +183,7 @@ fn bench_circuit_two_parties<'a, M, F>(
                 // this means that we must recreate the SimpleChannel and circ above, because the future needs to
                 // be 'static for spawning.
                 let fut = async move {
-                    mpc(&ch1, &circ1, &inputs1, 0, 0, &p_out)
+                    mpc(&ch1, &circ1, &inputs1, 0, 0, &p_out, None)
                         .await
                         .expect("mpc execution failed")
                 };
@@ -195,7 +195,7 @@ fn bench_circuit_two_parties<'a, M, F>(
                     tx.send(res).expect("channel closed");
                 });
                 let fut = async move {
-                    mpc(&ch2, &circ2, &inputs2, 0, 1, &p_out)
+                    mpc(&ch2, &circ2, &inputs2, 0, 1, &p_out, None)
                         .await
                         .expect("mpc execution failed")
                 };
