@@ -350,19 +350,19 @@ pub(crate) async fn _mpc(
 ) -> Result<Vec<bool>, Error> {
     validate(ctx)?;
     // fn-independent preprocessing:
-    let (delta, random_shares, shared_two_by_two, multi_shared_rand) =
+    let (delta, mut random_shares, shared_two_by_two, multi_shared_rand) =
         fn_independent_pre(ctx).await?;
 
     // fn-dependent preprocessing:
-    let and_shares = init_and_shares(ctx, &random_shares)?;
+    let and_shares = init_and_shares(ctx, &mut random_shares)?;
     let auth_bits =
         gen_auth_bits(ctx, delta, and_shares, shared_two_by_two, multi_shared_rand).await?;
     let (table_shares, garbled_gates, shares, labels, input_labels) =
-        garble(ctx, delta, auth_bits, &random_shares).await?;
+        garble(ctx, delta, auth_bits, &mut random_shares).await?;
 
     // input processing:
     let (masked_inputs, input_labels) =
-        input_processing(ctx, delta, &input_labels, &random_shares).await?;
+        input_processing(ctx, delta, &input_labels, &mut random_shares).await?;
 
     // circuit evaluation:
     let (values, labels_eval) = evaluate(
@@ -416,7 +416,7 @@ async fn fn_independent_pre(
 ) -> Result<
     (
         Delta,
-        Vec<Share>,
+        MaybeFileBuf<Share>,
         Option<Vec<Vec<Option<ChaCha20Rng>>>>,
         Option<ChaCha20Rng>,
     ),
@@ -433,7 +433,7 @@ async fn fn_independent_pre(
     } = ctx;
     let secret_bits = num_inputs + num_and_ops;
     let delta: Delta;
-    let random_shares: Vec<Share>;
+    let mut random_shares: MaybeFileBuf<Share>;
     let mut shared_two_by_two = None;
     let mut multi_shared_rand = None;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
@@ -444,35 +444,45 @@ async fn fn_independent_pre(
             .ok_or(Error::EmptyMsg)?;
 
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
-        random_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
+        let fpre_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
+        random_shares = MaybeFileBuf::Memory { data: fpre_shares };
     } else {
+        random_shares = MaybeFileBuf::new(ctx.tmp_dir, secret_bits)?;
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(channel, p_own, p_max).await?);
         multi_shared_rand = Some(shared_rng(channel, p_own, p_max).await?);
-
-        random_shares = fashare(
-            (channel, delta),
-            p_own,
-            p_max,
-            secret_bits,
-            shared_two_by_two.as_mut().expect("Set above"),
-            multi_shared_rand.as_mut().expect("Set above"),
-        )
-        .await?;
+        let max_chunk_size = ctx.and_share_batch_size();
+        let remainder = secret_bits % max_chunk_size;
+        let chunk_sizes = iter::repeat_n(max_chunk_size, secret_bits / max_chunk_size);
+        let chunk_sizes = chunk_sizes.chain(if remainder != 0 {
+            Some(remainder)
+        } else {
+            None
+        });
+        for chunk_size in chunk_sizes {
+            let chunk_random_shares = fashare(
+                (channel, delta),
+                p_own,
+                p_max,
+                chunk_size,
+                shared_two_by_two.as_mut().expect("Set above"),
+                multi_shared_rand.as_mut().expect("Set above"),
+            )
+            .await?;
+            random_shares.write_chunk(&chunk_random_shares)?;
+        }
     }
     Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
 fn init_and_shares(
     ctx: &Context<impl Channel>,
-    random_shares: &[Share],
+    random_shares: &mut MaybeFileBuf<Share>,
 ) -> Result<MaybeFileBuf<(Share, Share)>, Error> {
     let &Context {
-        circ,
-        num_and_ops,
-        ..
+        circ, num_and_ops, ..
     } = ctx;
-    let mut random_shares_iter = random_shares.iter();
+    let mut random_shares_iter = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
     let mut and_shares = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
@@ -481,9 +491,9 @@ fn init_and_shares(
     for (w, inst) in circ.insts.iter().enumerate() {
         match inst.op {
             Op::Input(_) | Op::And(_) => {
-                let Some(share) = random_shares_iter.next() else {
-                    return Err(MpcError::MissingPreprocessingShareForInst(w).into());
-                };
+                let share = random_shares_iter
+                    .next()
+                    .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                 if let Op::And(And(x, y)) = inst.op {
                     chunk.push((shares[x].clone(), shares[y].clone()));
                 }
@@ -575,7 +585,7 @@ async fn garble(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     mut auth_bits: MaybeFileBuf<Share>,
-    random_shares: &[Share],
+    random_shares: &mut MaybeFileBuf<Share>,
 ) -> Result<
     (
         MaybeFileBuf<[Share; 4]>,
@@ -596,7 +606,7 @@ async fn garble(
         tmp_dir,
         ..
     } = ctx;
-    let mut random_shares = random_shares.iter();
+    let mut random_shares = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
     let mut labels = vec![Label(0); circ.max_reg_count];
     let mut input_labels = vec![];
@@ -612,16 +622,13 @@ async fn garble(
                 Op::And(And(x, y)) => {
                     let Share(r_x, mac_r_x_key_s_x) = shares[x].clone();
                     let Share(r_y, mac_r_y_key_s_y) = shares[y].clone();
-                    let rand_share = random_shares.next().unwrap().clone();
+                    let rand_share = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                     let Share(r_gamma, mac_r_gamma_key_s_gamma) = rand_share.clone();
-                    let sigma = match auth_bits.next() {
-                        Some(Ok(sigma)) => sigma,
-                        Some(err @ Err(_)) => err?,
-                        None => {
-                            return Err(MpcError::MissingAndShareForInst(w).into());
-                        }
-                    };
-                    let Share(r_sig, mac_r_sig_key_s_sig) = sigma;
+                    let Share(r_sig, mac_r_sig_key_s_sig) = auth_bits
+                        .next()
+                        .ok_or(MpcError::MissingAndShareForInst(w))??;
                     let r = r_sig ^ r_gamma;
                     let mac_r_key_s_0 = &mac_r_sig_key_s_sig ^ &mac_r_gamma_key_s_gamma;
                     let mac_r_key_s_1 = &mac_r_key_s_0 ^ &mac_r_x_key_s_x;
@@ -674,7 +681,9 @@ async fn garble(
                     let label = Label(random());
                     labels[inst.out] = label;
                     input_labels.push(label);
-                    shares[inst.out] = random_shares.next().unwrap().clone();
+                    shares[inst.out] = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                 }
             }
         }
@@ -714,7 +723,9 @@ async fn garble(
                 Op::And(And(x, y)) => {
                     let x = shares[x].clone();
                     let y = shares[y].clone();
-                    let rand_share = random_shares.next().unwrap().clone();
+                    let rand_share = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                     let gamma = rand_share.clone();
                     let Share(s_x, mac_s_x_key_r_x) = x;
                     let Share(s_y, mac_s_y_key_r_y) = y;
@@ -748,7 +759,9 @@ async fn garble(
                     shares[inst.out] = shares[x].clone();
                 }
                 Op::Input(_) => {
-                    shares[inst.out] = random_shares.next().unwrap().clone();
+                    shares[inst.out] = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                 }
             }
         }
@@ -763,7 +776,7 @@ async fn input_processing(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     input_labels: &[Label],
-    random_shares: &[Share],
+    random_shares: &mut MaybeFileBuf<Share>,
 ) -> Result<(Vec<Option<bool>>, Vec<Option<Vec<Label>>>), Error> {
     let &Context {
         channel,
@@ -773,12 +786,17 @@ async fn input_processing(
         p_eval,
         p_own,
         p_max,
+        num_inputs,
         ..
     } = ctx;
+    let random_input_shares: Vec<_> = random_shares
+        .iter()?
+        .take(num_inputs)
+        .collect::<Result<_, _>>()?;
     let mut wire_shares_for_others = vec![vec![None; circ.max_reg_count]; p_max];
     for (w, inst) in circ.insts.iter().enumerate() {
         if let Op::Input(input @ Input { party, .. }) = inst.op {
-            let Share(bit, Auth(macs_and_keys)) = random_shares[w].clone();
+            let Share(bit, Auth(macs_and_keys)) = random_input_shares[w].clone();
             let Some((mac, _)) = macs_and_keys.get(party as usize) else {
                 return Err(MpcError::MissingSharesForInput(input).into());
             };
@@ -799,7 +817,7 @@ async fn input_processing(
             let Some(input) = inputs.get(input as usize) else {
                 return Err(MpcError::InstWithoutInput(w).into());
             };
-            let Share(own_share, Auth(own_macs_and_keys)) = random_shares[w].clone();
+            let Share(own_share, Auth(own_macs_and_keys)) = random_input_shares[w].clone();
             let mut masked_input = *input ^ own_share;
             for p in 0..p_max {
                 if let Some((_, key)) = own_macs_and_keys.get(p).copied()
