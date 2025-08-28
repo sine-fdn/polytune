@@ -32,6 +32,7 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Seek, Write};
@@ -230,7 +231,7 @@ pub(crate) enum Preprocessor {
 /// * `p_own` - Index of the current party executing this function
 /// * `p_out` - Indices of parties that will receive the computation output
 /// * `tmp_dir` - An optional directory path where Polytune will store
-///     indermediate data if provided. This improves peak memory consumption.
+///   indermediate data if provided. This improves peak memory consumption.
 ///
 /// # Returns
 ///
@@ -303,6 +304,7 @@ pub(crate) struct Context<'circ, 'inp, 'out, 'ch, 'p, C: Channel> {
 }
 
 impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p, C> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         channel: &'ch C,
         circ: &'circ Circuit,
@@ -330,6 +332,16 @@ impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p,
             num_inputs,
             tmp_dir,
         }
+    }
+
+    fn and_share_batch_size(&self) -> usize {
+        // Generate the authenticated bits in batches. This reduces peak memory consumption,
+        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
+        // auth bits, we need 9M random Shares (b = 3).
+        // The minimum batch size is 1k. For small circuits it does not make sense to go lower.
+        // This is done by taking the max of the potential batch size and 1k
+        // TODO choose correct batch_size?
+        cmp::max(self.num_and_ops.div_ceil(3 * 3), 1_000)
     }
 }
 
@@ -454,12 +466,18 @@ async fn fn_independent_pre(
 fn init_and_shares(
     ctx: &Context<impl Channel>,
     random_shares: &[Share],
-) -> Result<Vec<(Share, Share)>, Error> {
-    let &Context { circ, .. } = ctx;
+) -> Result<MaybeFileBuf<(Share, Share)>, Error> {
+    let &Context {
+        circ,
+        num_and_ops,
+        ..
+    } = ctx;
     let mut random_shares_iter = random_shares.iter();
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
-    let mut and_shares = Vec::new();
+    let mut and_shares = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
+    let max_chunk_size = ctx.and_share_batch_size();
+    let mut chunk = Vec::with_capacity(std::cmp::min(max_chunk_size, num_and_ops));
     for (w, inst) in circ.insts.iter().enumerate() {
         match inst.op {
             Op::Input(_) | Op::And(_) => {
@@ -467,7 +485,7 @@ fn init_and_shares(
                     return Err(MpcError::MissingPreprocessingShareForInst(w).into());
                 };
                 if let Op::And(And(x, y)) = inst.op {
-                    and_shares.push((shares[x].clone(), shares[y].clone()));
+                    chunk.push((shares[x].clone(), shares[y].clone()));
                 }
                 shares[inst.out] = share.clone();
             }
@@ -478,6 +496,13 @@ fn init_and_shares(
                 shares[inst.out] = &shares[x] ^ &shares[y];
             }
         }
+        if chunk.len() >= max_chunk_size {
+            and_shares.write_chunk(&chunk)?;
+            chunk.clear();
+        }
+    }
+    if !chunk.is_empty() {
+        and_shares.write_chunk(&chunk)?;
     }
     Ok(and_shares)
 }
@@ -485,7 +510,7 @@ fn init_and_shares(
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    and_shares: Vec<(Share, Share)>,
+    mut and_shares: MaybeFileBuf<(Share, Share)>,
     mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
     mut multi_shared_rand: Option<ChaCha20Rng>,
 ) -> Result<MaybeFileBuf<Share>, Error> {
@@ -499,6 +524,7 @@ async fn gen_auth_bits(
     } = ctx;
     let mut auth_bits = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
+        let and_shares: Vec<_> = and_shares.iter()?.collect::<Result<_, _>>()?;
         (_, auth_bits) = try_join(send_to(channel, p_fpre, "AND shares", &and_shares), async {
             Ok(MaybeFileBuf::Memory {
                 data: recv_vec_from(channel, p_fpre, "AND shares", num_and_ops).await?,
@@ -506,20 +532,15 @@ async fn gen_auth_bits(
         })
         .await?;
     } else {
-        // Generate the authenticated bits in batches. This reduces peak memory consumption,
-        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
-        // auth bits, we need 9M random Shares (b = 3).
-        // The minimum batch size is 1k. For small circuits it does not make sense to go lower.
-        // This is done by taking the max of the potential batch size and 1k
-        // TODO choose correct batch_size?
-        let batch_size = cmp::max(and_shares.len().div_ceil(3 * 3), 1_000);
+        let batch_size = ctx.and_share_batch_size();
         let shared_two_by_two = shared_two_by_two
             .as_mut()
             .expect("Set in fn_independent_pre");
         let multi_shared_rand = multi_shared_rand
             .as_mut()
             .expect("Set in fn_independent_pre");
-        for and_shares in and_shares.chunks(batch_size) {
+        for and_shares in and_shares.chunks(batch_size)? {
+            let and_shares = and_shares?;
             debug!(size = and_shares.len(), "Generating auth bits batch");
 
             // TODO choose batch_size to minimize bucket_size?
@@ -536,7 +557,7 @@ async fn gen_auth_bits(
             .await?;
             let batch_auth_bits = beaver_aand(
                 (channel, delta),
-                and_shares,
+                &and_shares,
                 p_own,
                 p_max,
                 and_shares.len(),
@@ -656,7 +677,7 @@ async fn garble(
                 }
             }
         }
-        if preprocessed_gates.len() != 0 {
+        if !preprocessed_gates.is_empty() {
             send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
         }
     } else {
@@ -1079,6 +1100,11 @@ enum MaybeFileBufIter<'a, T> {
     },
 }
 
+enum MaybeFileBufChunkIter<'a, T> {
+    ChunkedTmpFile { read: BufReader<Arc<File>> },
+    Memory { iter: std::slice::Chunks<'a, T> },
+}
+
 impl<T> MaybeFileBuf<T> {
     fn new(dir: Option<&Path>, capacity: usize) -> std::io::Result<Self> {
         if let Some(dir) = dir {
@@ -1105,6 +1131,21 @@ impl<T> MaybeFileBuf<T> {
                 })
             }
             MaybeFileBuf::Memory { data } => Ok(MaybeFileBufIter::Memory { iter: data.iter() }),
+        }
+    }
+
+    fn chunks(&mut self, size: usize) -> std::io::Result<MaybeFileBufChunkIter<'_, T>> {
+        match self {
+            MaybeFileBuf::ChunkedTmpFile { write } => {
+                write.flush()?;
+                let mut file = Arc::clone(write.get_ref());
+                file.rewind()?;
+                let read = BufReader::new(file);
+                Ok(MaybeFileBufChunkIter::ChunkedTmpFile { read })
+            }
+            MaybeFileBuf::Memory { data } => Ok(MaybeFileBufChunkIter::Memory {
+                iter: data.chunks(size),
+            }),
         }
     }
 
@@ -1141,21 +1182,44 @@ impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufIter<'a, T> {
                 match opts.deserialize_from::<_, Vec<T>>(read) {
                     Ok(chunk) => {
                         *chunk_iter = chunk.into_iter();
-                        return self.next();
+                        self.next()
                     }
                     Err(err) => {
-                        match &*err {
-                            bincode::ErrorKind::Io(io) => match io.kind() {
-                                std::io::ErrorKind::UnexpectedEof => return None,
-                                _ => {}
-                            },
-                            _ => {}
+                        if let bincode::ErrorKind::Io(io) = &*err
+                            && std::io::ErrorKind::UnexpectedEof == io.kind()
+                        {
+                            return None;
                         }
-                        return Some(Err(err));
+
+                        Some(Err(err))
                     }
                 }
             }
             MaybeFileBufIter::Memory { iter } => iter.next().map(|e| Ok(e.clone())),
+        }
+    }
+}
+
+impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufChunkIter<'a, T> {
+    type Item = bincode::Result<Cow<'a, [T]>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            MaybeFileBufChunkIter::ChunkedTmpFile { read } => {
+                let opts = MaybeFileBuf::<T>::bincode();
+                match opts.deserialize_from::<_, Vec<T>>(read) {
+                    Ok(chunk) => Some(Ok(Cow::Owned(chunk))),
+                    Err(err) => {
+                        if let bincode::ErrorKind::Io(io) = &*err
+                            && std::io::ErrorKind::UnexpectedEof == io.kind()
+                        {
+                            return None;
+                        }
+                        Some(Err(err))
+                    }
+                }
+            }
+            MaybeFileBufChunkIter::Memory { iter } => iter.next().map(|e| Ok(Cow::Borrowed(e))),
         }
     }
 }
