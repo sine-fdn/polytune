@@ -578,7 +578,7 @@ async fn garble(
     random_shares: &[Share],
 ) -> Result<
     (
-        Vec<[Share; 4]>,
+        MaybeFileBuf<[Share; 4]>,
         Vec<MaybeFileBuf<GarbledGate>>,
         Vec<Share>,
         Vec<Label>,
@@ -593,6 +593,7 @@ async fn garble(
         p_eval,
         p_max,
         num_and_ops,
+        tmp_dir,
         ..
     } = ctx;
     let mut random_shares = random_shares.iter();
@@ -600,7 +601,7 @@ async fn garble(
     let mut labels = vec![Label(0); circ.max_reg_count];
     let mut input_labels = vec![];
     let mut auth_bits = auth_bits.iter()?;
-    let mut table_shares = vec![];
+    let mut table_shares = MaybeFileBuf::default();
     let mut files = vec![];
     let max_garbled_gates_per_chunk = std::cmp::max(1000, circ.and_ops / 10);
 
@@ -705,7 +706,9 @@ async fn garble(
             }
         }))
         .await?;
-        table_shares = vec![];
+        table_shares = MaybeFileBuf::new(tmp_dir, num_and_ops)?;
+        let max_chunk_size = ctx.and_share_batch_size();
+        let mut table_shares_chunk = Vec::with_capacity(max_chunk_size);
         for (w, inst) in circ.insts.iter().enumerate() {
             match inst.op {
                 Op::And(And(x, y)) => {
@@ -731,7 +734,11 @@ async fn garble(
                     let row1 = Share(s ^ s_x, mac_s_key_r_1.clone());
                     let row2 = Share(s ^ s_y, &mac_s_key_r_0 ^ &mac_s_y_key_r_y);
                     let row3 = Share(s ^ s_x ^ s_y ^ true, &mac_s_key_r_1 ^ &mac_s_y_key_r_y);
-                    table_shares.push([row0, row1, row2, row3]);
+                    table_shares_chunk.push([row0, row1, row2, row3]);
+                    if table_shares_chunk.len() >= max_chunk_size {
+                        table_shares.write_chunk(&table_shares_chunk)?;
+                        table_shares_chunk.clear();
+                    }
                     shares[inst.out] = rand_share;
                 }
                 Op::Xor(Xor(x, y)) => {
@@ -744,6 +751,9 @@ async fn garble(
                     shares[inst.out] = random_shares.next().unwrap().clone();
                 }
             }
+        }
+        if !table_shares_chunk.is_empty() {
+            table_shares.write_chunk(&table_shares_chunk)?;
         }
     }
     Ok((table_shares, files, shares, labels, input_labels))
@@ -859,7 +869,7 @@ async fn input_processing(
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
-    table_shares: Vec<[Share; 4]>,
+    mut table_shares: MaybeFileBuf<[Share; 4]>,
     mut garble_files: Vec<MaybeFileBuf<GarbledGate>>,
     masked_inputs: Vec<Option<bool>>,
     input_labels: Vec<Option<Vec<Label>>>,
@@ -879,7 +889,7 @@ fn evaluate(
         .map(|file| file.iter())
         .collect::<std::io::Result<_>>()?;
 
-    let mut table_shares = table_shares.into_iter();
+    let mut table_shares = table_shares.iter()?;
     if !is_contrib {
         for (w, inst) in circ.insts.iter().enumerate() {
             let (value, label) = match inst.op {
@@ -914,8 +924,12 @@ fn evaluate(
                     let input_y = values[y];
                     let label_y = &labels_eval[y];
                     let i = 2 * (input_x as usize) + (input_y as usize);
-                    let Some(table_shares) = &table_shares.next() else {
-                        return Err(MpcError::MissingTableShareForInst(w).into());
+                    let table_shares = match table_shares.next() {
+                        Some(Ok(shares)) => shares,
+                        Some(err) => err?,
+                        None => {
+                            return Err(MpcError::MissingTableShareForInst(w).into());
+                        }
                     };
 
                     let mut label = vec![Label(0); p_max];
@@ -1151,6 +1165,12 @@ impl<T> MaybeFileBuf<T> {
 
     fn bincode() -> impl bincode::Options {
         bincode::options().allow_trailing_bytes()
+    }
+}
+
+impl<T> Default for MaybeFileBuf<T> {
+    fn default() -> Self {
+        Self::Memory { data: vec![] }
     }
 }
 
