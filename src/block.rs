@@ -12,7 +12,7 @@ use rand::{Rng, distr::StandardUniform, prelude::Distribution};
 use serde::{Deserialize, Serialize};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
-use wide::u8x16;
+use wide::{u8x16, u64x2};
 
 // TODO remove this once OT implementations are refactored and we know
 // what parts we need and which not
@@ -120,13 +120,15 @@ impl Block {
     /// Low 64 bits of the block.
     #[inline]
     pub fn low(&self) -> u64 {
-        u64::from_ne_bytes(self.as_bytes()[..8].try_into().expect("correct len"))
+        let inner: &u64x2 = bytemuck::must_cast_ref(&self.0);
+        inner.as_array_ref()[0]
     }
 
     /// High 64 bits of the block.
     #[inline]
     pub fn high(&self) -> u64 {
-        u64::from_ne_bytes(self.as_bytes()[8..].try_into().expect("correct len"))
+        let inner: &u64x2 = bytemuck::must_cast_ref(&self.0);
+        inner.as_array_ref()[1]
     }
 
     /// Least significant bit of the block
@@ -301,17 +303,31 @@ impl From<Block> for [u8; 16] {
     }
 }
 
+impl From<[i64; 2]> for Block {
+    #[inline]
+    fn from(value: [i64; 2]) -> Self {
+        bytemuck::must_cast(value)
+    }
+}
+
+impl From<Block> for [i64; 2] {
+    #[inline]
+    fn from(value: Block) -> Self {
+        bytemuck::must_cast(value)
+    }
+}
+
 impl From<[u64; 2]> for Block {
     #[inline]
     fn from(value: [u64; 2]) -> Self {
-        bytemuck::cast(value)
+        bytemuck::must_cast(value)
     }
 }
 
 impl From<Block> for [u64; 2] {
     #[inline]
     fn from(value: Block) -> Self {
-        bytemuck::cast(value)
+        bytemuck::must_cast(value)
     }
 }
 
@@ -459,7 +475,7 @@ mod tests {
 
     #[test]
     fn test_from_into_u64_arr() {
-        let b = Block::from([42, 65]);
+        let b = Block::from([42_u64, 65]);
         assert_eq!(42, b.low());
         assert_eq!(65, b.high());
         assert_eq!([42, 65], <[u64; 2]>::from(b));
