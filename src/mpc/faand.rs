@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::{
     block::Block,
     channel::{self, Channel, recv_vec_from, scatter, send_to, unverified_broadcast},
+    crypto::AesRng,
     mpc::data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
     utils::xor_inplace,
@@ -401,16 +402,23 @@ async fn fabitn(
         }
     });
 
+    // TODO having keys and macs as Blocks will likely further increase performance as then
+    // explicit sse2 instructions are used (whe available) (robinhundt 2.9.25)
     let (mut keys, mut macs): (Vec<_>, Vec<_>) = try_join_all(ot_futs).await?.into_iter().unzip();
 
     drop(deltas);
 
     // Step 2) Run 2-party OTs to compute keys and MACs [input parameters mm and kk].
 
+    // Seed a faster AesRng from the shared chacha rng
+    let mut aes_rand = AesRng::from_seed(multi_shared_rand.random());
     // Step 3) Verification of MACs and keys.
-    // Step 3 a) Sample 2 * RHO random l'-bit strings r.
-    let r: Vec<Vec<bool>> = (0..three_rho)
-        .map(|_| (0..lprime).map(|_| multi_shared_rand.random()).collect())
+    // Step 3 a) Sample 3 * RHO random l'-bit strings r.
+    // We sample whole Blocks as this requires less memory and is faster than sampling
+    // individual bools.
+    let blocks = lprime.div_ceil(Block::BITS);
+    let r: Vec<Vec<Block>> = (0..three_rho)
+        .map(|_| (0..blocks).map(|_| aes_rand.random()).collect())
         .collect();
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
@@ -418,22 +426,23 @@ async fn fabitn(
     let mut xj = Vec::with_capacity(three_rho);
     for rbits in &r {
         let mut xm = false;
-        for (xi, ri) in x.iter().zip(rbits) {
+        chunked_update_with_rbits(&x, rbits, |xi, rbit| {
+            let ri = rbit != 0;
             xm ^= xi & ri;
-        }
+        });
         xj.push(xm);
     }
 
     // Step 3 b continued) Send xj and its corresponding MACs to all parties except self.
     let mut xj_xjmac = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
+        let macs = &macs[k];
         for (rbits, xj) in r.iter().zip(xj.iter()) {
             let mut xjmac = 0;
-            for (j, &rbit) in rbits.iter().enumerate() {
-                if rbit {
-                    xjmac ^= macs[k][j];
-                }
-            }
+            chunked_update_with_rbits(macs, rbits, |mac, rbit| {
+                let mask = (-(rbit as i128)) as u128;
+                xjmac ^= mac & mask;
+            });
             xj_xjmac[k].push((*xj, xjmac));
         }
     }
@@ -445,11 +454,12 @@ async fn fabitn(
         for k in (0..n).filter(|k| *k != i) {
             let (xj, xjmac) = &xj_xjmac_k[k][j];
             let mut xjkey = 0;
-            for (i, rbit) in rbits.iter().enumerate() {
-                if *rbit {
-                    xjkey ^= keys[k][i];
-                }
-            }
+
+            chunked_update_with_rbits(&keys[k], rbits, |key, rbit| {
+                let mask = (-(rbit as i128)) as u128;
+                xjkey ^= key & mask;
+            });
+
             // Step 3 d) Validity check of macs.
             if (*xj && *xjmac != xjkey ^ delta.0) || (!*xj && *xjmac != xjkey) {
                 return Err(Error::ABitWrongMAC);
@@ -473,6 +483,48 @@ async fn fabitn(
         res.push(Share(*xi, Auth(authvec)));
     }
     Ok(res)
+}
+
+// A helper function that calls the update function with each element of x and a u64 where
+// the lowest bit is the random bit for this element x_i.
+// This function applies the update function to chunks of x to make use of automatic loop
+// unrolling and efficiently transform the rbits Blocks into individual bits.
+// This function is generic as it is called with T = bool and T = u128
+fn chunked_update_with_rbits<T>(x: &[T], rbits: &[Block], mut update: impl FnMut(&T, u64)) {
+    // Blocks are 128 bits, so we split x into 128 bit chunks
+    let (chunks, remainder) = x.as_chunks::<128>();
+    let mut r_bits = rbits.iter();
+    for (chunk, r_chunk) in chunks.iter().zip(r_bits.by_ref()) {
+        // We can't efficiently iterate over all bits a Block, so we split it into
+        // the low and high 64 bits over which we iterate by ANDing 1 and shifting
+        let mut lower_r = r_chunk.low();
+        for xi in &chunk[..64] {
+            update(xi, lower_r & 1);
+            lower_r >>= 1;
+        }
+
+        let mut upper_r = r_chunk.high();
+        for xi in &chunk[64..] {
+            update(xi, upper_r & 1);
+            upper_r >>= 1;
+        }
+    }
+
+    if remainder.is_empty() {
+        return;
+    }
+    // handle the remainder
+    let r_chunk = r_bits.next().expect("Insufficient random bits");
+    let mut lower_r = r_chunk.low();
+    for xi in remainder.iter().take(64) {
+        update(xi, lower_r & 1);
+        lower_r >>= 1;
+    }
+    let mut upper_r = r_chunk.high();
+    for xi in remainder.iter().skip(64) {
+        update(xi, upper_r & 1);
+        upper_r >>= 1;
+    }
 }
 
 /// Protocol PI_aShare that performs F_aShare from the paper
