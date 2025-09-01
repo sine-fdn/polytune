@@ -36,7 +36,7 @@ use std::{cmp, sync::Mutex};
 
 use futures::future::{try_join, try_join_all};
 use garble_lang::register_circuit::CircuitError;
-use garble_lang::register_circuit::{And, Circuit, Input, Inst, Not, Op, Reg, Xor};
+use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
 use tracing::debug;
@@ -139,7 +139,7 @@ impl From<faand::Error> for Error {
 #[derive(Debug)]
 pub enum MpcError {
     /// No secret share was sent during preprocessing for the specified instruction.
-    MissingPreprocessingShareForInst(Inst),
+    MissingPreprocessingShareForInst(usize),
     /// No secret share was sent in the garbled table for the specified instruction.
     MissingTableShareForInst(usize),
     /// No secret share was sent for the specified output register.
@@ -220,6 +220,22 @@ pub(crate) enum Preprocessor {
 /// 3. Input processing: handles sharing and masking of private inputs
 /// 4. Circuit evaluation: performed by the evaluator party only
 /// 5. Output determination: reveals the computation result to designated output parties
+///
+/// # Gates and Instructions Terminology
+///
+/// MPC protocols such as the [WRK17b](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979) protocol
+/// are often described as operations on a circuit consisting of gates and wires. This circuit is
+/// never actually built in hardware. The terminology is a result of these protocols operating on
+/// a directed acyclic graph of basic logic operations (AND, XOR, NOT), i.e., a circuit. These gates
+/// are iterated in topological order and executed according to the protocol. In a way, the circuit
+/// is similar to a (very restricted) domain specific bytecode for an MPC engine or virtual machine.
+///
+/// In Garble and Polytune, we use this view and execute a [`Circuit`] consisting of
+/// [instructions](`garble_lang::register_circuit::Inst`)
+/// and input/output [registers](`Reg`) corresponding to [gates](`garble_lang::circuit::Gate`) and
+/// [wires](`garble_lang::circuit::Wire`). The primary benefit is that instructions specifically
+/// denote their output register, which can be reused once the stored value is not needed anymore
+/// during the execution. This reduces the memory consumption of the MPC evaluation.
 pub async fn mpc(
     channel: &impl Channel,
     circuit: &Circuit,
@@ -405,11 +421,11 @@ fn init_and_shares(
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
     let mut and_shares = Vec::new();
-    for inst in circ.insts.iter() {
+    for (w, inst) in circ.insts.iter().enumerate() {
         match inst.op {
             Op::Input(_) | Op::And(_) => {
                 let Some(share) = random_shares_iter.next() else {
-                    return Err(MpcError::MissingPreprocessingShareForInst(*inst).into());
+                    return Err(MpcError::MissingPreprocessingShareForInst(w).into());
                 };
                 if let Op::And(And(x, y)) = inst.op {
                     and_shares.push((shares[x].clone(), shares[y].clone()));
