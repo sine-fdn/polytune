@@ -356,7 +356,6 @@ async fn fabitn(
     // Step 1) Pick random bit-string x of length lprime.
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
-
     let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.

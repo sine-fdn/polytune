@@ -226,7 +226,9 @@ mod tests {
             protocol::{_mpc, Context, Preprocessor},
         },
     };
-    use garble_lang::{circuit::Circuit, compile};
+    use garble_lang::{
+        CircuitKind, CompileOptions, compile_with_options, register_circuit::Circuit,
+    };
 
     #[tokio::test]
     async fn xor_homomorphic_mac() -> Result<(), Error> {
@@ -402,7 +404,14 @@ mod tests {
     #[test]
     fn eval_garble_prg_3pc_td() -> Result<(), Error> {
         let output_parties: Vec<usize> = vec![0, 1, 2];
-        let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
+        let prg = compile_with_options(
+            "pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }",
+            CompileOptions {
+                circuit_kind: CircuitKind::Register,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         for x in 0..3 {
             for y in 0..3 {
                 for z in 0..3 {
@@ -416,7 +425,7 @@ mod tests {
                         .build()
                         .expect("Could not start tokio runtime");
                     let output = rt.block_on(simulate_mpc_trusted_dealer(
-                        &prg.circuit,
+                        prg.circuit.unwrap_register_ref(),
                         &[&x, &y, &z],
                         &output_parties,
                     ))?;

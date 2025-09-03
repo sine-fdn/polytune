@@ -15,11 +15,8 @@ use axum::{
     http::{Request, Response},
 };
 use clap::Parser;
-use polytune::{
-    channel::Channel,
-    garble_lang::{compile_with_constants, literal::Literal},
-    mpc,
-};
+use garble_lang::{CircuitKind, CompileOptions, compile_with_options};
+use polytune::{channel::Channel, garble_lang::literal::Literal, mpc};
 use polytune_test_utils::peak_alloc::{PeakAllocator, create_instrumented_runtime, scale_memory};
 use reqwest::StatusCode;
 use schemars::JsonSchema;
@@ -271,18 +268,27 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
                 info!("{p}::{k}: {v:?}");
             }
         }
-        compile_with_constants(program, locked.consts.clone())
-            .map_err(|e| anyhow!(e.prettify(program)))?
+        compile_with_options(
+            program,
+            CompileOptions {
+                circuit_kind: CircuitKind::Register,
+                consts: locked.consts.clone(),
+                // false reduces peak memory consumption
+                optimize_duplicate_gates: false,
+            },
+        )
+        .map_err(|e| anyhow!(e.prettify(program)))?
     };
     let memory_peak = ALLOCATOR.peak(0) as f64;
     let (denom, unit) = scale_memory(memory_peak);
     info!(
-        "Trying to execute circuit with {:.2}M gates ({:.2}M AND gates). Compilation took {:?}. Peak memory: {} {unit}",
-        prg.circuit.gates.len() as f64 / 1000.0 / 1000.0,
-        prg.circuit.and_gates() as f64 / 1000.0 / 1000.0,
+        "Trying to execute circuit with {:.2}M instructions ({:.2}M AND ops). Compilation took {:?}. Peak memory: {} {unit}",
+        prg.circuit.ops() as f64 / 1000.0 / 1000.0,
+        prg.circuit.ands() as f64 / 1000.0 / 1000.0,
         compile_now.elapsed(),
         memory_peak / denom
     );
+
     let input = prg.literal_arg(*party, input.clone())?.as_bits();
 
     // Now that we have our input, we can start the actual session:
@@ -319,7 +325,15 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
     };
 
     // We run the computation using MPC, which might take some time...
-    let output = mpc(&channel, &prg.circuit, &input, 0, *party, &p_out).await?;
+    let output = mpc(
+        &channel,
+        prg.circuit.unwrap_register_ref(),
+        &input,
+        0,
+        *party,
+        &p_out,
+    )
+    .await?;
 
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();

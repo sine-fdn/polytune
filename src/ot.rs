@@ -3,6 +3,7 @@ use crate::ot_core::{self, CorrelatedReceiver, CorrelatedSender, Receiver, Sende
 
 use crate::{block::Block, channel::Channel, crypto::AesRng, mpc::faand::Error};
 
+use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
 /// Transform Block to u128
@@ -21,7 +22,7 @@ pub(crate) async fn kos_ot_sender(
     p_to: usize,
     shared_rand: &mut ChaCha20Rng,
 ) -> Result<Vec<u128>, Error> {
-    let mut rng = AesRng::new();
+    let mut rng = AesRng::seed_from_u64(42);
     let mut ot = ot_core::KosSender::init(channel, &mut rng, p_to, shared_rand).await?;
 
     let sender_out_block = ot

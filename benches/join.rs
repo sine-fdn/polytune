@@ -2,9 +2,9 @@ use std::{collections::HashMap, time::Instant};
 
 use criterion::Criterion;
 use garble_lang::{
-    circuit::Circuit,
-    compile_with_constants,
+    CircuitKind, CompileOptions, compile_with_options,
     literal::{Literal, VariantLiteral},
+    register_circuit::Circuit,
     token::UnsignedNumType,
 };
 use polytune::{Error, channel, mpc};
@@ -109,8 +109,21 @@ pub fn join_benchmark(c: &mut Criterion) {
                         )]),
                     ),
                 ]);
-                let prg = compile_with_constants(code, consts).unwrap();
-                info!("{}", prg.circuit.report_gates());
+                let prg = compile_with_options(
+                    code,
+                    CompileOptions {
+                        circuit_kind: CircuitKind::Register,
+                        consts,
+                        ..Default::default()
+                    },
+                )
+                .expect("Circuit compilation failed");
+                let circuit = prg.circuit.unwrap_register_ref();
+                info!(
+                    "Compiled circuit with total instructions: {}, AND ops {}",
+                    circuit.insts.len(),
+                    circuit.and_ops
+                );
                 let elapsed = now.elapsed();
                 info!(
                     "Compilation took {} minute(s), {} second(s)",
@@ -147,9 +160,7 @@ pub fn join_benchmark(c: &mut Criterion) {
 
                 let inputs = vec![input0.as_slice(), input1.as_slice()];
 
-                simulate_mpc_async(&prg.circuit, &inputs, &[0])
-                    .await
-                    .unwrap();
+                simulate_mpc_async(circuit, &inputs, &[0]).await.unwrap();
                 let elapsed = now.elapsed();
                 info!(
                     "MPC computation took {} minute(s), {} second(s)",

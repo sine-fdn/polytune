@@ -2,7 +2,10 @@ use std::{path::PathBuf, process::exit, time::Duration};
 
 use clap::{Parser, Subcommand};
 use http_channel::PollingHttpChannel;
-use polytune::{garble_lang::compile, mpc};
+use polytune::{
+    garble_lang::{CircuitKind, CompileOptions, compile_with_options},
+    mpc,
+};
 use tokio::{fs, time::sleep};
 use tracing::debug;
 
@@ -58,12 +61,19 @@ async fn main() {
                 eprintln!("Could not find '{}'", program.display());
                 exit(-1);
             };
-            let prg = compile(&prg).unwrap();
+            let prg = compile_with_options(
+                &prg,
+                CompileOptions {
+                    circuit_kind: CircuitKind::Register,
+                    ..Default::default()
+                },
+            )
+            .expect("Circuit copilation failed");
             let input = prg.parse_arg(party, &input).unwrap().as_bits();
             let p_eval = 0;
             let channel = PollingHttpChannel::new(&url, &session, party);
             channel.join().await.unwrap();
-            let parties = prg.circuit.input_gates.len();
+            let parties = prg.circuit.parties();
             loop {
                 let joined = channel.participants().await.unwrap();
                 if joined < parties {
@@ -74,9 +84,16 @@ async fn main() {
                 }
             }
             let p_out: Vec<_> = (0..parties).collect();
-            let output = mpc(&channel, &prg.circuit, &input, p_eval, party, &p_out)
-                .await
-                .unwrap();
+            let output = mpc(
+                &channel,
+                prg.circuit.unwrap_register_ref(),
+                &input,
+                p_eval,
+                party,
+                &p_out,
+            )
+            .await
+            .unwrap();
             if !output.is_empty() {
                 let result = prg.parse_output(&output).unwrap();
                 println!("\nThe result is {result}");

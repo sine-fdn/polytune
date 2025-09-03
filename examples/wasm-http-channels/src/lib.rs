@@ -3,7 +3,9 @@ use std::str::FromStr;
 use gloo_timers::future::TimeoutFuture;
 use polytune::{
     channel::Channel,
-    garble_lang::{compile, literal::Literal, token::SignedNumType},
+    garble_lang::{
+        CircuitKind, CompileOptions, compile_with_options, literal::Literal, token::SignedNumType,
+    },
     mpc,
 };
 use reqwest::StatusCode;
@@ -18,8 +20,21 @@ pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Resul
         "let range_in_percent = 10;",
         &format!("let range_in_percent = {range};"),
     );
-    let prg = compile(&code).map_err(|e| e.prettify(&code))?;
-    console::log_1(&prg.circuit.report_gates().into());
+    let prg = compile_with_options(
+        &code,
+        CompileOptions {
+            circuit_kind: CircuitKind::Register,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| e.prettify(&code))?;
+    let circuit = prg.circuit.unwrap_register_ref();
+    let gates = format!(
+        "Trying to execute circuit with {:.2}M instructions  ({:.2}M AND ops)",
+        circuit.insts.len() as f64 / 1000.0 / 1000.0,
+        circuit.and_ops as f64 / 1000.0 / 1000.0
+    );
+    console::log_1(&gates.into());
     let input_literal = Literal::NumSigned(input as i64, SignedNumType::I32);
     let input = prg
         .literal_arg(party, input_literal)
@@ -27,7 +42,7 @@ pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Resul
         .as_bits();
     let p_out = vec![0, 1, 2];
     let channel = HttpChannel::new(url, party).await?;
-    let output = mpc(&channel, &prg.circuit, &input, 0, party, &p_out)
+    let output = mpc(&channel, &circuit, &input, 0, party, &p_out)
         .await
         .map_err(|e| format!("MPC computation failed: {e}"))?;
     let output = prg

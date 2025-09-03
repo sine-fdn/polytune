@@ -1,6 +1,7 @@
 use garble_lang::{
     circuit::{Circuit, Gate},
     compile,
+    register_circuit::Circuit as RegisterCircuit,
 };
 use polytune::{Error, channel, mpc};
 
@@ -33,6 +34,7 @@ async fn simulate_mpc_async(
     };
 
     let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
+    let circuit: RegisterCircuit = circuit.clone().into();
     for (p_own, (channel, inputs)) in parties {
         let circuit = circuit.clone();
         let inputs = inputs.to_vec();
@@ -55,7 +57,7 @@ async fn simulate_mpc_async(
     }
     let eval_result = mpc(
         &eval_channel,
-        circuit,
+        &circuit,
         inputs,
         p_eval,
         p_eval,
@@ -251,9 +253,8 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
                     gates: vec![Gate::And(0, 2), Gate::And(1, 3)],
                     output_gates: vec![4],
                 };
-
                 let output = simulate_mpc(&circuit, &[&[x, z], &[y]], &output_parties)?;
-                assert_eq!(output, vec![x & y & z]);
+                assert_eq!(output, vec![x & y & z], "x: {x} y: {y} z: {z}");
             }
         }
     }
@@ -316,7 +317,11 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
                 let x = prg.parse_arg(0, &format!("{x}u8")).unwrap().as_bits();
                 let y = prg.parse_arg(1, &format!("{y}u8")).unwrap().as_bits();
                 let z = prg.parse_arg(2, &format!("{z}u8")).unwrap().as_bits();
-                let output = simulate_mpc(&prg.circuit, &[&x, &y, &z], &output_parties)?;
+                let output = simulate_mpc(
+                    &prg.circuit.clone().unwrap_ssa(),
+                    &[&x, &y, &z],
+                    &output_parties,
+                )?;
                 let result = prg.parse_output(&output).unwrap();
                 println!("{calculation} = {result}");
                 assert_eq!(format!("{result}"), format!("{expected}"));
