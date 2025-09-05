@@ -69,6 +69,7 @@ async fn main() -> Result<(), Error> {
         0,
         party,
         &p_out,
+        None,
     )
     .await?;
     if !output.is_empty() {
