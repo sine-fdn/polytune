@@ -334,14 +334,24 @@ impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p,
         }
     }
 
+    fn random_shares_batch_size(&self) -> usize {
+        let random_shares = self.num_inputs + self.num_and_ops;
+        cmp::min(
+            random_shares,
+            cmp::max(random_shares.div_ceil(3 * 3), 1_000),
+        )
+    }
+
     fn and_share_batch_size(&self) -> usize {
         // Generate the authenticated bits in batches. This reduces peak memory consumption,
         // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
         // auth bits, we need 9M random Shares (b = 3).
-        // The minimum batch size is 1k. For small circuits it does not make sense to go lower.
-        // This is done by taking the max of the potential batch size and 1k
+        // The minimum batch size is 1k or inputs + and_ops. For small circuits it does not make sense to go lower.
         // TODO choose correct batch_size?
-        cmp::max(self.num_and_ops.div_ceil(3 * 3), 1_000)
+        cmp::min(
+            self.num_and_ops,
+            cmp::max(self.num_and_ops.div_ceil(3 * 3), 1_000),
+        )
     }
 }
 
@@ -451,15 +461,7 @@ async fn fn_independent_pre(
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(channel, p_own, p_max).await?);
         multi_shared_rand = Some(shared_rng(channel, p_own, p_max).await?);
-        let max_chunk_size = ctx.and_share_batch_size();
-        let remainder = secret_bits % max_chunk_size;
-        let chunk_sizes = iter::repeat_n(max_chunk_size, secret_bits / max_chunk_size);
-        let chunk_sizes = chunk_sizes.chain(if remainder != 0 {
-            Some(remainder)
-        } else {
-            None
-        });
-        for chunk_size in chunk_sizes {
+        for chunk_size in chunk_size_iter(secret_bits, ctx.random_shares_batch_size()) {
             let chunk_random_shares = fashare(
                 (channel, delta),
                 p_own,
@@ -482,6 +484,9 @@ fn init_and_shares(
     let &Context {
         circ, num_and_ops, ..
     } = ctx;
+    if num_and_ops == 0 {
+        return Ok(MaybeFileBuf::new(None, 0)?);
+    }
     let mut random_shares_iter = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
@@ -489,7 +494,7 @@ fn init_and_shares(
     // It is important that we use the and_share_batch_size as the max_chunk_size here, because we will directly
     // read the chunks in the gen_auth_bits method.
     let max_chunk_size = ctx.and_share_batch_size();
-    let mut chunk = Vec::with_capacity(std::cmp::min(max_chunk_size, num_and_ops));
+    let mut chunk = Vec::with_capacity(max_chunk_size);
     for (w, inst) in circ.insts.iter().enumerate() {
         match inst.op {
             Op::Input(_) | Op::And(_) => {
@@ -534,6 +539,9 @@ async fn gen_auth_bits(
         num_and_ops,
         ..
     } = ctx;
+    if num_and_ops == 0 {
+        return Ok(MaybeFileBuf::new(None, 0)?);
+    }
     let mut auth_bits = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         let and_shares: Vec<_> = and_shares.iter()?.collect::<Result<_, _>>()?;
@@ -615,7 +623,7 @@ async fn garble(
     let mut auth_bits = auth_bits.iter()?;
     let mut table_shares = MaybeFileBuf::default();
     let mut files = vec![];
-    let max_garbled_gates_per_chunk = std::cmp::max(1000, circ.and_ops / 10);
+    let max_garbled_gates_per_chunk = ctx.and_share_batch_size();
 
     if is_contrib {
         let mut preprocessed_gates = vec![];
@@ -696,16 +704,7 @@ async fn garble(
         files = try_join_all((0..p_max).map(async |p| {
             let mut f = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
             if p != p_eval {
-                let full_chunks = circ.and_ops / max_garbled_gates_per_chunk;
-                let last_chunk = circ.and_ops % max_garbled_gates_per_chunk;
-                let last_chunk = if last_chunk != 0 {
-                    Some(last_chunk)
-                } else {
-                    None
-                };
-                let chunk_sizes =
-                    iter::repeat_n(max_garbled_gates_per_chunk, full_chunks).chain(last_chunk);
-                for chunk_size in chunk_sizes {
+                for chunk_size in chunk_size_iter(num_and_ops, max_garbled_gates_per_chunk) {
                     let gates =
                         recv_vec_from::<GarbledGate>(channel, p, "preprocessed gates", chunk_size)
                             .await?;
@@ -732,13 +731,9 @@ async fn garble(
                     let Share(s_x, mac_s_x_key_r_x) = x;
                     let Share(s_y, mac_s_y_key_r_y) = y;
                     let Share(s_gamma, mac_s_gamma_key_r_gamma) = gamma;
-                    let sigma = match auth_bits.next() {
-                        Some(Ok(sigma)) => sigma,
-                        Some(err @ Err(_)) => err?,
-                        None => {
-                            return Err(MpcError::MissingAndShareForInst(w).into());
-                        }
-                    };
+                    let sigma = auth_bits
+                        .next()
+                        .ok_or(MpcError::MissingAndShareForInst(w))??;
                     let Share(s_sig, mac_s_sig_key_r_sig) = sigma;
                     let s = s_sig ^ s_gamma;
                     let mac_s_key_r_0 = &mac_s_sig_key_r_sig ^ &mac_s_gamma_key_r_gamma;
@@ -944,13 +939,9 @@ fn evaluate(
                     let input_y = values[y];
                     let label_y = &labels_eval[y];
                     let i = 2 * (input_x as usize) + (input_y as usize);
-                    let table_shares = match table_shares.next() {
-                        Some(Ok(shares)) => shares,
-                        Some(err) => err?,
-                        None => {
-                            return Err(MpcError::MissingTableShareForInst(w).into());
-                        }
-                    };
+                    let table_shares = table_shares
+                        .next()
+                        .ok_or(MpcError::MissingTableShareForInst(w))??;
 
                     let mut label = vec![Label(0); p_max];
                     let mut macs = vec![vec![]; p_max];
@@ -962,13 +953,9 @@ fn evaluate(
                         if p == p_own {
                             continue;
                         }
-                        let Some(res) = &garbled_gates[p].next() else {
-                            return Err(MpcError::MissingGarbledGate(w).into());
-                        };
-                        let GarbledGate(garbled_gate) = match res {
-                            Ok(gate) => gate,
-                            Err(err) => panic!("{err:?}"),
-                        };
+                        let GarbledGate(garbled_gate) = garbled_gates[p]
+                            .next()
+                            .ok_or(MpcError::MissingGarbledGate(w))??;
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
                         let garbled_row = garbled_gate[i].clone();
                         let (r, mac_r, label_share) =
@@ -1117,4 +1104,17 @@ async fn output(
         }
     }
     Ok(outputs)
+}
+
+fn chunk_size_iter(total: usize, chunk_size: usize) -> Box<dyn Iterator<Item = usize> + Send> {
+    if chunk_size == 0 {
+        return Box::new(iter::empty());
+    }
+    let remainder = total % chunk_size;
+    let iter = iter::repeat_n(chunk_size, total / chunk_size);
+    if remainder != 0 {
+        Box::new(iter.chain(Some(remainder)))
+    } else {
+        Box::new(iter)
+    }
 }

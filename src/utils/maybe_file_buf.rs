@@ -107,7 +107,7 @@ impl<T> Default for MaybeFileBuf<T> {
 }
 
 impl<T: Serialize + Clone> MaybeFileBuf<T> {
-    /// Write a chunk to the temporyr file or in-memory buffer.
+    /// Write a chunk to the temporary file or in-memory buffer.
     pub(crate) fn write_chunk(&mut self, chunk: &[T]) -> bincode::Result<()> {
         match self {
             MaybeFileBuf::ChunkedTmpFile { write, .. } => {
@@ -154,7 +154,7 @@ impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufIter<'a, T> {
 }
 
 // The drop impl ensures that we can create an iterator, and afterwards continue
-// writing to the end of the file and overwrite existing content.
+// writing to the end of the file and don't overwrite existing content.
 impl<'a, T> Drop for MaybeFileBufIter<'a, T> {
     fn drop(&mut self) {
         if let Self::ChunkedTmpFile { read, .. } = self {
