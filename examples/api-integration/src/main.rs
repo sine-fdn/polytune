@@ -7,7 +7,7 @@ use aide::{
     swagger::Swagger,
     transform::TransformOperation,
 };
-use anyhow::{Error, anyhow, bail};
+use anyhow::{Context, Error, anyhow, bail};
 use axum::{
     Extension, Json,
     body::Bytes,
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
-    env::{self},
+    env,
     net::{IpAddr, SocketAddr},
     result::Result,
     str::FromStr,
@@ -335,7 +335,7 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
         &p_out,
         // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
         // and the files will be in memory and not on the disk
-        Some(tempdir_in("./").expect("Unable to create tempdir").path()),
+        Some(tempdir_in("./").context("Unable to create tempdir")?.path()),
     )
     .await?;
 
