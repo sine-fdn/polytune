@@ -9,7 +9,7 @@ aide = { version = "0.15.1", features = ["axum", "axum-json", "swagger"] }
 anyhow = "1.0.99"
 axum = "0.8.4"
 blake3 = "1.5.1"
-clap = { version = "4.5.45", features = ["derive"] }
+clap = { version = "4.5.47", features = ["derive"] }
 garble_lang = { version = "0.7.0", features = ["json_schema"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 polytune-test-utils = { path = "../../crates/polytune-test-utils" }
