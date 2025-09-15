@@ -634,7 +634,7 @@ version = "0.2.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a23fa214dea9efd4dacee5a5614646b30216ae0f05d4bb51bafb50e9da1c5be"
 dependencies = [
- "hybrid-array",
+ "hybrid-array 0.3.1",
 ]
 
 [[package]]
@@ -1135,6 +1135,15 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891d15931895091dea5c47afa5b3c9a01ba634b311919fd4d41388fa0e3d76af"
 dependencies = [
+ "typenum",
+]
+
+[[package]]
+name = "hybrid-array"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7116c472cf19838450b1d421b4e842569f52b519d640aee9ace1ebcf5b21051"
+dependencies = [
  "bytemuck",
  "serde",
  "typenum",
@@ -1352,7 +1361,7 @@ version = "0.2.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c774c86bce20ea04abe1c37cf0051c5690079a3a28ef5fdac2a5a0412b3d7d74"
 dependencies = [
- "hybrid-array",
+ "hybrid-array 0.3.1",
 ]
 
 [[package]]
@@ -1828,7 +1837,7 @@ dependencies = [
  "garble_lang",
  "getrandom 0.2.16",
  "getrandom 0.3.3",
- "hybrid-array",
+ "hybrid-array 0.4.1",
  "polytune-test-utils",
  "proptest",
  "rand 0.9.2",
