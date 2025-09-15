@@ -139,3 +139,10 @@ jobs:
         working-directory: ./examples/wasm-http-channels
         env:
           RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
+
+  build-api-integration-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build examples/api-integration Dockerfile
+        run: docker build . -f examples/api-integration/Dockerfile --tag 'polytune-api-integration'
