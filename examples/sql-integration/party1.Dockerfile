@@ -2,7 +2,7 @@
 FROM rust:1.88 AS builder
 WORKDIR /usr/src/polytune
 COPY . .
-RUN cargo install --path ./examples/sql-integration
+RUN cargo install --path ./examples/sql-integration --locked
 
 FROM debian:bookworm-slim
 COPY --from=builder /usr/local/cargo/bin/polytune-sql-integration /usr/local/bin/polytune-sql-integration

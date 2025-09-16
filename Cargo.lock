@@ -928,7 +928,7 @@ dependencies = [
 [[package]]
 name = "garble_lang"
 version = "0.7.0"
-source = "git+https://github.com/sine-fdn/garble-lang.git?branch=circ-validate-inputs#aebf2c57f8a65ac7dd6be7a2132903ae814b632e"
+source = "git+https://github.com/sine-fdn/garble-lang.git?branch=main#3f5315e61f5855380daf747fa7f63ecc78036393"
 dependencies = [
  "schemars",
  "serde",
