@@ -98,4 +98,4 @@ debug = true
 inherits = "release"
 
 [patch.crates-io]
-garble_lang = { git = "https://github.com/sine-fdn/garble-lang.git", branch = "circ-validate-inputs" }
+garble_lang = { git = "https://github.com/sine-fdn/garble-lang.git", branch = "main" }
