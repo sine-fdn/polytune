@@ -1,8 +1,8 @@
 # syntax = docker/dockerfile-upstream:master-labs
-FROM rust:1.82 AS builder
+FROM rust:1.89 AS builder
 WORKDIR /usr/src/polytune
 COPY . .
-RUN cargo install --path ./examples/api-integration
+RUN cargo install --path ./examples/api-integration --locked
 
 FROM debian:bookworm-slim
 COPY --from=builder /usr/local/cargo/bin/polytune-api-integration /usr/local/bin/polytune-api-integration
