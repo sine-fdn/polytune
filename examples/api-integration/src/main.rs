@@ -7,7 +7,7 @@ use aide::{
     swagger::Swagger,
     transform::TransformOperation,
 };
-use anyhow::{Error, anyhow, bail};
+use anyhow::{Context, Error, anyhow, bail};
 use axum::{
     Extension, Json,
     body::Bytes,
@@ -15,6 +15,7 @@ use axum::{
     http::{Request, Response},
 };
 use clap::Parser;
+use futures::future::try_join_all;
 use garble_lang::{CircuitKind, CompileOptions, compile_with_options};
 use polytune::{channel::Channel, garble_lang::literal::Literal, mpc};
 use polytune_test_utils::peak_alloc::{PeakAllocator, create_instrumented_runtime, scale_memory};
@@ -34,7 +35,7 @@ use std::{
 };
 use tokio::{
     sync::{
-        Mutex,
+        Mutex, Notify,
         mpsc::{Receiver, Sender, channel},
     },
     time::sleep,
@@ -102,6 +103,8 @@ struct MpcComms {
     policy: Option<Policy>,
     consts: HashMap<String, HashMap<String, Literal>>,
     senders: Vec<Sender<Vec<u8>>>,
+    sync_received: Arc<Notify>,
+    sync_requested: Arc<Notify>,
 }
 
 type MpcState = Arc<Mutex<MpcComms>>;
@@ -127,11 +130,15 @@ fn main() -> Result<(), Error> {
 async fn async_main() -> Result<(), Error> {
     tracing_subscriber::fmt::init();
     let Cli { addr, port } = Cli::parse();
+    let sync_received = Arc::new(Notify::new());
+    let sync_requested = Arc::new(Notify::new());
 
     let state = Arc::new(Mutex::new(MpcComms {
         policy: None,
         consts: HashMap::new(),
         senders: vec![],
+        sync_received,
+        sync_requested,
     }));
 
     let log_layer = TraceLayer::new_for_http()
@@ -147,6 +154,7 @@ async fn async_main() -> Result<(), Error> {
     let app = ApiRouter::new()
         // to check whether a server is running:
         .route("/ping", get(ping))
+        .route("/sync", axum::routing::post(sync))
         // to start an MPC session as a leader:
         .api_route("/launch", post_with(launch, launch_docs))
         // to kick off an MPC session:
@@ -321,8 +329,12 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
             urls: participants.clone(),
             party: *party,
             recv: receivers,
+            sync_received: Arc::clone(&state.sync_received),
+            sync_requested: Arc::clone(&state.sync_requested),
         }
     };
+
+    channel.barrier().await.context("barrier failed")?;
 
     // We run the computation using MPC, which might take some time...
     let output = mpc(
@@ -356,6 +368,11 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
 
 async fn ping() -> &'static str {
     "pong"
+}
+
+async fn sync(State(state): State<MpcState>) {
+    state.lock().await.sync_requested.notified().await;
+    state.lock().await.sync_received.notify_one();
 }
 
 fn launch_docs(t: TransformOperation) -> TransformOperation {
@@ -474,6 +491,27 @@ struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
     recv: Vec<Mutex<Receiver<Vec<u8>>>>,
+    sync_received: Arc<Notify>,
+    sync_requested: Arc<Notify>,
+}
+
+impl HttpChannel {
+    async fn barrier(&self) -> anyhow::Result<()> {
+        if self.party == 0 {
+            try_join_all(
+                self.urls[1..]
+                    .iter()
+                    .map(|url| self.client.post(&format!("{url}sync")).send()),
+            )
+            .await
+            .context("Sync error")?;
+        } else {
+            self.sync_requested.notify_one();
+            self.sync_received.notified().await;
+        }
+
+        Ok(())
+    }
 }
 
 impl Channel for HttpChannel {
