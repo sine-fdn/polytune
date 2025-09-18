@@ -44,7 +44,7 @@ use rand::random;
 use rand_chacha::ChaCha20Rng;
 use tracing::debug;
 
-use crate::utils::maybe_file_buf::MaybeFileBuf;
+use crate::utils::file_or_mem_buf::FileOrMemBuf;
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
     mpc::{
@@ -426,7 +426,7 @@ async fn fn_independent_pre(
 ) -> Result<
     (
         Delta,
-        MaybeFileBuf<Share>,
+        FileOrMemBuf<Share>,
         Option<Vec<Vec<Option<ChaCha20Rng>>>>,
         Option<ChaCha20Rng>,
     ),
@@ -443,7 +443,7 @@ async fn fn_independent_pre(
     } = ctx;
     let secret_bits = num_inputs + num_and_ops;
     let delta: Delta;
-    let mut random_shares: MaybeFileBuf<Share>;
+    let mut random_shares: FileOrMemBuf<Share>;
     let mut shared_two_by_two = None;
     let mut multi_shared_rand = None;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
@@ -455,9 +455,9 @@ async fn fn_independent_pre(
 
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
         let fpre_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
-        random_shares = MaybeFileBuf::Memory { data: fpre_shares };
+        random_shares = FileOrMemBuf::Memory { data: fpre_shares };
     } else {
-        random_shares = MaybeFileBuf::new(ctx.tmp_dir, secret_bits)?;
+        random_shares = FileOrMemBuf::new(ctx.tmp_dir, secret_bits)?;
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(channel, p_own, p_max).await?);
         multi_shared_rand = Some(shared_rng(channel, p_own, p_max).await?);
@@ -479,18 +479,18 @@ async fn fn_independent_pre(
 
 fn init_and_shares(
     ctx: &Context<impl Channel>,
-    random_shares: &mut MaybeFileBuf<Share>,
-) -> Result<MaybeFileBuf<(Share, Share)>, Error> {
+    random_shares: &mut FileOrMemBuf<Share>,
+) -> Result<FileOrMemBuf<(Share, Share)>, Error> {
     let &Context {
         circ, num_and_ops, ..
     } = ctx;
     if num_and_ops == 0 {
-        return Ok(MaybeFileBuf::new(None, 0)?);
+        return Ok(FileOrMemBuf::new(None, 0)?);
     }
     let mut random_shares_iter = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
-    let mut and_shares = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
+    let mut and_shares = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
     // It is important that we use the and_share_batch_size as the max_chunk_size here, because we will directly
     // read the chunks in the gen_auth_bits method.
     let max_chunk_size = ctx.and_share_batch_size();
@@ -527,10 +527,10 @@ fn init_and_shares(
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    mut and_shares: MaybeFileBuf<(Share, Share)>,
+    mut and_shares: FileOrMemBuf<(Share, Share)>,
     mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
     mut multi_shared_rand: Option<ChaCha20Rng>,
-) -> Result<MaybeFileBuf<Share>, Error> {
+) -> Result<FileOrMemBuf<Share>, Error> {
     let &Context {
         channel,
         p_fpre,
@@ -540,13 +540,13 @@ async fn gen_auth_bits(
         ..
     } = ctx;
     if num_and_ops == 0 {
-        return Ok(MaybeFileBuf::new(None, 0)?);
+        return Ok(FileOrMemBuf::new(None, 0)?);
     }
-    let mut auth_bits = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
+    let mut auth_bits = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
         let and_shares: Vec<_> = and_shares.iter()?.collect::<Result<_, _>>()?;
         (_, auth_bits) = try_join(send_to(channel, p_fpre, "AND shares", &and_shares), async {
-            Ok(MaybeFileBuf::Memory {
+            Ok(FileOrMemBuf::Memory {
                 data: recv_vec_from(channel, p_fpre, "AND shares", num_and_ops).await?,
             })
         })
@@ -594,12 +594,12 @@ async fn gen_auth_bits(
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    mut auth_bits: MaybeFileBuf<Share>,
-    random_shares: &mut MaybeFileBuf<Share>,
+    mut auth_bits: FileOrMemBuf<Share>,
+    random_shares: &mut FileOrMemBuf<Share>,
 ) -> Result<
     (
-        MaybeFileBuf<[Share; 4]>,
-        Vec<MaybeFileBuf<GarbledGate>>,
+        FileOrMemBuf<[Share; 4]>,
+        Vec<FileOrMemBuf<GarbledGate>>,
         Vec<Share>,
         Vec<Label>,
         Vec<Label>,
@@ -621,7 +621,7 @@ async fn garble(
     let mut labels = vec![Label(0); circ.max_reg_count];
     let mut input_labels = vec![];
     let mut auth_bits = auth_bits.iter()?;
-    let mut table_shares = MaybeFileBuf::default();
+    let mut table_shares = FileOrMemBuf::default();
     let mut files = vec![];
     let max_garbled_gates_per_chunk = ctx.and_share_batch_size();
 
@@ -702,7 +702,7 @@ async fn garble(
         }
     } else {
         files = try_join_all((0..p_max).map(async |p| {
-            let mut f = MaybeFileBuf::new(ctx.tmp_dir, num_and_ops)?;
+            let mut f = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
             if p != p_eval {
                 for chunk_size in chunk_size_iter(num_and_ops, max_garbled_gates_per_chunk) {
                     let gates =
@@ -716,7 +716,7 @@ async fn garble(
             }
         }))
         .await?;
-        table_shares = MaybeFileBuf::new(tmp_dir, num_and_ops)?;
+        table_shares = FileOrMemBuf::new(tmp_dir, num_and_ops)?;
         let max_chunk_size = ctx.and_share_batch_size();
         let mut table_shares_chunk = Vec::with_capacity(max_chunk_size);
         for (w, inst) in circ.insts.iter().enumerate() {
@@ -773,7 +773,7 @@ async fn input_processing(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     input_labels: &[Label],
-    random_shares: &mut MaybeFileBuf<Share>,
+    random_shares: &mut FileOrMemBuf<Share>,
 ) -> Result<(Vec<Option<bool>>, Vec<Option<Vec<Label>>>), Error> {
     let &Context {
         channel,
@@ -884,8 +884,8 @@ async fn input_processing(
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
-    mut table_shares: MaybeFileBuf<[Share; 4]>,
-    mut garble_files: Vec<MaybeFileBuf<GarbledGate>>,
+    mut table_shares: FileOrMemBuf<[Share; 4]>,
+    mut garble_files: Vec<FileOrMemBuf<GarbledGate>>,
     masked_inputs: Vec<Option<bool>>,
     input_labels: Vec<Option<Vec<Label>>>,
 ) -> Result<(Vec<bool>, Vec<Vec<Label>>), Error> {

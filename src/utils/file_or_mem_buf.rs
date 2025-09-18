@@ -13,17 +13,17 @@ use tempfile::tempfile_in;
 /// Abstraction over a chunked buffer backed by a temporary file or in-memory
 ///
 /// This type can be used to store intermediate data serialized in chunks in a temporary file.
-/// If the [`MaybeFileBuf::new`] is passed a [`Path`] to a directory, a temporary file will be
-/// created in that directory. Subsequent [`MaybeFileBuf::write_chunk`] calls will serialize the
-/// chunk into the file. Once all data is written, [`MaybeFileBuf::iter`] can be used to create
+/// If the [`FileOrMemBuf::new`] is passed a [`Path`] to a directory, a temporary file will be
+/// created in that directory. Subsequent [`FileOrMemBuf::write_chunk`] calls will serialize the
+/// chunk into the file. Once all data is written, [`FileOrMemBuf::iter`] can be used to create
 /// an iterator for the temporary file (or the in-memory Vec if no directory was provided).
 /// Only ever one of the previously written chunks will be held in memory.
-pub(crate) enum MaybeFileBuf<T> {
+pub(crate) enum FileOrMemBuf<T> {
     ChunkedTmpFile { write: BufWriter<Arc<File>> },
     Memory { data: Vec<T> },
 }
 
-pub(crate) enum MaybeFileBufIter<'a, T> {
+pub(crate) enum Iter<'a, T> {
     ChunkedTmpFile {
         read: BufReader<Arc<File>>,
         chunk_iter: std::vec::IntoIter<T>,
@@ -33,12 +33,12 @@ pub(crate) enum MaybeFileBufIter<'a, T> {
     },
 }
 
-pub(crate) enum MaybeFileBufChunkIter<'a, T> {
+pub(crate) enum ChunkIter<'a, T> {
     ChunkedTmpFile { read: BufReader<Arc<File>> },
     Memory { iter: std::slice::Chunks<'a, T> },
 }
 
-impl<T> MaybeFileBuf<T> {
+impl<T> FileOrMemBuf<T> {
     /// Create an optionally temp file backed buffer.
     ///
     /// The capacity is only used for the in-memory buf if `dir` is `None`.
@@ -54,42 +54,42 @@ impl<T> MaybeFileBuf<T> {
         }
     }
 
-    /// Create an iterator for the [`MaybeFileBuf`].
+    /// Create an iterator for the [`FileOrMemBuf`].
     ///
-    /// For the [`MaybeFileBuf::ChunkedTmpFile`] variant, the matching iterator
+    /// For the [`FileOrMemBuf::ChunkedTmpFile`] variant, the matching iterator
     /// will only read one of the written chunks (+ potentially the default capacity of
     /// a BufReader) and keep it in memory until it is iterated over. Then the next
     /// chunk is loaded.
-    pub(crate) fn iter(&mut self) -> std::io::Result<MaybeFileBufIter<'_, T>> {
+    pub(crate) fn iter(&mut self) -> std::io::Result<Iter<'_, T>> {
         match self {
-            MaybeFileBuf::ChunkedTmpFile { write } => {
+            FileOrMemBuf::ChunkedTmpFile { write } => {
                 write.flush()?;
                 let mut file = Arc::clone(write.get_ref());
                 file.rewind()?;
                 let read = BufReader::new(file);
-                Ok(MaybeFileBufIter::ChunkedTmpFile {
+                Ok(Iter::ChunkedTmpFile {
                     read,
                     chunk_iter: Default::default(),
                 })
             }
-            MaybeFileBuf::Memory { data } => Ok(MaybeFileBufIter::Memory { iter: data.iter() }),
+            FileOrMemBuf::Memory { data } => Ok(Iter::Memory { iter: data.iter() }),
         }
     }
 
     /// Iterator over the chunks stored in the file or a chunk iterator for the in-memory buf.
     ///
-    /// The `chunks` parameter is only used in the [`MaybeFileBuf::Memory`] case, otherwise the
-    /// exact chunks that were written to the file by [`MaybeFileBuf::write_chunk`] are returned.
-    pub(crate) fn chunks(&mut self, size: usize) -> std::io::Result<MaybeFileBufChunkIter<'_, T>> {
+    /// The `chunks` parameter is only used in the [`FileOrMemBuf::Memory`] case, otherwise the
+    /// exact chunks that were written to the file by [`FileOrMemBuf::write_chunk`] are returned.
+    pub(crate) fn chunks(&mut self, size: usize) -> std::io::Result<ChunkIter<'_, T>> {
         match self {
-            MaybeFileBuf::ChunkedTmpFile { write } => {
+            FileOrMemBuf::ChunkedTmpFile { write } => {
                 write.flush()?;
                 let mut file = Arc::clone(write.get_ref());
                 file.rewind()?;
                 let read = BufReader::new(file);
-                Ok(MaybeFileBufChunkIter::ChunkedTmpFile { read })
+                Ok(ChunkIter::ChunkedTmpFile { read })
             }
-            MaybeFileBuf::Memory { data } => Ok(MaybeFileBufChunkIter::Memory {
+            FileOrMemBuf::Memory { data } => Ok(ChunkIter::Memory {
                 iter: data.chunks(size),
             }),
         }
@@ -100,21 +100,21 @@ impl<T> MaybeFileBuf<T> {
     }
 }
 
-impl<T> Default for MaybeFileBuf<T> {
+impl<T> Default for FileOrMemBuf<T> {
     fn default() -> Self {
         Self::Memory { data: vec![] }
     }
 }
 
-impl<T: Serialize + Clone> MaybeFileBuf<T> {
+impl<T: Serialize + Clone> FileOrMemBuf<T> {
     /// Write a chunk to the temporary file or in-memory buffer.
     pub(crate) fn write_chunk(&mut self, chunk: &[T]) -> bincode::Result<()> {
         match self {
-            MaybeFileBuf::ChunkedTmpFile { write, .. } => {
+            FileOrMemBuf::ChunkedTmpFile { write, .. } => {
                 let opts = Self::bincode();
                 opts.serialize_into(write, chunk)?;
             }
-            MaybeFileBuf::Memory { data } => {
+            FileOrMemBuf::Memory { data } => {
                 data.extend_from_slice(chunk);
             }
         }
@@ -122,16 +122,16 @@ impl<T: Serialize + Clone> MaybeFileBuf<T> {
     }
 }
 
-impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufIter<'a, T> {
+impl<'a, T: DeserializeOwned + Clone> Iterator for Iter<'a, T> {
     type Item = bincode::Result<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            MaybeFileBufIter::ChunkedTmpFile { read, chunk_iter } => {
+            Iter::ChunkedTmpFile { read, chunk_iter } => {
                 if let Some(gate) = chunk_iter.next() {
                     return Some(Ok(gate));
                 }
-                let opts = MaybeFileBuf::<T>::bincode();
+                let opts = FileOrMemBuf::<T>::bincode();
                 match opts.deserialize_from::<_, Vec<T>>(read) {
                     Ok(chunk) => {
                         *chunk_iter = chunk.into_iter();
@@ -148,14 +148,14 @@ impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufIter<'a, T> {
                     }
                 }
             }
-            MaybeFileBufIter::Memory { iter } => iter.next().map(|e| Ok(e.clone())),
+            Iter::Memory { iter } => iter.next().map(|e| Ok(e.clone())),
         }
     }
 }
 
 // The drop impl ensures that we can create an iterator, and afterwards continue
 // writing to the end of the file and don't overwrite existing content.
-impl<'a, T> Drop for MaybeFileBufIter<'a, T> {
+impl<'a, T> Drop for Iter<'a, T> {
     fn drop(&mut self) {
         if let Self::ChunkedTmpFile { read, .. } = self {
             read.get_mut()
@@ -165,13 +165,13 @@ impl<'a, T> Drop for MaybeFileBufIter<'a, T> {
     }
 }
 
-impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufChunkIter<'a, T> {
+impl<'a, T: DeserializeOwned + Clone> Iterator for ChunkIter<'a, T> {
     type Item = bincode::Result<Cow<'a, [T]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            MaybeFileBufChunkIter::ChunkedTmpFile { read } => {
-                let opts = MaybeFileBuf::<T>::bincode();
+            ChunkIter::ChunkedTmpFile { read } => {
+                let opts = FileOrMemBuf::<T>::bincode();
                 match opts.deserialize_from::<_, Vec<T>>(read) {
                     Ok(chunk) => Some(Ok(Cow::Owned(chunk))),
                     Err(err) => {
@@ -184,12 +184,12 @@ impl<'a, T: DeserializeOwned + Clone> Iterator for MaybeFileBufChunkIter<'a, T> 
                     }
                 }
             }
-            MaybeFileBufChunkIter::Memory { iter } => iter.next().map(|e| Ok(Cow::Borrowed(e))),
+            ChunkIter::Memory { iter } => iter.next().map(|e| Ok(Cow::Borrowed(e))),
         }
     }
 }
 
-impl<'a, T> Drop for MaybeFileBufChunkIter<'a, T> {
+impl<'a, T> Drop for ChunkIter<'a, T> {
     fn drop(&mut self) {
         if let Self::ChunkedTmpFile { read, .. } = self {
             read.get_mut()
