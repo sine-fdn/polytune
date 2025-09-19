@@ -9,6 +9,7 @@ anyhow = "1.0.99"
 axum = "0.8.4"
 blake3 = "1.5.1"
 clap = { version = "4.5.47", features = ["derive"] }
+futures = "0.3.31"
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 polytune-test-utils = { path = "../../crates/polytune-test-utils" }
 reqwest = { version = "0.12.23", features = ["json"] }

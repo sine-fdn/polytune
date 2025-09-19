@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use clap::Parser;
+use futures::future::try_join_all;
 use polytune::{
     channel::Channel,
     garble_lang::{
@@ -40,7 +41,7 @@ use std::{
 use tokio::{
     fs,
     sync::{
-        Mutex,
+        Mutex, Notify,
         mpsc::{Receiver, Sender, channel},
     },
     time::{sleep, timeout},
@@ -105,6 +106,8 @@ struct ConstsRequest {
 struct MpcComms {
     consts: HashMap<String, HashMap<String, Literal>>,
     senders: Vec<Sender<Vec<u8>>>,
+    sync_received: Arc<Notify>,
+    sync_requested: Arc<Notify>,
 }
 
 type MpcState = Arc<Mutex<MpcComms>>;
@@ -133,9 +136,14 @@ fn main() -> Result<(), Error> {
 
 async fn async_main(cli: Cli, policy: Policy) -> Result<(), Error> {
     let Cli { addr, port, .. } = cli;
+    let sync_received = Arc::new(Notify::new());
+    let sync_requested = Arc::new(Notify::new());
+
     let state = Arc::new(Mutex::new(MpcComms {
         consts: HashMap::new(),
         senders: vec![],
+        sync_received,
+        sync_requested,
     }));
 
     let log_layer = TraceLayer::new_for_http()
@@ -151,6 +159,7 @@ async fn async_main(cli: Cli, policy: Policy) -> Result<(), Error> {
     let app = Router::new()
         // to check whether a server is running:
         .route("/ping", get(ping))
+        .route("/sync", post(sync))
         // to kick off an MPC session:
         .route("/run", post(run))
         // to receive constants from other parties:
@@ -582,8 +591,12 @@ async fn execute_mpc(
             urls: participants.clone(),
             party: *party,
             recv: receivers,
+            sync_received: Arc::clone(&state.sync_received),
+            sync_requested: Arc::clone(&state.sync_requested),
         }
     };
+
+    channel.barrier().await.context("barrier failed")?;
 
     // We run the computation using MPC, which might take some time...
     let output = mpc(&channel, &circuit, &input, 0, *party, &p_out).await?;
@@ -653,6 +666,11 @@ async fn ping() -> &'static str {
     "pong"
 }
 
+async fn sync(State((_, state)): State<(Policy, MpcState)>) {
+    state.lock().await.sync_requested.notified().await;
+    state.lock().await.sync_received.notify_one();
+}
+
 async fn run(State((policy, state)): State<(Policy, MpcState)>, Json(body): Json<PolicyRequest>) {
     if policy.participants != body.participants || policy.leader != body.leader {
         error!("Policy not accepted: {body:?}");
@@ -703,6 +721,29 @@ struct HttpChannel {
     urls: Vec<Url>,
     party: usize,
     recv: Vec<Mutex<Receiver<Vec<u8>>>>,
+    sync_received: Arc<Notify>,
+    sync_requested: Arc<Notify>,
+}
+
+impl HttpChannel {
+    async fn barrier(&self) -> anyhow::Result<()> {
+        if self.party == 0 {
+            let client = reqwest::Client::new();
+
+            try_join_all(
+                self.urls[1..]
+                    .iter()
+                    .map(|url| client.post(&format!("{url}sync")).send()),
+            )
+            .await
+            .context("Sync error")?;
+        } else {
+            self.sync_requested.notify_one();
+            self.sync_received.notified().await;
+        }
+
+        Ok(())
+    }
 }
 
 impl Channel for HttpChannel {
