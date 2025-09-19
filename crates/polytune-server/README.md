@@ -1,16 +1,8 @@
-# API Integration
+# Polytune Server
 
-This example is more advanced and shows how to provide data using a simple API directly as Garble literals, join them together (using the built-in `join` function of the Garble language) and send the output to an API endpoint that accepts Garble literals.
+This crate implements a full-fledged MPC server which can receive requests containing a program specified as a Garble program, coordinate with multiple instances of this server, execute the provided program securely using Polytune, and return the result.
 
-The example uses two parties, which communicate over MPC without the need for a trusted (or semi-trusted) third party. Each party runs an HTTP server to receive incoming messages and sends messages by sending HTTP requests to the other party. The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call.
-
-## How to Run the Example
-
-The easiest way to run the example is as a test that orchestrates the two parties:
-
-```
-cargo t --profile debug-release
-```
+The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call to the `polytune-server`.
 
 ## How to Deploy the Engine
 
@@ -20,15 +12,15 @@ A simple Dockerfile is provided as an example of how to run the MPC engine insid
 
 ```
 EXPOSE 8000
-WORKDIR /usr/src/polytune/examples/api-integration
-CMD ["polytune-api-integration", "--addr=0.0.0.0", "--port=8000"]
+WORKDIR /usr/src/polytune/crates/polytune-server
+CMD ["polytune-server", "--addr=0.0.0.0", "--port=8000"]
 ```
 
 To build and run the container, use the following commands and **make sure to run them from the top level directory of the repository**:
 
 ```
-docker build -f examples/api-integration/Dockerfile --tag 'polytune0' .
-docker run -t -p 8000:8000 polytune0
+docker build -f crates/polytune-server/Dockerfile --tag 'polytune-server' .
+docker run -t -p 8000:8000 polytune-server
 ```
 
 Starting the container does not immediately start an MPC execution, this needs to be explicitly triggered with a POST request to `localhost:8000/launch` while providing the necessary configuration file (see `policy0.json` and `policy1.json` for example configs) as a JSON body.
