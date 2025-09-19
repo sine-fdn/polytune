@@ -43,7 +43,7 @@ impl<OT: OtReceiver<Msg = Block> + Malicious> Sender<OT> {
         p_to: usize,
         shared_rand: &mut ChaCha20Rng,
     ) -> Result<Vec<u8>, Error> {
-        let m = if m % 8 != 0 { m + (8 - m % 8) } else { m };
+        let m = m.next_multiple_of(8);
         let ncols = m + 128 + SSP;
         let qs = self.ot.send_setup(channel, ncols, p_to).await?;
         // Check correlation
@@ -162,7 +162,7 @@ impl<OT: OtSender<Msg = Block> + Malicious> Receiver<OT> {
         shared_rand: &mut ChaCha20Rng,
     ) -> Result<Vec<u8>, Error> {
         let m = inputs.len();
-        let m = if m % 8 != 0 { m + (8 - m % 8) } else { m };
+        let m = m.next_multiple_of(8);
         let m_ = m + 128 + SSP;
         let mut r = boolvec_to_u8vec(inputs);
         r.extend((0..(m_ - m) / 8).map(|_| rand::random::<u8>()));

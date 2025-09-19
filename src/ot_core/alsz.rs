@@ -74,7 +74,7 @@ impl<OT: OtReceiver<Msg = Block> + SemiHonest> Sender<OT> {
         p_to: usize,
     ) -> Result<Vec<u8>, Error> {
         const nrows: usize = 128;
-        let ncols = if m % 8 != 0 { m + (8 - m % 8) } else { m };
+        let ncols = m.next_multiple_of(8);
         let mut qs = vec![0u8; nrows * ncols / 8];
         let zero = vec![0u8; ncols / 8];
         let uvec: Vec<Vec<u8>> =
@@ -167,7 +167,7 @@ impl<OT: OtSender<Msg = Block> + SemiHonest> Receiver<OT> {
         p_to: usize,
     ) -> Result<Vec<u8>, Error> {
         const nrows: usize = 128;
-        let ncols = if m % 8 != 0 { m + (8 - m % 8) } else { m };
+        let ncols = m.next_multiple_of(8);
         let mut ts = vec![0u8; nrows * ncols / 8];
         let mut gvec = vec![];
         for j in 0..self.rngs.len() {
@@ -283,7 +283,7 @@ pub(crate) fn u8vec_to_boolvec(v: &[u8]) -> Vec<bool> {
 /// boolvec to u8vec
 #[inline]
 pub(crate) fn boolvec_to_u8vec(bv: &[bool]) -> Vec<u8> {
-    let offset = if bv.len() % 8 == 0 { 0 } else { 1 };
+    let offset = if bv.len().is_multiple_of(8) { 0 } else { 1 };
     let mut v = vec![0u8; bv.len() / 8 + offset];
     for (i, b) in bv.iter().enumerate() {
         v[i / 8] |= (*b as u8) << (i % 8);
