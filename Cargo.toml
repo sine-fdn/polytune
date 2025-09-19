@@ -1,5 +1,6 @@
 workspace = { members = [
     "crates/polytune-test-utils",
+    "crates/polytune-server",
     "examples/api-integration",
     "examples/http-multi-server-channels",
     "examples/http-single-server-channels",
