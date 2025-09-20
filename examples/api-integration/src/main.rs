@@ -33,6 +33,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tempfile::tempdir_in;
 use tokio::{
     sync::{
         Mutex, Notify,
@@ -344,6 +345,9 @@ async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>
         0,
         *party,
         &p_out,
+        // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
+        // and the files will be in memory and not on the disk
+        Some(tempdir_in("./").context("Unable to create tempdir")?.path()),
     )
     .await?;
 

@@ -32,6 +32,9 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
+use std::fmt::Debug;
+use std::iter;
+use std::path::Path;
 use std::{cmp, sync::Mutex};
 
 use futures::future::{try_join, try_join_all};
@@ -41,6 +44,7 @@ use rand::random;
 use rand_chacha::ChaCha20Rng;
 use tracing::debug;
 
+use crate::utils::file_or_mem_buf::FileOrMemBuf;
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
     mpc::{
@@ -88,6 +92,10 @@ pub enum Error {
     InvalidOutputParty(usize),
     /// A message was sent, but it contained no data.
     EmptyMsg,
+    /// An error occured while using a temporary file.
+    TempFile(std::io::Error),
+    /// An error occured while serializing to/deserializing from a temporary file.
+    TempFileSerDe(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl std::error::Error for Error {}
@@ -107,6 +115,13 @@ impl std::fmt::Display for Error {
             Error::MissingOutputParties => write!(f, "Output parties are missing"),
             Error::InvalidOutputParty(p) => write!(f, "Party {p} is not a valid output party"),
             Error::EmptyMsg => f.write_str("The message sent by the other party was empty"),
+            Error::TempFile(e) => {
+                write!(f, "An error occured while using a temporary file: {e:?}")
+            }
+            Error::TempFileSerDe(e) => write!(
+                f,
+                "An error occured while serializing to/deserializing from a temporary file: {e:?}",
+            ),
         }
     }
 }
@@ -132,6 +147,18 @@ impl From<garble::Error> for Error {
 impl From<faand::Error> for Error {
     fn from(e: faand::Error) -> Self {
         Self::PreprocessingError(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::TempFile(e)
+    }
+}
+
+impl From<bincode::Error> for Error {
+    fn from(e: bincode::Error) -> Self {
+        Self::TempFileSerDe(Box::new(e))
     }
 }
 
@@ -188,6 +215,13 @@ pub(crate) enum Preprocessor {
 /// compute a function without revealing their private inputs. The protocol consists of several
 /// phases: preprocessing, input processing, circuit evaluation, and output determination.
 ///
+/// When an optional `tmp_dir` path is provided, Polytune will create temporary files in the
+/// specified directory to reduce the peak memory consumption of the protocol evaluation.
+/// Note that files created under `/tmp` on many Linux systems are stored in a
+/// [tmpfs](https://www.kernel.org/doc/html/latest/filesystems/tmpfs.html) which will not
+/// actually write the files to disk. We recommend creating a temporary directory for example
+/// in `/var/tmp`.
+///
 /// # Arguments
 ///
 /// * `channel` - Communication channel to interact with other parties
@@ -196,6 +230,8 @@ pub(crate) enum Preprocessor {
 /// * `p_eval` - Index of the party that will evaluate the garbled circuit
 /// * `p_own` - Index of the current party executing this function
 /// * `p_out` - Indices of parties that will receive the computation output
+/// * `tmp_dir` - An optional directory path where Polytune will store
+///   indermediate data if provided. This improves peak memory consumption.
 ///
 /// # Returns
 ///
@@ -243,13 +279,16 @@ pub async fn mpc(
     p_eval: usize,
     p_own: usize,
     p_out: &[usize],
+    tmp_dir: Option<&Path>,
 ) -> Result<Vec<bool>, Error> {
     let p_fpre = Preprocessor::Untrusted;
-    let ctx = Context::new(channel, circuit, inputs, p_fpre, p_eval, p_own, p_out);
+    let ctx = Context::new(
+        channel, circuit, inputs, p_fpre, p_eval, p_own, p_out, tmp_dir,
+    );
     _mpc(&ctx).await
 }
 
-pub(crate) struct Context<'circ, 'inp, 'out, 'ch, C: Channel> {
+pub(crate) struct Context<'circ, 'inp, 'out, 'ch, 'p, C: Channel> {
     channel: &'ch C,
     circ: &'circ Circuit,
     inputs: &'inp [bool],
@@ -261,9 +300,11 @@ pub(crate) struct Context<'circ, 'inp, 'out, 'ch, C: Channel> {
     p_out: &'out [usize],
     num_and_ops: usize,
     num_inputs: usize,
+    tmp_dir: Option<&'p Path>,
 }
 
-impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
+impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p, C> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         channel: &'ch C,
         circ: &'circ Circuit,
@@ -272,6 +313,7 @@ impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
         p_eval: usize,
         p_own: usize,
         p_out: &'out [usize],
+        tmp_dir: Option<&'p Path>,
     ) -> Self {
         let p_max = circ.input_regs.len();
         let is_contrib = p_own != p_eval;
@@ -288,30 +330,49 @@ impl<'circ, 'inp, 'out, 'ch, C: Channel> Context<'circ, 'inp, 'out, 'ch, C> {
             p_out,
             num_and_ops: circ.and_ops,
             num_inputs,
+            tmp_dir,
         }
     }
 
-    fn num_insts(&self) -> usize {
-        self.circ.insts.len()
+    fn random_shares_batch_size(&self) -> usize {
+        let random_shares = self.num_inputs + self.num_and_ops;
+        cmp::min(
+            random_shares,
+            cmp::max(random_shares.div_ceil(3 * 3), 1_000),
+        )
+    }
+
+    fn and_share_batch_size(&self) -> usize {
+        // Generate the authenticated bits in batches. This reduces peak memory consumption,
+        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
+        // auth bits, we need 9M random Shares (b = 3).
+        // The minimum batch size is 1k or inputs + and_ops. For small circuits it does not make sense to go lower.
+        // TODO choose correct batch_size?
+        cmp::min(
+            self.num_and_ops,
+            cmp::max(self.num_and_ops.div_ceil(3 * 3), 1_000),
+        )
     }
 }
 
-pub(crate) async fn _mpc(ctx: &Context<'_, '_, '_, '_, impl Channel>) -> Result<Vec<bool>, Error> {
+pub(crate) async fn _mpc(
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+) -> Result<Vec<bool>, Error> {
     validate(ctx)?;
     // fn-independent preprocessing:
-    let (delta, random_shares, shared_two_by_two, multi_shared_rand) =
+    let (delta, mut random_shares, shared_two_by_two, multi_shared_rand) =
         fn_independent_pre(ctx).await?;
 
     // fn-dependent preprocessing:
-    let and_shares = init_and_shares(ctx, &random_shares)?;
+    let and_shares = init_and_shares(ctx, &mut random_shares)?;
     let auth_bits =
         gen_auth_bits(ctx, delta, and_shares, shared_two_by_two, multi_shared_rand).await?;
     let (table_shares, garbled_gates, shares, labels, input_labels) =
-        garble(ctx, delta, auth_bits, &random_shares).await?;
+        garble(ctx, delta, auth_bits, &mut random_shares).await?;
 
     // input processing:
     let (masked_inputs, input_labels) =
-        input_processing(ctx, delta, &input_labels, &random_shares).await?;
+        input_processing(ctx, delta, &input_labels, &mut random_shares).await?;
 
     // circuit evaluation:
     let (values, labels_eval) = evaluate(
@@ -361,11 +422,11 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
 }
 
 async fn fn_independent_pre(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<
     (
         Delta,
-        Vec<Share>,
+        FileOrMemBuf<Share>,
         Option<Vec<Vec<Option<ChaCha20Rng>>>>,
         Option<ChaCha20Rng>,
     ),
@@ -382,7 +443,7 @@ async fn fn_independent_pre(
     } = ctx;
     let secret_bits = num_inputs + num_and_ops;
     let delta: Delta;
-    let random_shares: Vec<Share>;
+    let mut random_shares: FileOrMemBuf<Share>;
     let mut shared_two_by_two = None;
     let mut multi_shared_rand = None;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
@@ -393,42 +454,55 @@ async fn fn_independent_pre(
             .ok_or(Error::EmptyMsg)?;
 
         send_to(channel, p_fpre, "random shares", &[secret_bits as u32]).await?;
-        random_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
+        let fpre_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
+        random_shares = FileOrMemBuf::Memory { data: fpre_shares };
     } else {
+        random_shares = FileOrMemBuf::new(ctx.tmp_dir, secret_bits)?;
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(channel, p_own, p_max).await?);
         multi_shared_rand = Some(shared_rng(channel, p_own, p_max).await?);
-
-        random_shares = fashare(
-            (channel, delta),
-            p_own,
-            p_max,
-            secret_bits,
-            shared_two_by_two.as_mut().expect("Set above"),
-            multi_shared_rand.as_mut().expect("Set above"),
-        )
-        .await?;
+        for chunk_size in chunk_size_iter(secret_bits, ctx.random_shares_batch_size()) {
+            let chunk_random_shares = fashare(
+                (channel, delta),
+                p_own,
+                p_max,
+                chunk_size,
+                shared_two_by_two.as_mut().expect("Set above"),
+                multi_shared_rand.as_mut().expect("Set above"),
+            )
+            .await?;
+            random_shares.write_chunk(&chunk_random_shares)?;
+        }
     }
     Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
 fn init_and_shares(
     ctx: &Context<impl Channel>,
-    random_shares: &[Share],
-) -> Result<Vec<(Share, Share)>, Error> {
-    let &Context { circ, .. } = ctx;
-    let mut random_shares_iter = random_shares.iter();
+    random_shares: &mut FileOrMemBuf<Share>,
+) -> Result<FileOrMemBuf<(Share, Share)>, Error> {
+    let &Context {
+        circ, num_and_ops, ..
+    } = ctx;
+    if num_and_ops == 0 {
+        return Ok(FileOrMemBuf::new(None, 0)?);
+    }
+    let mut random_shares_iter = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
 
-    let mut and_shares = Vec::new();
+    let mut and_shares = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
+    // It is important that we use the and_share_batch_size as the max_chunk_size here, because we will directly
+    // read the chunks in the gen_auth_bits method.
+    let max_chunk_size = ctx.and_share_batch_size();
+    let mut chunk = Vec::with_capacity(max_chunk_size);
     for (w, inst) in circ.insts.iter().enumerate() {
         match inst.op {
             Op::Input(_) | Op::And(_) => {
-                let Some(share) = random_shares_iter.next() else {
-                    return Err(MpcError::MissingPreprocessingShareForInst(w).into());
-                };
+                let share = random_shares_iter
+                    .next()
+                    .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                 if let Op::And(And(x, y)) = inst.op {
-                    and_shares.push((shares[x].clone(), shares[y].clone()));
+                    chunk.push((shares[x].clone(), shares[y].clone()));
                 }
                 shares[inst.out] = share.clone();
             }
@@ -439,17 +513,24 @@ fn init_and_shares(
                 shares[inst.out] = &shares[x] ^ &shares[y];
             }
         }
+        if chunk.len() >= max_chunk_size {
+            and_shares.write_chunk(&chunk)?;
+            chunk.clear();
+        }
+    }
+    if !chunk.is_empty() {
+        and_shares.write_chunk(&chunk)?;
     }
     Ok(and_shares)
 }
 
 async fn gen_auth_bits(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    and_shares: Vec<(Share, Share)>,
+    mut and_shares: FileOrMemBuf<(Share, Share)>,
     mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
     mut multi_shared_rand: Option<ChaCha20Rng>,
-) -> Result<Vec<Share>, Error> {
+) -> Result<FileOrMemBuf<Share>, Error> {
     let &Context {
         channel,
         p_fpre,
@@ -458,28 +539,28 @@ async fn gen_auth_bits(
         num_and_ops,
         ..
     } = ctx;
-    let mut auth_bits: Vec<Share> = vec![];
+    if num_and_ops == 0 {
+        return Ok(FileOrMemBuf::new(None, 0)?);
+    }
+    let mut auth_bits = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
-        (_, auth_bits) = try_join(
-            send_to(channel, p_fpre, "AND shares", &and_shares),
-            recv_vec_from(channel, p_fpre, "AND shares", num_and_ops),
-        )
+        let and_shares: Vec<_> = and_shares.iter()?.collect::<Result<_, _>>()?;
+        (_, auth_bits) = try_join(send_to(channel, p_fpre, "AND shares", &and_shares), async {
+            Ok(FileOrMemBuf::Memory {
+                data: recv_vec_from(channel, p_fpre, "AND shares", num_and_ops).await?,
+            })
+        })
         .await?;
     } else {
-        // Generate the authenticated bits in batches. This reduces peak memory consumption,
-        // because, for each authenticated bit, we need 3 * b random shares. E.g. for 1M
-        // auth bits, we need 9M random Shares (b = 3).
-        // The minimum batch size is 1k. For small circuits it does not make sense to go lower.
-        // This is done by taking the max of the potential batch size and 1k
-        // TODO choose correct batch_size?
-        let batch_size = cmp::max(and_shares.len().div_ceil(3 * 3), 1_000);
+        let batch_size = ctx.and_share_batch_size();
         let shared_two_by_two = shared_two_by_two
             .as_mut()
             .expect("Set in fn_independent_pre");
         let multi_shared_rand = multi_shared_rand
             .as_mut()
             .expect("Set in fn_independent_pre");
-        for and_shares in and_shares.chunks(batch_size) {
+        for and_shares in and_shares.chunks(batch_size)? {
+            let and_shares = and_shares?;
             debug!(size = and_shares.len(), "Generating auth bits batch");
 
             // TODO choose batch_size to minimize bucket_size?
@@ -496,7 +577,7 @@ async fn gen_auth_bits(
             .await?;
             let batch_auth_bits = beaver_aand(
                 (channel, delta),
-                and_shares,
+                &and_shares,
                 p_own,
                 p_max,
                 and_shares.len(),
@@ -504,21 +585,21 @@ async fn gen_auth_bits(
                 &xyz_shares,
             )
             .await?;
-            auth_bits.extend_from_slice(&batch_auth_bits);
+            auth_bits.write_chunk(&batch_auth_bits)?;
         }
     }
     Ok(auth_bits)
 }
 
 async fn garble(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
-    auth_bits: Vec<Share>,
-    random_shares: &[Share],
+    mut auth_bits: FileOrMemBuf<Share>,
+    random_shares: &mut FileOrMemBuf<Share>,
 ) -> Result<
     (
-        Vec<Option<[Share; 4]>>,
-        Vec<Vec<Option<GarbledGate>>>,
+        FileOrMemBuf<[Share; 4]>,
+        Vec<FileOrMemBuf<GarbledGate>>,
         Vec<Share>,
         Vec<Label>,
         Vec<Label>,
@@ -531,30 +612,33 @@ async fn garble(
         is_contrib,
         p_eval,
         p_max,
+        num_and_ops,
+        tmp_dir,
         ..
     } = ctx;
-    let num_insts = ctx.num_insts();
-
-    let mut random_shares = random_shares.iter();
+    let mut random_shares = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
     let mut labels = vec![Label(0); circ.max_reg_count];
     let mut input_labels = vec![];
-    let mut auth_bits = auth_bits.into_iter();
-    let mut table_shares = vec![];
-    let mut garbled_gates = vec![];
+    let mut auth_bits = auth_bits.iter()?;
+    let mut table_shares = FileOrMemBuf::default();
+    let mut files = vec![];
+    let max_garbled_gates_per_chunk = ctx.and_share_batch_size();
+
     if is_contrib {
-        let mut preprocessed_gates = vec![None; num_insts];
+        let mut preprocessed_gates = vec![];
         for (w, inst) in circ.insts.iter().enumerate() {
             match inst.op {
                 Op::And(And(x, y)) => {
                     let Share(r_x, mac_r_x_key_s_x) = shares[x].clone();
                     let Share(r_y, mac_r_y_key_s_y) = shares[y].clone();
-                    let rand_share = random_shares.next().unwrap().clone();
+                    let rand_share = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                     let Share(r_gamma, mac_r_gamma_key_s_gamma) = rand_share.clone();
-                    let Some(sigma) = auth_bits.next() else {
-                        return Err(MpcError::MissingAndShareForInst(w).into());
-                    };
-                    let Share(r_sig, mac_r_sig_key_s_sig) = sigma;
+                    let Share(r_sig, mac_r_sig_key_s_sig) = auth_bits
+                        .next()
+                        .ok_or(MpcError::MissingAndShareForInst(w))??;
                     let r = r_sig ^ r_gamma;
                     let mac_r_key_s_0 = &mac_r_sig_key_s_sig ^ &mac_r_gamma_key_s_gamma;
                     let mac_r_key_s_1 = &mac_r_key_s_0 ^ &mac_r_x_key_s_x;
@@ -587,10 +671,13 @@ async fn garble(
                     let garbled2 = encrypt(&k2, (row2.bit(), row2.macs(), row2_label))?;
                     let garbled3 = encrypt(&k3, (row3.bit(), row3.macs(), row3_label))?;
 
-                    preprocessed_gates[w] =
-                        Some(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
+                    preprocessed_gates.push(GarbledGate([garbled0, garbled1, garbled2, garbled3]));
                     shares[inst.out] = rand_share;
                     labels[inst.out] = label_gamma_0;
+                    if preprocessed_gates.len() >= max_garbled_gates_per_chunk {
+                        send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+                        preprocessed_gates.clear();
+                    }
                 }
                 Op::Xor(Xor(x, y)) => {
                     shares[inst.out] = &shares[x] ^ &shares[y];
@@ -604,35 +691,49 @@ async fn garble(
                     let label = Label(random());
                     labels[inst.out] = label;
                     input_labels.push(label);
-                    shares[inst.out] = random_shares.next().unwrap().clone();
+                    shares[inst.out] = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                 }
             }
         }
-
-        send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+        if !preprocessed_gates.is_empty() {
+            send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
+        }
     } else {
-        garbled_gates = try_join_all((0..p_max).map(async |p| {
+        files = try_join_all((0..p_max).map(async |p| {
+            let mut f = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
             if p != p_eval {
-                recv_vec_from(channel, p, "preprocessed gates", num_insts).await
+                for chunk_size in chunk_size_iter(num_and_ops, max_garbled_gates_per_chunk) {
+                    let gates =
+                        recv_vec_from::<GarbledGate>(channel, p, "preprocessed gates", chunk_size)
+                            .await?;
+                    f.write_chunk(&gates)?;
+                }
+                Ok::<_, Error>(f)
             } else {
-                Ok(vec![])
+                Ok(f)
             }
         }))
         .await?;
-        table_shares = vec![None; num_insts];
+        table_shares = FileOrMemBuf::new(tmp_dir, num_and_ops)?;
+        let max_chunk_size = ctx.and_share_batch_size();
+        let mut table_shares_chunk = Vec::with_capacity(max_chunk_size);
         for (w, inst) in circ.insts.iter().enumerate() {
             match inst.op {
                 Op::And(And(x, y)) => {
                     let x = shares[x].clone();
                     let y = shares[y].clone();
-                    let rand_share = random_shares.next().unwrap().clone();
+                    let rand_share = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                     let gamma = rand_share.clone();
                     let Share(s_x, mac_s_x_key_r_x) = x;
                     let Share(s_y, mac_s_y_key_r_y) = y;
                     let Share(s_gamma, mac_s_gamma_key_r_gamma) = gamma;
-                    let Some(sigma) = auth_bits.next() else {
-                        return Err(MpcError::MissingAndShareForInst(w).into());
-                    };
+                    let sigma = auth_bits
+                        .next()
+                        .ok_or(MpcError::MissingAndShareForInst(w))??;
                     let Share(s_sig, mac_s_sig_key_r_sig) = sigma;
                     let s = s_sig ^ s_gamma;
                     let mac_s_key_r_0 = &mac_s_sig_key_r_sig ^ &mac_s_gamma_key_r_gamma;
@@ -641,7 +742,11 @@ async fn garble(
                     let row1 = Share(s ^ s_x, mac_s_key_r_1.clone());
                     let row2 = Share(s ^ s_y, &mac_s_key_r_0 ^ &mac_s_y_key_r_y);
                     let row3 = Share(s ^ s_x ^ s_y ^ true, &mac_s_key_r_1 ^ &mac_s_y_key_r_y);
-                    table_shares[w] = Some([row0, row1, row2, row3]);
+                    table_shares_chunk.push([row0, row1, row2, row3]);
+                    if table_shares_chunk.len() >= max_chunk_size {
+                        table_shares.write_chunk(&table_shares_chunk)?;
+                        table_shares_chunk.clear();
+                    }
                     shares[inst.out] = rand_share;
                 }
                 Op::Xor(Xor(x, y)) => {
@@ -651,19 +756,24 @@ async fn garble(
                     shares[inst.out] = shares[x].clone();
                 }
                 Op::Input(_) => {
-                    shares[inst.out] = random_shares.next().unwrap().clone();
+                    shares[inst.out] = random_shares
+                        .next()
+                        .ok_or(MpcError::MissingPreprocessingShareForInst(w))??;
                 }
             }
         }
+        if !table_shares_chunk.is_empty() {
+            table_shares.write_chunk(&table_shares_chunk)?;
+        }
     }
-    Ok((table_shares, garbled_gates, shares, labels, input_labels))
+    Ok((table_shares, files, shares, labels, input_labels))
 }
 
 async fn input_processing(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     input_labels: &[Label],
-    random_shares: &[Share],
+    random_shares: &mut FileOrMemBuf<Share>,
 ) -> Result<(Vec<Option<bool>>, Vec<Option<Vec<Label>>>), Error> {
     let &Context {
         channel,
@@ -673,12 +783,17 @@ async fn input_processing(
         p_eval,
         p_own,
         p_max,
+        num_inputs,
         ..
     } = ctx;
+    let random_input_shares: Vec<_> = random_shares
+        .iter()?
+        .take(num_inputs)
+        .collect::<Result<_, _>>()?;
     let mut wire_shares_for_others = vec![vec![None; circ.max_reg_count]; p_max];
     for (w, inst) in circ.insts.iter().enumerate() {
         if let Op::Input(input @ Input { party, .. }) = inst.op {
-            let Share(bit, Auth(macs_and_keys)) = random_shares[w].clone();
+            let Share(bit, Auth(macs_and_keys)) = random_input_shares[w].clone();
             let Some((mac, _)) = macs_and_keys.get(party as usize) else {
                 return Err(MpcError::MissingSharesForInput(input).into());
             };
@@ -699,7 +814,7 @@ async fn input_processing(
             let Some(input) = inputs.get(input as usize) else {
                 return Err(MpcError::InstWithoutInput(w).into());
             };
-            let Share(own_share, Auth(own_macs_and_keys)) = random_shares[w].clone();
+            let Share(own_share, Auth(own_macs_and_keys)) = random_input_shares[w].clone();
             let mut masked_input = *input ^ own_share;
             for p in 0..p_max {
                 if let Some((_, key)) = own_macs_and_keys.get(p).copied()
@@ -769,8 +884,8 @@ async fn input_processing(
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
-    table_shares: Vec<Option<[Share; 4]>>,
-    garbled_gates: Vec<Vec<Option<GarbledGate>>>,
+    mut table_shares: FileOrMemBuf<[Share; 4]>,
+    mut garble_files: Vec<FileOrMemBuf<GarbledGate>>,
     masked_inputs: Vec<Option<bool>>,
     input_labels: Vec<Option<Vec<Label>>>,
 ) -> Result<(Vec<bool>, Vec<Vec<Label>>), Error> {
@@ -784,6 +899,12 @@ fn evaluate(
     } = ctx;
     let mut values: Vec<bool> = vec![false; circ.max_reg_count];
     let mut labels_eval: Vec<Vec<Label>> = vec![vec![]; circ.max_reg_count];
+    let mut garbled_gates: Vec<_> = garble_files
+        .iter_mut()
+        .map(|file| file.iter())
+        .collect::<std::io::Result<_>>()?;
+
+    let mut table_shares = table_shares.iter()?;
     if !is_contrib {
         for (w, inst) in circ.insts.iter().enumerate() {
             let (value, label) = match inst.op {
@@ -818,9 +939,9 @@ fn evaluate(
                     let input_y = values[y];
                     let label_y = &labels_eval[y];
                     let i = 2 * (input_x as usize) + (input_y as usize);
-                    let Some(table_shares) = &table_shares[w] else {
-                        return Err(MpcError::MissingTableShareForInst(w).into());
-                    };
+                    let table_shares = table_shares
+                        .next()
+                        .ok_or(MpcError::MissingTableShareForInst(w))??;
 
                     let mut label = vec![Label(0); p_max];
                     let mut macs = vec![vec![]; p_max];
@@ -832,9 +953,9 @@ fn evaluate(
                         if p == p_own {
                             continue;
                         }
-                        let Some(Some(GarbledGate(garbled_gate))) = &garbled_gates[p].get(w) else {
-                            return Err(MpcError::MissingGarbledGate(w).into());
-                        };
+                        let GarbledGate(garbled_gate) = garbled_gates[p]
+                            .next()
+                            .ok_or(MpcError::MissingGarbledGate(w))??;
                         let garbling_key = GarblingKey::new(label_x[p], label_y[p], w, i as u8);
                         let garbled_row = garbled_gate[i].clone();
                         let (r, mac_r, label_share) =
@@ -869,7 +990,7 @@ fn evaluate(
 }
 
 async fn output(
-    ctx: &Context<'_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
     shares: Vec<Share>,
     labels: Vec<Label>,
@@ -983,4 +1104,17 @@ async fn output(
         }
     }
     Ok(outputs)
+}
+
+fn chunk_size_iter(total: usize, chunk_size: usize) -> Box<dyn Iterator<Item = usize> + Send> {
+    if chunk_size == 0 {
+        return Box::new(iter::empty());
+    }
+    let remainder = total % chunk_size;
+    let iter = iter::repeat_n(chunk_size, total / chunk_size);
+    if remainder != 0 {
+        Box::new(iter.chain(Some(remainder)))
+    } else {
+        Box::new(iter)
+    }
 }

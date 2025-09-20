@@ -599,7 +599,7 @@ async fn execute_mpc(
     channel.barrier().await.context("barrier failed")?;
 
     // We run the computation using MPC, which might take some time...
-    let output = mpc(&channel, &circuit, &input, 0, *party, &p_out).await?;
+    let output = mpc(&channel, &circuit, &input, 0, *party, &p_out, None).await?;
 
     // ...and now we are done and return the output (if there is any):
     state.lock().await.senders.clear();

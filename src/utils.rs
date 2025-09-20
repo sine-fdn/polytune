@@ -1,5 +1,6 @@
 use std::ops::{BitAndAssign, BitXorAssign};
 
+pub(crate) mod file_or_mem_buf;
 mod rand_compat;
 
 pub(crate) use rand_compat::RngCompat;
