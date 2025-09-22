@@ -26,7 +26,9 @@ Polytune, our MPC engine, aims at fulfilling our vision by providing an easy-to-
 
 ## Secure Multi-Party Computation
 
-https://github.com/user-attachments/assets/a04b5caa-2b79-40de-bf21-24f7124eb190
+In the demo video below, we display a very simple example of a secure multi-party computation protocol.
+
+[Demo Video](https://github.com/user-attachments/assets/a04b5caa-2b79-40de-bf21-24f7124eb190)
 
 Polytune implements the multi-party [[WRK17b]](https://eprint.iacr.org/2017/189.pdf) protocol and will include optimizations from [[YWZ20]](https://eprint.iacr.org/2019/1104.pdf). This protocol is secure against malicious adversaries that can control up to all-but-one of the parties. This means that even if all but one of the parties are corrupt and together try to obtain information about the honest party's input while actively deviating from the protocol, they are unable to do so, i.e., the input of the honest party remains private.
 
