@@ -13,8 +13,9 @@ edition = "2024"
 rust-version = "1.88.0"
 description = "Maliciously-Secure Multi-Party Computation (MPC) Engine using Authenticated Garbling"
 repository = "https://github.com/sine-fdn/polytune/"
+homepage = "https://polytune.org/"
 license = "MIT"
-categories = ["cryptography"]
+categories = ["cryptography", "security"]
 keywords = [
     "secure-computation",
     "garbled-circuits",
@@ -26,6 +27,11 @@ keywords = [
 # executes benches in various modules under `benches/`. Those modules should
 # not be automatically detected as separate benchmarks.
 autobenches = false
+
+[package.metadata.docs.rs]
+rustdoc-args = [
+    "--generate-link-to-definition",
+]
 
 [lib]
 bench = false
