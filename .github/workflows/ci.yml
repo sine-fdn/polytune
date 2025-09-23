@@ -94,6 +94,20 @@ jobs:
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
       - run: cargo test --release
 
+  test-polytune-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run: 
+        working-directory: crates/polytune-server
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - run: cargo test --profile debug-release -- --nocapture  
+
   test-examples:
     runs-on: ubuntu-latest
     timeout-minutes: 15
