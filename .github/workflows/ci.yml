@@ -1,10 +1,14 @@
-name: Pull Request Checks
+name: CI
 
-# By using the pull_request event, the workflow is run on
-# the merge commit before it is added to main. This ensures
-# that the pipeline won't break after the merge.
 on:
-  - pull_request
+  # By using the pull_request event, the workflow is run on
+  # the merge commit before it is added to main. This ensures
+  # that the pipeline won't break after the merge.
+  pull_request:
+  push:
+    branches: 
+      - main
+    
 
 env:
   CARGO_TERM_COLOR: always
