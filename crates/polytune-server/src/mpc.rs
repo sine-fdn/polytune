@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tempfile::tempdir_in;
 use tokio::{
     sync::{Mutex, mpsc::channel},
     time::sleep,
@@ -22,7 +23,11 @@ use crate::{
     policy::Policy,
 };
 
-pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Literal>, Error> {
+pub async fn execute_mpc(
+    state: MpcState,
+    policy: &Policy,
+    channel: HttpChannel,
+) -> Result<Option<Literal>, Error> {
     info!("executing MPC");
     let Policy {
         program,
@@ -34,14 +39,13 @@ pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Lite
         constants,
     } = policy;
     let now = Instant::now();
-    {
-        let mut locked = state.lock().await;
-        locked
-            .consts
-            .insert(format!("PARTY_{party}"), constants.clone());
-    }
+    state
+        .consts
+        .lock()
+        .await
+        .insert(format!("PARTY_{party}"), constants.clone());
     // Now we sent around the constants to the other parties...
-    let client = reqwest::Client::new();
+    let client = channel.client.clone();
     for p in participants.iter() {
         if p != &participants[*party] {
             info!("Sending constants to party {p}");
@@ -63,15 +67,15 @@ pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Lite
     // ...and wait for their constants:
     loop {
         sleep(Duration::from_millis(500)).await;
-        let locked = state.lock().await;
-        if locked.consts.len() >= participants.len() - 1 {
+        let consts = state.consts.lock().await;
+        if consts.len() >= participants.len() - 1 {
             break;
         } else {
-            let missing = participants.len() - 1 - locked.consts.len();
+            let missing = participants.len() - 1 - consts.len();
             info!(
                 "Constants missing from {} parties, received constants from {:?}",
                 missing,
-                locked.consts.keys()
+                consts.keys()
             );
         }
     }
@@ -79,9 +83,9 @@ pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Lite
     ALLOCATOR.enable();
     // After receiving the constants, we can finally compile the circuit:
     let prg = {
-        let locked = state.lock().await;
+        let consts = state.consts.lock().await.clone();
         info!("Compiling circuit with the following constants:");
-        for (p, v) in locked.consts.iter() {
+        for (p, v) in consts.iter() {
             for (k, v) in v {
                 info!("{p}::{k}: {v:?}");
             }
@@ -90,7 +94,7 @@ pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Lite
             program,
             CompileOptions {
                 circuit_kind: CircuitKind::Register,
-                consts: locked.consts.clone(),
+                consts: consts.clone(),
                 // false reduces peak memory consumption
                 optimize_duplicate_gates: false,
             },
@@ -111,38 +115,6 @@ pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Lite
 
     // Now that we have our input, we can start the actual session:
     let p_out: Vec<_> = vec![*leader];
-    let channel = {
-        let mut locked = state.lock().await;
-        let state = locked.borrow_mut();
-        if !state.senders.is_empty() {
-            panic!("Cannot start a new MPC execution while there are still active senders!");
-        }
-        let mut receivers = vec![];
-        for _ in 0..policy.participants.len() {
-            let (s, r) = channel(1);
-            state.senders.push(s);
-            receivers.push(Mutex::new(r));
-        }
-
-        #[allow(unused_mut)]
-        let mut builder = reqwest::ClientBuilder::new();
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        {
-            builder = builder.tcp_user_timeout(Duration::from_secs(10 * 60));
-        }
-
-        let client = builder.build()?;
-
-        HttpChannel {
-            client,
-            urls: participants.clone(),
-            party: *party,
-            recv: receivers,
-            sync_received: Arc::clone(&state.sync_received),
-            sync_requested: Arc::clone(&state.sync_requested),
-        }
-    };
 
     channel.barrier().await.context("barrier failed")?;
 
@@ -154,11 +126,14 @@ pub async fn execute_mpc(state: MpcState, policy: &Policy) -> Result<Option<Lite
         0,
         *party,
         &p_out,
+        // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
+        // and the files will be in memory and not on the disk
+        Some(tempdir_in("./").context("Unable to create tempdir")?.path()),
     )
     .await?;
 
     // ...and now we are done and return the output (if there is any):
-    state.lock().await.senders.clear();
+    state.senders.lock().await.clear();
     let elapsed = now.elapsed();
     let memory_peak = ALLOCATOR.peak(0) as f64;
     let (denom, unit) = scale_memory(memory_peak);
