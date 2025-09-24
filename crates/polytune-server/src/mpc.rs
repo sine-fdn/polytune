@@ -1,152 +1,163 @@
-use anyhow::{Context, Error, anyhow, bail};
-use garble_lang::{CircuitKind, CompileOptions, compile_with_options};
-use polytune::{garble_lang::literal::Literal, mpc};
-use polytune_test_utils::peak_alloc::scale_memory;
-use reqwest::StatusCode;
-use std::{
-    borrow::BorrowMut,
-    result::Result,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, thread};
+
+use futures::future::try_join_all;
+use garble_lang::{CircuitKind, CompileOptions, GarbleConsts, compile_with_options};
+use reqwest_middleware::ClientWithMiddleware;
 use tempfile::tempdir_in;
 use tokio::{
-    sync::{Mutex, mpsc::channel},
-    time::sleep,
+    sync::{Notify, mpsc, oneshot},
+    task::JoinSet,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::{
-    ALLOCATOR,
-    api::{ConstsRequest, MpcState},
+    api::{Policy, RunRequest},
     channel::HttpChannel,
-    policy::Policy,
+    consts::{Consts, ConstsRequest},
 };
 
-pub async fn execute_mpc(
-    state: MpcState,
-    policy: &Policy,
-    channel: HttpChannel,
-) -> Result<Option<Literal>, Error> {
-    info!("executing MPC");
-    let Policy {
-        program,
-        leader,
-        participants,
-        party,
-        input,
-        output: _output,
-        constants,
-    } = policy;
-    let now = Instant::now();
-    state
-        .consts
-        .lock()
-        .await
-        .insert(format!("PARTY_{party}"), constants.clone());
-    // Now we sent around the constants to the other parties...
-    let client = channel.client.clone();
-    for p in participants.iter() {
-        if p != &participants[*party] {
-            info!("Sending constants to party {p}");
-            let url = format!("{p}consts/{party}");
-            let const_request = ConstsRequest {
-                consts: constants.clone(),
-            };
-            let Ok(res) = client.post(&url).json(&const_request).send().await else {
-                bail!("Could not reach {url}");
-            };
-            match res.status() {
-                StatusCode::OK => {}
-                code => {
-                    bail!("Unexpected response while trying to send consts to {url}: {code}");
+pub(crate) struct MpcRunner {
+    client: reqwest_middleware::ClientWithMiddleware,
+    schedule_receiver: mpsc::Receiver<ScheduledPolicy>,
+    max_concurrency: usize,
+}
+
+pub(crate) struct ScheduledPolicy {
+    pub(crate) pol: Policy,
+    pub(crate) channel: HttpChannel,
+    pub(crate) const_receiver: oneshot::Receiver<GarbleConsts>,
+}
+
+pub(crate) enum MpcError {}
+
+impl MpcRunner {
+    pub(crate) fn new(
+        client: ClientWithMiddleware,
+        schedule_receiver: mpsc::Receiver<ScheduledPolicy>,
+        max_concurrency: usize,
+    ) -> Self {
+        Self {
+            client,
+            schedule_receiver,
+            max_concurrency,
+        }
+    }
+
+    pub(crate) async fn start(mut self) -> Result<(), MpcError> {
+        let mut js = JoinSet::new();
+        loop {
+            while js.len() < self.max_concurrency {
+                let policy = match self.schedule_receiver.recv().await {
+                    Some(policy) => policy,
+                    None => return Ok(()),
+                };
+                if js.len() < self.max_concurrency {
+                    // TODO use aborthandle?
+                    js.spawn(Self::execute_run_request(self.client.clone(), policy));
                 }
             }
+            js.join_next()
+                .await
+                .unwrap()
+                .unwrap()
+                .map_err(drop)
+                .unwrap();
+
+            // spawn execution on joinset if less than max_concurrency
+            // otherwise js.join_next().await
+            // https://users.rust-lang.org/t/limited-concurrency-for-future-execution-tokio/87171/4
         }
     }
-    // ...and wait for their constants:
-    loop {
-        sleep(Duration::from_millis(500)).await;
-        let consts = state.consts.lock().await;
-        if consts.len() >= participants.len() - 1 {
-            break;
-        } else {
-            let missing = participants.len() - 1 - consts.len();
-            info!(
-                "Constants missing from {} parties, received constants from {:?}",
-                missing,
-                consts.keys()
+
+    pub(crate) async fn execute_run_request(
+        client: ClientWithMiddleware,
+        scheduled_policy: ScheduledPolicy,
+    ) -> Result<(), MpcError> {
+        let ScheduledPolicy {
+            pol,
+            channel,
+            const_receiver,
+        } = scheduled_policy;
+
+        if pol.is_leader() {
+            let client = client.clone();
+            let run_futs = pol
+                .participants
+                .iter()
+                .enumerate()
+                .filter(|(id, _)| *id != pol.party)
+                .map(async |(_, participant)| {
+                    let url = participant.join("run").unwrap();
+                    let run_request = RunRequest {
+                        computation_id: pol.computation_id,
+                    };
+                    // TODO the policy request should contain the queue position at which we will schedule this
+                    client.post(url).json(&run_request).send().await
+                });
+            // TODO: What happens if /run fails for one of the parties? We should send /cancel to the others
+            try_join_all(run_futs).await.unwrap();
+        }
+
+        let const_futs = pol
+            .participants
+            .iter()
+            .enumerate()
+            .filter(|(id, _)| *id != pol.party)
+            .map(async |(_, participant)| {
+                let url = participant
+                    .join(&format!("consts/{}/{}", pol.computation_id, pol.party))
+                    .unwrap();
+                let const_request = ConstsRequest {
+                    consts: pol.constants.clone(),
+                };
+                client.post(url).json(&const_request).send().await
+            });
+        try_join_all(const_futs).await.unwrap();
+
+        let consts = const_receiver.await.unwrap();
+        debug!("{consts:?}");
+        let program = pol.program;
+
+        let (compiled_tx, compiled_rx) = oneshot::channel();
+        thread::spawn(move || {
+            let compiled = compile_with_options(
+                &program,
+                CompileOptions {
+                    circuit_kind: CircuitKind::Register,
+                    consts: consts,
+                    // false reduces peak memory consumption
+                    optimize_duplicate_gates: false,
+                },
             );
-        }
-    }
-    let compile_now = Instant::now();
-    ALLOCATOR.enable();
-    // After receiving the constants, we can finally compile the circuit:
-    let prg = {
-        let consts = state.consts.lock().await.clone();
-        info!("Compiling circuit with the following constants:");
-        for (p, v) in consts.iter() {
-            for (k, v) in v {
-                info!("{p}::{k}: {v:?}");
-            }
-        }
-        compile_with_options(
-            program,
-            CompileOptions {
-                circuit_kind: CircuitKind::Register,
-                consts: consts.clone(),
-                // false reduces peak memory consumption
-                optimize_duplicate_gates: false,
-            },
+            // ignore send error as execute_run_request has been dropped
+            let _ = compiled_tx.send(compiled);
+        });
+        let compiled = compiled_rx.await.unwrap().unwrap();
+
+        let input = compiled
+            .literal_arg(pol.party, pol.input)
+            .unwrap()
+            .as_bits();
+        info!("starting mpc comp");
+        let output = polytune::mpc(
+            &channel,
+            compiled.circuit.unwrap_register_ref(),
+            &input,
+            0,
+            pol.party,
+            &vec![pol.leader],
+            // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
+            // and the files will be in memory and not on the disk
+            Some(tempdir_in("./").unwrap().path()),
         )
-        .map_err(|e| anyhow!(e.prettify(program)))?
-    };
-    let memory_peak = ALLOCATOR.peak(0) as f64;
-    let (denom, unit) = scale_memory(memory_peak);
-    info!(
-        "Trying to execute circuit with {:.2}M instructions ({:.2}M AND ops). Compilation took {:?}. Peak memory: {} {unit}",
-        prg.circuit.ops() as f64 / 1000.0 / 1000.0,
-        prg.circuit.ands() as f64 / 1000.0 / 1000.0,
-        compile_now.elapsed(),
-        memory_peak / denom
-    );
+        .await
+        .unwrap();
+        info!("finished mpc comp");
 
-    let input = prg.literal_arg(*party, input.clone())?.as_bits();
+        if !output.is_empty() {
+            dbg!(compiled.parse_output(&output));
+        }
 
-    // Now that we have our input, we can start the actual session:
-    let p_out: Vec<_> = vec![*leader];
-
-    channel.barrier().await.context("barrier failed")?;
-
-    // We run the computation using MPC, which might take some time...
-    let output = mpc(
-        &channel,
-        prg.circuit.unwrap_register_ref(),
-        &input,
-        0,
-        *party,
-        &p_out,
-        // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
-        // and the files will be in memory and not on the disk
-        Some(tempdir_in("./").context("Unable to create tempdir")?.path()),
-    )
-    .await?;
-
-    // ...and now we are done and return the output (if there is any):
-    state.senders.lock().await.clear();
-    let elapsed = now.elapsed();
-    let memory_peak = ALLOCATOR.peak(0) as f64;
-    let (denom, unit) = scale_memory(memory_peak);
-    info!(
-        "MPC computation for party {party} took {} hour(s), {} minute(s), {} second(s). Peak memory: {} {unit}",
-        elapsed.as_secs() / 60 / 60,
-        (elapsed.as_secs() % (60 * 60)) / 60,
-        elapsed.as_secs() % 60,
-        memory_peak / denom
-    );
-    if output.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(prg.parse_output(&output)?))
+        Ok(())
     }
 }

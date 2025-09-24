@@ -1,79 +1,114 @@
-use anyhow::{Context, anyhow};
-use futures::future::try_join_all;
-use polytune::channel::Channel;
-use reqwest::StatusCode;
-use std::{result::Result, sync::Arc, time::Duration};
-use tokio::{
-    sync::{Mutex, Notify, mpsc::Receiver},
-    time::sleep,
-};
-use tracing::{error, info};
-use url::Url;
+use std::{collections::HashMap, sync::Arc};
 
-pub struct HttpChannel {
-    pub client: reqwest_middleware::ClientWithMiddleware,
-    pub urls: Vec<Url>,
-    pub party: usize,
-    pub recv: Vec<Mutex<Receiver<Vec<u8>>>>,
-    pub sync_received: Arc<Notify>,
-    pub sync_requested: Arc<Notify>,
+use aide::OperationIo;
+use axum::{
+    body::Bytes,
+    extract::{Path, State},
+    response::IntoResponse,
+};
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use url::Url;
+use uuid::Uuid;
+
+use crate::{api::Policy, state::PolytuneState};
+
+#[derive(Default)]
+pub(crate) struct MsgStateInner {
+    /// Senders to send to HttpChannels
+    pub(crate) senders: tokio::sync::RwLock<HashMap<Uuid, Vec<Sender<Vec<u8>>>>>,
 }
 
-impl HttpChannel {
-    pub async fn barrier(&self) -> anyhow::Result<()> {
-        if self.party == 0 {
-            try_join_all(
-                self.urls[1..]
-                    .iter()
-                    .map(|url| self.client.post(&format!("{url}sync")).send()),
-            )
-            .await
-            .context("Sync error")?;
-        } else {
-            self.sync_requested.notify_one();
-            self.sync_received.notified().await;
-        }
+pub(crate) type MsgState = Arc<MsgStateInner>;
 
-        Ok(())
+impl MsgStateInner {
+    pub(crate) async fn create_channel(
+        &self,
+        policy: &Policy,
+        client: reqwest_middleware::ClientWithMiddleware,
+    ) -> HttpChannel {
+        let participants = policy.participants.clone();
+        let party = policy.party;
+        let computation_id = policy.computation_id;
+        let mut senders = vec![];
+        let mut receivers = vec![];
+        for _ in 0..participants.len() {
+            // TODO buffer size?
+            let (sender, receiver) = mpsc::channel(1);
+            senders.push(sender);
+            receivers.push(tokio::sync::Mutex::new(receiver));
+        }
+        self.senders.write().await.insert(computation_id, senders);
+        let urls = participants
+            .into_iter()
+            .map(|url| url.join(&format!("msg/{computation_id}/{party}")).unwrap())
+            .collect();
+        HttpChannel {
+            client,
+            receivers,
+            urls,
+        }
     }
 }
 
-impl Channel for HttpChannel {
-    type SendError = anyhow::Error;
-    type RecvError = anyhow::Error;
+pub(crate) async fn msg(
+    State(state): State<MsgState>,
+    Path((computation_id, from)): Path<(Uuid, usize)>,
+    body: Bytes,
+) -> Result<(), MsgError> {
+    state
+        .senders
+        .read()
+        .await
+        .get(&computation_id)
+        .unwrap()
+        .get(from)
+        .unwrap()
+        .send(body.to_vec())
+        .await
+        .unwrap();
+    Ok(())
+}
+
+#[derive(OperationIo)]
+#[aide(output)]
+pub(crate) struct MsgError;
+
+impl IntoResponse for MsgError {
+    fn into_response(self) -> axum::response::Response {
+        todo!()
+    }
+}
+
+pub(crate) struct HttpChannel {
+    client: reqwest_middleware::ClientWithMiddleware,
+    urls: Vec<Url>,
+    receivers: Vec<tokio::sync::Mutex<Receiver<Vec<u8>>>>, // and similar fields as the old channel
+}
+
+#[derive(Debug)]
+pub(crate) enum HttpChannelError {}
+
+impl polytune::channel::Channel for HttpChannel {
+    type SendError = HttpChannelError;
+
+    type RecvError = HttpChannelError;
 
     async fn send_bytes_to(
         &self,
-        p: usize,
-        msg: Vec<u8>,
+        party: usize,
+        data: Vec<u8>,
         phase: &str,
     ) -> Result<(), Self::SendError> {
-        let url = format!("{}msg/{}", self.urls[p], self.party);
-        let mb = msg.len() as f64 / 1024.0 / 1024.0;
-        info!("Sending msg {phase} to party {p} ({mb:.2}MB)...");
-        let mut retries = 0;
-        loop {
-            let res = self.client.post(&url).body(msg.clone()).send().await?;
-            match res.status() {
-                StatusCode::OK => break Ok(()),
-                // retry for 10 minutes
-                StatusCode::NOT_FOUND if retries < 10 * 60 => {
-                    retries += 1;
-                    error!("Could not reach party {p} at {url}...");
-                    sleep(Duration::from_millis(1000)).await;
-                }
-                status => {
-                    error!("Unexpected status code: {status}");
-                    anyhow::bail!("Unexpected status code: {status}")
-                }
-            }
-        }
+        self.client
+            .post(self.urls[party].clone())
+            .body(data)
+            .send()
+            .await
+            .unwrap();
+        Ok(())
     }
 
-    async fn recv_bytes_from(&self, p: usize, _phase: &str) -> Result<Vec<u8>, Self::RecvError> {
-        let mut r = self.recv[p].lock().await;
-        r.recv()
-            .await
-            .ok_or_else(|| anyhow!("Expected a message, but received `None`!"))
+    async fn recv_bytes_from(&self, party: usize, phase: &str) -> Result<Vec<u8>, Self::RecvError> {
+        Ok(self.receivers[party].lock().await.recv().await.unwrap())
     }
 }

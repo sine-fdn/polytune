@@ -31,12 +31,12 @@ fn simulate() {
     };
     let mut cmd = Command::new(&cmd_prog)
         .args(common_args.clone())
-        .arg("--port=8001")
+        .arg("--addr=127.0.0.1:8001")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines().skip(4);
+    let mut stdout = BufReader::new(cmd.stdout.take().unwrap()).lines();
     let mut stderr = BufReader::new(cmd.stderr.take().unwrap()).lines();
     thread::spawn(move || {
         while let Some(Ok(line)) = stdout.next() {
@@ -54,7 +54,7 @@ fn simulate() {
 
     let mut cmd = Command::new(cmd_prog)
         .args(common_args)
-        .arg("--port=8000")
+        .arg("--addr=127.0.0.1:8000")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -114,7 +114,7 @@ fn simulate() {
         // test that we can start party 0 before party 1
         s.spawn(|| {
             client
-                .post("http://127.0.0.1:8000/launch")
+                .post("http://127.0.0.1:8000/schedule")
                 .body(pol0)
                 .header("Content-Type", "application/json")
                 .timeout(Duration::from_secs(60 * 60))
@@ -124,7 +124,7 @@ fn simulate() {
         thread::sleep(Duration::from_millis(100));
         s.spawn(|| {
             client
-                .post("http://127.0.0.1:8001/launch")
+                .post("http://127.0.0.1:8001/schedule")
                 .body(pol1)
                 .header("Content-Type", "application/json")
                 .send()
