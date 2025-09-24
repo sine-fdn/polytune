@@ -1,5 +1,22 @@
 # Polytune Server
 
+`/launch`
+
+Schedules an MPC computation for execution. `/launch` needs to be called with the same
+UUID, participants, program, and leader for all parties listed in `participants`. Once `/launch` 
+is called on all of them, the parties will start executing the provided program with the inputs.
+`/launch` returns with 200 if the computation is succesfully started, or with an error if there
+was an issue in coordinating the computation, exchanging the constants, or compiling the circuit.
+
+TODO: Should `/launch` return before compiling the circ, or after? This can take multiple minutes
+and timeouts for `/launch` call need to be set appropriately. Alternatively, errors in compilation, etc.
+could also be sent to the output endpoint.
+
+
+
+
+-----
+
 This crate implements a full-fledged MPC server which can receive requests containing a program specified as a Garble program, coordinate with multiple instances of this server, execute the provided program securely using Polytune, and return the result.
 
 The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call to the `polytune-server`.
