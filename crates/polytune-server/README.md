@@ -25,9 +25,7 @@ docker run -t -p 8000:8000 polytune-server
 
 Starting the container does not immediately start an MPC execution, this needs to be explicitly triggered with a POST request to `localhost:8000/launch` while providing the necessary configuration file (see `policy0.json` and `policy1.json` for example configs) as a JSON body.
 
-The `"input"` part of the JSON needs to use Garble's serialization format, as described in the [Garble Serialization How-To](https://garble-lang.org/serde.html). The result of the MPC execution will use the same serialization format and is sent to the endpoint specified as `"output"` in the JSON.
-
-**Please note that you must call `/launch` for all contributors (who will then start waiting for incoming MPC requests) _before_ you call `/launch` for the MPC leader (who will immediately start sending requests to all the other participants and fail if one of them is unreachable).**
+The `"input"` part of the JSON needs to use Garble's serialization format, as described in the [Garble Serialization How-To](https://garble-lang.org/serde.html) (or as JsonSchema as part of the OpenAPI spec at `/api.json`). The result of the MPC execution will use the same serialization format and is sent to the endpoint specified as `"output"` in the JSON.
 
 You can check that the party is running and listening by making a GET request to its `/ping` route (in this example thus `localhost:8000/ping`), which should respond with a `pong` message.
 

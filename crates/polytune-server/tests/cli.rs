@@ -108,22 +108,29 @@ fn simulate() {
     assert_eq!(expected_policy, pol0_program.program);
     assert_eq!(expected_policy, pol1_program.program);
 
-    client
-        .post("http://127.0.0.1:8001/launch")
-        .body(pol1)
-        .header("Content-Type", "application/json")
-        .send()
-        .unwrap();
-
     sleep(Duration::from_millis(millis));
     let client = reqwest::blocking::Client::new();
-    client
-        .post("http://127.0.0.1:8000/launch")
-        .body(pol0)
-        .header("Content-Type", "application/json")
-        .timeout(Duration::from_secs(60 * 60))
-        .send()
-        .unwrap();
+    thread::scope(|s| {
+        // test that we can start party 0 before party 1
+        s.spawn(|| {
+            client
+                .post("http://127.0.0.1:8000/launch")
+                .body(pol0)
+                .header("Content-Type", "application/json")
+                .timeout(Duration::from_secs(60 * 60))
+                .send()
+                .unwrap();
+        });
+        thread::sleep(Duration::from_millis(100));
+        s.spawn(|| {
+            client
+                .post("http://127.0.0.1:8001/launch")
+                .body(pol1)
+                .header("Content-Type", "application/json")
+                .send()
+                .unwrap();
+        });
+    });
 
     let result = r.recv_timeout(Duration::from_secs(10));
     for mut child in children {

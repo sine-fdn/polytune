@@ -67,13 +67,14 @@ async fn async_main() -> Result<(), Error> {
     let sync_received = Arc::new(Notify::new());
     let sync_requested = Arc::new(Notify::new());
 
-    let state = Arc::new(Mutex::new(MpcComms {
-        policy: None,
-        consts: HashMap::new(),
-        senders: vec![],
+    let state = Arc::new(MpcComms {
+        policy: Mutex::new(None),
+        consts: Mutex::new(HashMap::new()),
+        senders: Mutex::new(vec![]),
         sync_received,
         sync_requested,
-    }));
+        channel: Mutex::new(None),
+    });
 
     let log_layer = TraceLayer::new_for_http()
         .on_request(|r: &Request<_>, _: &Span| tracing::info!("{} {}", r.method(), r.uri().path()))

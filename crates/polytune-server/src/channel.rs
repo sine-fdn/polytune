@@ -11,7 +11,7 @@ use tracing::{error, info};
 use url::Url;
 
 pub struct HttpChannel {
-    pub client: reqwest::Client,
+    pub client: reqwest_middleware::ClientWithMiddleware,
     pub urls: Vec<Url>,
     pub party: usize,
     pub recv: Vec<Mutex<Receiver<Vec<u8>>>>,
