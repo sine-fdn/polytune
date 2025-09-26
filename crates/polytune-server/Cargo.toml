@@ -15,12 +15,16 @@ garble_lang = { version = "0.7.0", features = ["json_schema"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 polytune-test-utils = { path = "../../crates/polytune-test-utils" }
 reqwest = { version = "0.12.23", features = ["blocking", "json"] }
-schemars = { version = "0.9", features = ["url2"] }
+reqwest-middleware = { version = "0.4.2", features = ["json"] }
+reqwest-retry = "0.7.0"
+schemars = { version = "0.9", features = ["url2", "uuid1"] }
 serde = "1.0.197"
 serde_json = "1.0.143"
+tempfile = "3.23.0"
 tokio = { version = "1.47.1", features = ["macros", "rt", "rt-multi-thread"] }
 tower = { version = "0.5.1", features = ["util"] }
 tower-http = { version = "0.6.6", features = ["fs", "trace"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.20"
 url = { version = "2.5.7", features = ["serde"] }
+uuid = { version = "1.18.1", features = ["serde"] }

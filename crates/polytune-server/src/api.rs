@@ -1,164 +1,140 @@
-use aide::{axum::IntoApiResponse, openapi::OpenApi, transform::TransformOperation};
-use axum::{
-    Extension, Json,
-    body::Bytes,
-    extract::{Path, State},
-};
-use polytune::garble_lang::literal::Literal;
-use reqwest::StatusCode;
+use std::collections::HashMap;
+
+use axum::{Json, extract::State};
+use garble_lang::literal::Literal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{Mutex, Notify, mpsc::Sender};
-use tracing::{error, info};
 use url::Url;
+use uuid::Uuid;
 
-use crate::{mpc::execute_mpc, policy::Policy};
+use crate::state::PolytuneState;
+
+struct LaunchError;
+
+/// A policy containing everything necessary to run an MPC session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+pub struct Policy {
+    /// The unique `computation_id` of this mpc execution. This is used to identify 
+    /// which `/launch/` requests belong to the same computation.
+    pub computation_id: Uuid,
+    /// The URLs at which we can reach the other parties. Their position in
+    /// in this array needs to be identical for all parties and will correspond
+    /// to their party ID (e.g. used for the leader).
+    pub participants: Vec<Url>,
+    /// The program as [Garble](https://garble-lang.org/) source code.
+    pub program: String,
+    /// The id of the leader of the computation.
+    pub leader: usize,
+    /// Our own party ID. Corresponds to our adress at participants[party].
+    pub party: usize,
+    /// The input to the Garble program as a serialized Garble `Literal` value.
+    pub input: Literal,
+    /// The optional output URL to which the output of the MPC computation is provided
+    /// as a json serialized Garble `Literal` value.
+    pub output: Option<Url>,
+    /// The constants needed of this party for the MPC computation. Note that the
+    /// identifier must not contain the `PARTY_{ID}::` prefix, but only the name.
+    /// E.g. if the Garble program contains `const ROWS_0: usize = PARTY_0::ROWS;`
+    /// this should contain e.g. `"ROWS": { "NumUnsigned": [200, "Usize"]}`.
+    pub constants: HashMap<String, Literal>,
+}
+
+// TODO maybe a have a /schedule endpoint?
+// when does this endpoint return?
+// how do the different participants decide when to schedule a computation?
+// `/schedule` could be called in a different order for different parties
+pub(crate) async fn schedule(
+    State(state): State<PolytuneState>,
+    Json(policy): Json<Policy>,
+) -> Result<(), LaunchError> {
+    todo!()
+} 
+
+
+pub(crate) async fn launch(
+    State(state): State<PolytuneState>,
+    Json(policy): Json<Policy>,
+) -> Result<(), LaunchError> { 
+    // each party receives /launch call in arbitrary order
+    // compute ComputationId hash from Policy
+    // check in state if such a computation is already running, if yes, return error
+    // if not, add to state
+    // if not leader, wait for notify that mpc computation is started, then return
+    // if leader, send /validate requests to all other parties, retrying in case of failure
+    //  for a few minutes
+    // if /validate returns error for one of the parties, send /cancel to all 
+    // as leader: send /run to all other parties
+    // when /run returns, mpc calc is scheduled, return from /launch with success 
+    todo!()
+}
 
 /// HTTP request coming from another party to start an MPC session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
-pub struct PolicyRequest {
-    pub participants: Vec<Url>,
-    pub program_hash: String,
-    pub leader: usize,
+pub(crate) struct PolicyRequest {
+    pub(crate) computation_id: Uuid,
+    /// TODO I'm not sure how much sense it makes to include the participants in here
+    /// and check whether they're equal to the ones in the `Policy`. It could be the case
+    /// that P1 reaches P3 under a different URL than P2 if they're running in some
+    /// weird containerized environment
+    /// Could there be any weird consequences or angles for attack when not checking this?
+    /// I don't think so, either we reach the parties in our policy and coordinate for the
+    /// provided ID or not
+    pub(crate) participants: Vec<Url>,
+    pub(crate) program_hash: String,
+    pub(crate) leader: usize,
 }
 
-/// HTTP request to transmit constants necessary to compile a program.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConstsRequest {
-    pub consts: HashMap<String, Literal>,
+struct ValidateError;
+
+pub(crate) async fn validate(
+    State(state): State<PolytuneState>,
+    Json(policy_request): Json<PolicyRequest>,
+) -> Result<(), ValidateError> {
+    // check that policy_request matches stored policy for computation_id
+    // if not matching, return error
+    // create HttpChannel and store in state
+    todo!()
 }
 
-pub struct MpcComms {
-    pub policy: Option<Policy>,
-    pub consts: HashMap<String, HashMap<String, Literal>>,
-    pub senders: Vec<Sender<Vec<u8>>>,
-    pub sync_received: Arc<Notify>,
-    pub sync_requested: Arc<Notify>,
+struct RunError;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+pub(crate) struct RunRequest {
+    pub(crate) computation_id: Uuid,
 }
 
-pub type MpcState = Arc<Mutex<MpcComms>>;
-
-pub async fn serve_api(Extension(api): Extension<OpenApi>) -> impl IntoApiResponse {
-    Json(api)
+pub(crate) async fn run(
+    State(state): State<PolytuneState>,
+    Json(run_request): Json<RunRequest>,
+) -> Result<(), RunError> {
+    // take HttpChannel from state
+    // parse garble program so that we know how many constants we need
+    // insert (const_count, HashMap::new()) into ConstState for Id
+    // insert oneshot::Sender into ConstState for Id
+    // send constants to other parties
+    // wait on oneshot::receiver for constants
+    // compile circuit
+    // if error, return error from run, and also notify still ongoing 
+    // /launch call that compile failed (or const exchanging) so that
+    // /launch can return error (TODO, if an error occurs here, should we 
+    // send /cancel to the other parties?)
+    todo!()
 }
 
-pub async fn ping() -> &'static str {
-    "pong"
+struct CancelError;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+pub(crate) struct CancelRequest {
+    pub(crate) computation_id: Uuid,
 }
 
-pub async fn sync(State(state): State<MpcState>) {
-    state.lock().await.sync_requested.notified().await;
-    state.lock().await.sync_received.notify_one();
+pub(crate) async fn cancel(
+    State(state): State<PolytuneState>,
+    Json(cancel_request): Json<CancelRequest>,
+) -> Result<(), CancelError> {
+    // if still within /launch, notify /launch so that it can return error to caller
+    // TODO, what if mpc exec already started? 
+    todo!()
 }
 
-pub fn launch_docs(t: TransformOperation) -> TransformOperation {
-    t.id("launchMpcSession")
-        .description("Launch a new MPC session. This needs to be called for all contributors before it is called for the leader.")
-}
 
-// TODO Errors need to be returned to the caller of `/launch` and not only logged
-pub async fn launch(State(state): State<MpcState>, Json(policy): Json<Policy>) {
-    {
-        let mut state = state.lock().await;
-        state.policy = Some(policy.clone());
-    }
-    if policy.leader != policy.party {
-        return;
-    }
-    let hash = blake3::hash(policy.program.as_bytes()).to_string();
-    let client = reqwest::Client::new();
-    let policy_request = PolicyRequest {
-        participants: policy.participants.clone(),
-        leader: policy.leader,
-        program_hash: hash,
-    };
-    // As a leader, we first make sure that all other participants join the session:
-    let mut participant_missing = false;
-    for party in policy.participants.iter() {
-        if party != &policy.participants[policy.party] {
-            info!("Waiting for confirmation from party {party}");
-            let url = format!("{party}run");
-            match client.post(&url).json(&policy_request).send().await {
-                Err(err) => {
-                    error!("Could not reach {url}: {err}");
-                    participant_missing = true;
-                    continue;
-                }
-                Ok(res) => match res.status() {
-                    StatusCode::OK => {}
-                    code => {
-                        error!(
-                            "Unexpected response while trying to start execution for {url}: {code}"
-                        );
-                        participant_missing = true;
-                    }
-                },
-            }
-        }
-    }
-    if participant_missing {
-        return error!("Some participants are missing, aborting...");
-    }
-    // Now we start the MPC session:
-    info!("All participants have accepted the session, starting calculation now...");
-    match execute_mpc(state, &policy).await {
-        Ok(Some(output)) => {
-            info!("MPC Output: {output}");
-            if let Some(endpoint) = policy.output {
-                info!("Sending {output} to {endpoint}");
-                if let Err(e) = client.post(endpoint.clone()).json(&output).send().await {
-                    error!("Could not send output to {endpoint}: {e}");
-                }
-            }
-        }
-        Ok(None) => {}
-        Err(e) => {
-            error!("Error while executing MPC: {e}")
-        }
-    }
-}
-
-// TODO errors should be returned to the caller of `/run` and not only logged
-pub async fn run(State(state): State<MpcState>, Json(body): Json<PolicyRequest>) {
-    let Some(policy) = state.lock().await.policy.clone() else {
-        return error!("Trying to start MPC execution without policy");
-    };
-    if policy.participants != body.participants || policy.leader != body.leader {
-        error!("Policy not accepted: {body:?}");
-        return;
-    }
-    let expected = blake3::hash(policy.program.as_bytes()).to_string();
-    if expected != body.program_hash {
-        error!("Aborting due to different hashes for program in policy {policy:?}");
-        return;
-    }
-    info!("Starting execution");
-    tokio::spawn(async move {
-        if let Err(e) = execute_mpc(state, &policy).await {
-            error!("{e}");
-        }
-    });
-}
-
-pub async fn consts(
-    State(state): State<MpcState>,
-    Path(from): Path<u32>,
-    Json(body): Json<ConstsRequest>,
-) {
-    let mut state = state.lock().await;
-    state.consts.insert(format!("PARTY_{from}"), body.consts);
-}
-
-// TODO errors should be returned to the caller of `/run` and not only logged
-pub async fn msg(State(state): State<MpcState>, Path(from): Path<u32>, body: Bytes) {
-    let state = state.lock().await;
-    if state.senders.len() > from as usize {
-        state.senders[from as usize]
-            .send(body.to_vec())
-            .await
-            .unwrap();
-    } else {
-        error!("No sender for party {from}");
-    }
-}
