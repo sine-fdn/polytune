@@ -28,7 +28,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -F __bench -- -Dwarnings
       - name: Install cargo-machete
-        uses: taiki-e/install-action@d6912b47771be2c443ec90dbb3d28e023987e782
+        uses: taiki-e/install-action@5ab30948b991e8d6aa5a6c1e33c6aea130c6de65
         with:
           tool: cargo-machete@0.8.0 # install-action checks sha for the binary
       - name: Check for unused dependencies 
@@ -51,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install taplo for extracting rust-version
-        uses: taiki-e/install-action@d6912b47771be2c443ec90dbb3d28e023987e782
+        uses: taiki-e/install-action@5ab30948b991e8d6aa5a6c1e33c6aea130c6de65
         with:
           tool: taplo@0.10.0
       - run: |
@@ -136,7 +136,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
       - name: Install wasm-pack
-        uses: taiki-e/install-action@d6912b47771be2c443ec90dbb3d28e023987e782
+        uses: taiki-e/install-action@5ab30948b991e8d6aa5a6c1e33c6aea130c6de65
         with:
           tool: wasm-pack@0.13.1 # install-action will download from github releases and verify the SHA of the binary
       - run: wasm-pack build --target web
