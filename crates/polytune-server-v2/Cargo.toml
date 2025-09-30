@@ -1,0 +1,36 @@
+[package]
+name = "polytune-server-v2"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aide = { version = "0.15.1", features = [
+    "axum",
+    "axum-json",
+    "macros",
+    "swagger",
+] }
+anyhow = "1.0.99"
+axum = { version = "0.8.4", features = ["macros"] }
+blake3 = "1.5.1"
+clap = { version = "4.5.47", features = ["derive"] }
+futures = "0.3.31"
+garble_lang = { version = "0.7.0", features = ["json_schema"] }
+parking_lot = "0.12.4"
+polytune = { path = "../../", version = "0.2.0-alpha.2" }
+polytune-test-utils = { path = "../../crates/polytune-test-utils" }
+reqwest = { version = "0.12.23", features = ["blocking", "json"] }
+reqwest-middleware = { version = "0.4.2", features = ["json"] }
+reqwest-retry = "0.7.0"
+schemars = { version = "0.9", features = ["url2", "uuid1"] }
+serde = "1.0.197"
+serde_json = "1.0.143"
+tempfile = "3.23.0"
+tokio = { version = "1.47.1", features = ["macros", "rt", "rt-multi-thread"] }
+tower = { version = "0.5.1", features = ["util"] }
+tower-http = { version = "0.6.6", features = ["catch-panic", "fs", "trace"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+url = { version = "2.5.7", features = ["serde"] }
+uuid = { version = "1.18.1", features = ["serde"] }

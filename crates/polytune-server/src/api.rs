@@ -100,9 +100,7 @@ pub(crate) async fn schedule(
         let mut computations = state.computations.lock();
         match computations.entry(computation_id) {
             Entry::Occupied(occupied_entry) => {
-                match occupied_entry.get_mut() {
-                    PolicyState::ValidateRequested(notify, receiver)
-                }
+                todo!()
             },
             Entry::Vacant(vacant_entry) => {
                 vacant_entry.insert(PolicyState::Scheduled(policy.clone(), validate_sender))

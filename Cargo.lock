@@ -2052,6 +2052,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "polytune-server-v2"
+version = "0.1.0"
+dependencies = [
+ "aide",
+ "anyhow",
+ "axum",
+ "blake3",
+ "clap",
+ "futures",
+ "garble_lang",
+ "parking_lot 0.12.4",
+ "polytune",
+ "polytune-test-utils",
+ "reqwest",
+ "reqwest-middleware",
+ "reqwest-retry",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "polytune-sql-integration"
 version = "0.1.0"
 dependencies = [

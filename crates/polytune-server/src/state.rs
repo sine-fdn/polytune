@@ -3,6 +3,7 @@ use std::{collections::HashMap, mem, ops::Deref, sync::Arc};
 use axum::extract::FromRef;
 use garble_lang::GarbleConsts;
 use parking_lot::Mutex;
+use reqwest_middleware::ClientWithMiddleware;
 use tokio::sync::{
     Notify,
     mpsc::{self, Sender},
@@ -17,23 +18,39 @@ use crate::{
     mpc::ScheduledPolicy,
 };
 
+pub(crate) struct PolicyState {
+    client: ClientWithMiddleware,
+    cmd: mpsc::Receiver<StateCommand>
+}
+
 #[derive(Default)]
-pub(crate) enum PolicyState {
+pub(crate) enum PolicyStateKind {
     #[default]
     Empty,
-    // TODO Add a validate requested state with a sender where /schedule can send a
-    // policy if /schedule is called after /validate ?
-    ValidateRequested(
-        Arc<Notify>,
-        oneshot::Receiver<Result<(), ValidateError>>,
-    ),
-    Scheduled(Policy, oneshot::Sender<Result<(), ValidateError>>),
+    ValidateRequested,
+    Scheduled(Policy),
     // Todo, we need to parse the garble program at some point to get the number of consts
     // before compiling it, we could store the parsed program to avoid reparsing it (although
     // this cost is probably negligible)
-    Validated(Policy, oneshot::Receiver<GarbleConsts>),
+    Validated {
+        pol: Policy,
+        consts_needed: usize,
+        consts: GarbleConsts,
+    },
     Running(Policy),
     SendingOutput(Policy),
+}
+
+pub type Ret<R> = oneshot::Sender<R>;
+
+pub(crate) enum StateCommand {
+    Schedule(Policy, Ret<()>),
+    Validate(ValidatePolicyRequest, Ret<()>),
+    AddConsts {
+        from: usize,
+        consts: Consts
+    },
+    Run
 }
 
 pub(crate) enum PolicyCompatError {}
@@ -47,18 +64,18 @@ impl PolicyState {
         Ok(())
     }
 
-    pub(crate) fn to_validated(
-        &mut self,
-        const_receiver: oneshot::Receiver<GarbleConsts>,
-    ) -> oneshot::Sender<Result<(), ValidateError>> {
-        match mem::take(self) {
-            PolicyState::Scheduled(policy, sender) => {
-                *self = PolicyState::Validated(policy, const_receiver);
-                return sender;
-            }
-            _ => panic!("invalid state transition"),
-        }
-    }
+    // pub(crate) fn to_validated(
+    //     &mut self,
+    //     const_receiver: oneshot::Receiver<GarbleConsts>,
+    // ) -> oneshot::Sender<Result<(), ValidateError>> {
+    //     match mem::take(self) {
+    //         PolicyState::Scheduled(policy, sender) => {
+    //             *self = PolicyState::Validated(policy, const_receiver);
+    //             return sender;
+    //         }
+    //         _ => panic!("invalid state transition"),
+    //     }
+    // }
 }
 
 // TODO if we want to be able to schedule computations we need to also maintain a queue of

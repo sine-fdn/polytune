@@ -5,7 +5,7 @@ workspace = { members = [
     "examples/http-multi-server-channels",
     "examples/http-single-server-channels",
     "examples/wasm-http-channels",
-    "examples/sql-integration",
+    "examples/sql-integration", "crates/polytune-server-v2",
 ] }
 [package]
 name = "polytune"
