@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
+    mem,
     sync::Arc,
 };
 
@@ -93,21 +94,22 @@ pub(crate) async fn schedule(
     let is_leader = party == policy.leader;
     let computation_id = policy.computation_id;
 
-    let validate_notify = Arc::new(Notify::new());
+    let (validate_sender, validate_receiver) = oneshot::channel();
     let pol_request = {
         let pol_request = ValidatePolicyRequest::from(&policy);
         let mut computations = state.computations.lock();
         match computations.entry(computation_id) {
-            Entry::Occupied(occupied_entry) => todo!("return duplicate comp error"),
-            Entry::Vacant(vacant_entry) => vacant_entry.insert(PolicyState::Scheduled(
-                policy.clone(),
-                Arc::clone(&validate_notify),
-            )),
+            Entry::Occupied(occupied_entry) => {
+                match occupied_entry.get_mut() {
+                    PolicyState::ValidateRequested(notify, receiver)
+                }
+            },
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(PolicyState::Scheduled(policy.clone(), validate_sender))
+            }
         };
         pol_request
     };
-
-    let (const_sender, const_receiver) = oneshot::channel();
 
     // TODO only parse here, not type check, as we will probably require constants to be known for
     // type checking in the future
@@ -122,9 +124,6 @@ pub(crate) async fn schedule(
     state
         .const_state
         .init_consts(computation_id, const_count, own_consts);
-    state
-        .const_state
-        .insert_const_sender(computation_id, const_sender);
 
     if is_leader {
         let client = state.0.client.clone();
@@ -148,6 +147,11 @@ pub(crate) async fn schedule(
             .create_channel(&policy, state.client.clone())
             .await;
 
+        let (const_sender, const_receiver) = oneshot::channel();
+        state
+            .const_state
+            .insert_const_sender(computation_id, const_sender);
+
         state
             .schedule_sender
             .send(ScheduledPolicy {
@@ -159,13 +163,7 @@ pub(crate) async fn schedule(
             .unwrap();
     } else {
         // TODO have a timeout here? If policy is not validated in reasonable time we should not schedule it
-        validate_notify.notified_owned().await;
-        state
-            .computations
-            .lock()
-            .get_mut(&computation_id)
-            .unwrap()
-            .validated(const_receiver);
+        validate_receiver.await.unwrap().unwrap();
     }
 
     Ok(())
@@ -224,20 +222,49 @@ pub(crate) async fn validate(
     State(state): State<PolytuneState>,
     Json(policy_request): Json<ValidatePolicyRequest>,
 ) -> Result<(), ValidateError> {
-    let comps = state.computations.lock();
-    match comps.get(&policy_request.computation_id) {
-        Some(PolicyState::Scheduled(policy, notify_schedule)) => {
-            // check policy against request
-            notify_schedule.notify_one();
+    let computation_id = policy_request.computation_id;
+    let (notify, notify_schedule_sender) = match state.computations.lock().entry(computation_id) {
+        Entry::Occupied(mut occupied_entry) => {
+            match occupied_entry.get_mut() {
+                scheduled @ PolicyState::Scheduled(..) => {
+                    let (const_sender, const_receiver) = oneshot::channel();
+                    state
+                        .const_state
+                        .insert_const_sender(computation_id, const_sender);
+                    let notify_schedule = scheduled.to_validated(const_receiver);
+                    // TODO check policy
+                    // TODO what happens if we can't send to schedule?
+                    notify_schedule.send(Ok(()));
+                    return Ok(());
+                }
+                state => {
+                    // TODO send cancel to others?
+                    let err = ValidateError::PolicyStateInvalid;
+                    return Err(err);
+                }
+            }
         }
-        _ => return panic!(),
+        Entry::Vacant(vacant_entry) => {
+            let notify = Arc::new(Notify::new());
+            let (notify_schedule_sender, notify_schedule_receiver) = oneshot::channel();
+            let state =
+                PolicyState::ValidateRequested(Arc::clone(&notify), notify_schedule_receiver);
+            vacant_entry.insert(state);
+            (notify, notify_schedule_sender)
+        }
     };
+    notify.notified_owned().await;
+    let ret = Box::pin(validate(State(state), Json(policy_request))).await;
+    notify_schedule_sender.send(ret);
+
     Ok(())
 }
 
-#[derive(OperationIo)]
+#[derive(OperationIo, Debug)]
 #[aide(output)]
-pub(crate) struct ValidateError;
+pub(crate) enum ValidateError {
+    PolicyStateInvalid,
+}
 
 impl From<PolicyCompatError> for ValidateError {
     fn from(value: PolicyCompatError) -> Self {
@@ -248,7 +275,6 @@ impl From<PolicyCompatError> for ValidateError {
 impl IntoResponse for ValidateError {
     fn into_response(self) -> axum::response::Response {
         StatusCode::IM_A_TEAPOT.into_response()
-
     }
 }
 

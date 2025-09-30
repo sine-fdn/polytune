@@ -1,13 +1,8 @@
-use std::{
-    collections::HashMap,
-    mem,
-    ops::Deref,
-    sync::{Arc},
-};
+use std::{collections::HashMap, mem, ops::Deref, sync::Arc};
 
-use parking_lot::Mutex;
 use axum::extract::FromRef;
 use garble_lang::GarbleConsts;
+use parking_lot::Mutex;
 use tokio::sync::{
     Notify,
     mpsc::{self, Sender},
@@ -16,16 +11,23 @@ use tokio::sync::{
 use uuid::Uuid;
 
 use crate::{
-    api::{Policy, ValidatePolicyRequest},
+    api::{Policy, ValidateError, ValidatePolicyRequest},
     channel::{HttpChannel, MsgState},
     consts::{ConstState, Consts},
     mpc::ScheduledPolicy,
 };
 
+#[derive(Default)]
 pub(crate) enum PolicyState {
+    #[default]
+    Empty,
     // TODO Add a validate requested state with a sender where /schedule can send a
     // policy if /schedule is called after /validate ?
-    Scheduled(Policy, Arc<Notify>),
+    ValidateRequested(
+        Arc<Notify>,
+        oneshot::Receiver<Result<(), ValidateError>>,
+    ),
+    Scheduled(Policy, oneshot::Sender<Result<(), ValidateError>>),
     // Todo, we need to parse the garble program at some point to get the number of consts
     // before compiling it, we could store the parsed program to avoid reparsing it (although
     // this cost is probably negligible)
@@ -45,10 +47,14 @@ impl PolicyState {
         Ok(())
     }
 
-    pub(crate) fn validated(&mut self, const_receiver: oneshot::Receiver<GarbleConsts>) {
-        match self {
-            PolicyState::Scheduled(policy, _) => {
-                *self = PolicyState::Validated(mem::take(policy), const_receiver)
+    pub(crate) fn to_validated(
+        &mut self,
+        const_receiver: oneshot::Receiver<GarbleConsts>,
+    ) -> oneshot::Sender<Result<(), ValidateError>> {
+        match mem::take(self) {
+            PolicyState::Scheduled(policy, sender) => {
+                *self = PolicyState::Validated(policy, const_receiver);
+                return sender;
             }
             _ => panic!("invalid state transition"),
         }
