@@ -31,6 +31,8 @@ use crate::state::{
 
 pub(crate) struct PolytuneStateInner {
     pub(crate) client_builder: HttpClientBuilder,
+    // TODO how do handle removal of the senders once `mpc` finishes? This somehow needs
+    // to be communicated by the state machine, otherwise we leak memory
     pub(crate) cmd_senders: tokio::sync::RwLock<HashMap<Uuid, mpsc::Sender<PolicyCmd>>>,
 }
 
@@ -144,7 +146,8 @@ impl PolicyClient for HttpClient {
         to: Url,
         result: Result<Literal, crate::state::OutputError>,
     ) -> Result<(), Self::ClientError<std::convert::Infallible>> {
-        info!(?result);
+        // TODO actually send output
+        info!("Sending {} to {to}", result.unwrap());
         Ok(())
     }
 }
@@ -169,24 +172,26 @@ pub fn schedule_docs(t: TransformOperation) -> TransformOperation {
         .description("Schedule a new MPC session. This needs to be called in the same order for all participants for all computations.")
 }
 
-// TODO maybe a have a /schedule endpoint?
-// when does this endpoint return?
-// how do the different participants decide when to schedule a computation?
-// `/schedule` could be called in a different order for different parties
-// #[axum::debug_handler]
+// TODO document when does this endpoint return?
 pub(crate) async fn schedule(
     State(state): State<PolytuneState>,
     Json(policy): Json<Policy>,
 ) -> Result<(), ScheduleError> {
+    let computation_id = policy.computation_id;
     let (ret_tx, ret_rx) = oneshot::channel();
     let cmd_sender = {
         let mut cmd_senders = state.cmd_senders.write().await;
         cmd_senders
-            .entry(policy.computation_id)
+            .entry(computation_id)
             .or_insert_with(|| {
+                // TODO semaphore needs to be kept in state and in Arc0
                 let (policy_state, cmd_sender) =
                     PolicyState::new(state.client_builder.clone(), Semaphore::new(2));
-                tokio::spawn(policy_state.start());
+                let state_cl = state.clone();
+                tokio::spawn(async move {
+                    policy_state.start().await;
+                    state_cl.cmd_senders.write().await.remove(&computation_id);
+                });
                 cmd_sender
             })
             .clone()
@@ -220,8 +225,9 @@ pub(crate) async fn validate(
     State(state): State<PolytuneState>,
     Json(validate_request): Json<ValidateRequest>,
 ) -> Result<(), ValidateError> {
+    let computation_id = validate_request.computation_id;
     let (ret_tx, ret_rx) = oneshot::channel();
-
+    // TODO DRY this with schedule
     let cmd_sender = {
         let mut cmd_senders = state.cmd_senders.write().await;
         cmd_senders
@@ -229,7 +235,11 @@ pub(crate) async fn validate(
             .or_insert_with(|| {
                 let (policy_state, cmd_sender) =
                     PolicyState::new(state.client_builder.clone(), Semaphore::new(2));
-                tokio::spawn(policy_state.start());
+                let state_cl = state.clone();
+                tokio::spawn(async move {
+                    policy_state.start().await;
+                    state_cl.cmd_senders.write().await.remove(&computation_id);
+                });
                 cmd_sender
             })
             .clone()

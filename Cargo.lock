@@ -2052,6 +2052,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "polytune-server-core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "futures",
+ "garble_lang",
+ "polytune",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "polytune-server-v2"
 version = "0.1.0"
 dependencies = [
