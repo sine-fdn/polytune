@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem, thread};
+use std::{collections::HashMap, convert::Infallible, fmt::Debug, mem, ops::ControlFlow, thread};
 
 use futures::future;
 use garble_lang::{
@@ -7,9 +7,13 @@ use garble_lang::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, mpsc, oneshot};
-use tracing::info;
+use tracing::{debug, error, info};
 use url::Url;
 use uuid::Uuid;
+
+use crate::api::ConstError;
+
+pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// A policy containing everything necessary to run an MPC session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -40,9 +44,26 @@ pub struct Policy {
 }
 
 impl Policy {
+    fn program_hash(&self) -> String {
+        blake3::hash(self.program.as_bytes()).to_string()
+    }
     fn other_parties(&self) -> impl Iterator<Item = usize> + Clone {
         (0..self.participants.len()).filter(|p| *p != self.party)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ScheduleError {
+    #[error(
+        "unable to schedule policy {computation_id}. state must be Init for leader but is {state}"
+    )]
+    InvalidStateLeader { computation_id: Uuid, state: String },
+    #[error(
+        "unable to schedule policy {computation_id}. state must be Init or ValidateRequested but is {state}"
+    )]
+    InvalidStateFollower { computation_id: Uuid, state: String },
+    #[error("validation of party {to} failed")]
+    ValidateFailed { to: usize, source: BoxError },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -56,43 +77,77 @@ impl From<&Policy> for ValidateRequest {
     fn from(policy: &Policy) -> Self {
         Self {
             computation_id: policy.computation_id,
-            program_hash: blake3::hash(policy.program.as_bytes()).to_string(),
+            program_hash: policy.program_hash(),
             leader: policy.leader,
         }
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct ValidateError;
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ValidateError {
+    #[error(
+        "scheduled leader {scheduled_leader} but got validate request with leader: {requested_leader}"
+    )]
+    LeaderMismatch {
+        scheduled_leader: usize,
+        requested_leader: usize,
+    },
+    #[error(
+        "scheduled policy with program hash {scheduled_hash} but got validate request with hash: {requested_hash}"
+    )]
+    ProgramHashMismatch {
+        scheduled_hash: String,
+        requested_hash: String,
+    },
+    #[error(
+        "unable to validate policy {computation_id}. state must be Init or AwaitingValidation but is {state}"
+    )]
+    InvalidState { computation_id: Uuid, state: String },
+}
 
-#[derive(Clone, Debug)]
-struct RunRequest {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct RunRequest {
     pub(crate) computation_id: Uuid,
 }
-#[derive(Debug)]
-struct RunError;
+#[derive(Debug, thiserror::Error)]
+#[error("TODO")]
+pub(crate) struct RunError;
 
 pub(crate) type Consts = HashMap<String, Literal>;
 
-#[derive(Clone, Debug)]
-struct ConstsRequest {
-    from: usize,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ConstsRequest {
+    pub(crate) from: usize,
+    pub(crate) computation_id: Uuid,
     consts: Consts,
 }
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("TODO")]
 pub(crate) struct ConstsError;
 
-#[derive(Debug)]
-struct MpcMsg {
-    from: usize,
-    data: Vec<u8>,
+pub(crate) struct MpcMsg {
+    pub(crate) from: usize,
+    pub(crate) data: Vec<u8>,
 }
 
-#[derive(Debug)]
+impl Debug for MpcMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MpcMsg")
+            .field("from", &self.from)
+            .field("data_len", &self.data.len())
+            .finish()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("TODO")]
 pub(crate) struct MpcMsgError;
 
-#[derive(Debug)]
-pub(crate) struct OutputError;
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OutputError {
+    #[error("error when requesting run from followers")]
+    RequestRunError { source: BoxError },
+}
 
 pub(crate) struct PolicyState<B, C> {
     client_builder: B,
@@ -110,10 +165,16 @@ where
     B: PolicyClientBuilder<Client = C>,
     C: PolicyClient,
 {
+    ///
+    /// # Panics
+    /// - If `concurrency` [`Semaphore`] is closed.
     pub(crate) fn new(
         client_builder: B,
         concurrency: Semaphore,
     ) -> (Self, mpsc::Sender<PolicyCmd>) {
+        if concurrency.is_closed() {
+            panic!("concurrency semaphore must not be closed");
+        }
         let (cmd_tx, cmd_rx) = mpsc::channel(10);
         let mut channel_senders = vec![];
         let mut channel_receivers = vec![];
@@ -141,283 +202,416 @@ where
 
     pub(crate) async fn start(mut self) {
         while let Some(cmd) = self.cmd_rx.recv().await {
-            println!("handling {cmd:?}");
-            match cmd {
-                PolicyCmd::Schedule(policy, ret) => {
-                    let is_leader = policy.party == policy.leader;
+            debug!("handling {cmd:?}");
+            self = match self.handle_cmd(cmd).await {
+                ControlFlow::Continue(this) => this,
+                ControlFlow::Break(_) => return,
+            }
+        }
+    }
 
-                    let typed_program = garble_lang::check(&policy.program).unwrap();
+    async fn handle_cmd(mut self, cmd: PolicyCmd) -> ControlFlow<(), Self> {
+        match cmd {
+            PolicyCmd::Schedule(policy, ret) => {
+                self = self.schedule(policy, ret).await?;
+            }
+            PolicyCmd::Validate(request, ret) => {
+                self = self.validate(request, ret).await?;
+            }
+            PolicyCmd::Run(request, opt_ret) => {
+                self = self.run(request, opt_ret).await?;
+            }
+            PolicyCmd::Consts(request, ret) => {
+                self = self.consts(request, ret).await?;
+            }
+            PolicyCmd::InternalConstsSent => {
+                self = self.internal_consts_sent().await?;
+            }
+            PolicyCmd::MpcMsg(mpc_msg, ret) => {
+                self.channel_senders[mpc_msg.from]
+                    .send(mpc_msg.data)
+                    .await
+                    .unwrap();
+                let _ = ret.send(Ok(()));
+            }
+        }
+        ControlFlow::Continue(self)
+    }
 
-                    if is_leader {
-                        if !matches!(self.state_kind, PolicyStateKind::Init) {
-                            ret.send(Err(ScheduleError));
-                            continue;
-                        }
-                        let client = self.client_builder.new(policy.participants.clone());
+    async fn schedule(
+        mut self,
+        policy: Policy,
+        ret: Ret<Result<(), ScheduleError>>,
+    ) -> ControlFlow<(), Self> {
+        let is_leader = policy.party == policy.leader;
 
-                        dbg!("validating others");
-                        let validate_req = ValidateRequest::from(&policy);
-                        let validate_futs = policy
-                            .other_parties()
-                            .map(async |p| client.validate(p, validate_req.clone()).await);
-                        future::try_join_all(validate_futs).await.unwrap();
-                        dbg!("validated others");
-                        ret.send(Ok(()));
+        let typed_program = garble_lang::check(&policy.program).unwrap();
 
-                        let permit = self.concurrency.acquire().await.unwrap();
-                        let run_request = RunRequest {
-                            computation_id: policy.computation_id,
-                        };
-                        dbg!("running others");
-                        let run_futs = policy
-                            .other_parties()
-                            .map(async |p| client.run(p, run_request.clone()).await);
-                        future::try_join_all(run_futs).await;
-                        dbg!("done running others");
-                        self.state_kind = PolicyStateKind::Validated {
-                            client,
-                            policy,
-                            typed_program,
-                        };
-                        self.cmd_tx
-                            .send(PolicyCmd::Run(run_request, None))
-                            .await
-                            .unwrap();
-                    } else {
-                        let client = self.client_builder.new(policy.participants.clone());
+        if is_leader {
+            if !matches!(self.state_kind, PolicyStateKind::Init) {
+                let _ = ret.send(Err(ScheduleError::InvalidStateLeader {
+                    computation_id: policy.computation_id,
+                    state: format!("{:?}", self.state_kind),
+                }));
+                return ControlFlow::Continue(self);
+            }
+            let client = self.client_builder.new(&policy);
 
-                        match self.state_kind {
-                            PolicyStateKind::Init => {
-                                self.state_kind = PolicyStateKind::AwaitingValidation {
-                                    client,
-                                    schedule_ret: ret,
-                                    policy,
-                                };
-                            }
-                            PolicyStateKind::ValidateRequested {
-                                request,
-                                validate_ret,
-                            } => {
-                                // TODO check policy against request
-                                self.state_kind = PolicyStateKind::Validated {
-                                    client,
-                                    policy,
-                                    typed_program,
-                                };
-                                validate_ret.send(Ok(())).unwrap();
-                            }
-                            _ => panic!(),
-                        }
+            debug!("sending validate to followers");
+            let validate_req = ValidateRequest::from(&policy);
+            let validate_futs = policy.other_parties().map(async |p| {
+                client
+                    .validate(p, validate_req.clone())
+                    .await
+                    .map_err(|err| (p, err))
+            });
+            if let Err((to, err)) = future::try_join_all(validate_futs).await {
+                let _ = ret.send(Err(ScheduleError::ValidateFailed {
+                    to,
+                    source: Box::new(err),
+                }));
+                return ControlFlow::Break(());
+            }
+            debug!("validated followers");
+            // we return from `schedule` call after validating with the the other parties
+            // which means that they are reachable and a compatible policy has been scheduled
+            // for these parties
+            let _ = ret.send(Ok(()));
+
+            // We currently limit the concurrency in terms of computation where a party is the leader
+            let _permit = self
+                .concurrency
+                .acquire()
+                .await
+                .expect("is_closed checked in new()");
+            let run_request = RunRequest {
+                computation_id: policy.computation_id,
+            };
+            debug!("sending run to followers");
+            let run_futs = policy
+                .other_parties()
+                .map(async |p| client.run(p, run_request.clone()).await);
+            if let Err(err) = future::try_join_all(run_futs).await {
+                if let Some(url) = policy.output {
+                    let res = client
+                        .output(
+                            url.clone(),
+                            Err(OutputError::RequestRunError {
+                                source: Box::new(err),
+                            }),
+                        )
+                        .await;
+                    if let Err(err) = res {
+                        error!(?err, "unable to notify output {url} of request run error")
                     }
+                    return ControlFlow::Break(());
                 }
-                PolicyCmd::Validate(validate_request, ret) => {
-                    match self.state_kind {
-                        PolicyStateKind::Init => {
-                            // go to state ValidateRequested, passing along return
-                            self.state_kind = PolicyStateKind::ValidateRequested {
-                                request: validate_request,
-                                validate_ret: ret,
-                            };
-                        }
-                        PolicyStateKind::AwaitingValidation {
-                            client,
-                            schedule_ret,
-                            policy,
-                        } => {
-                            let typed_program = garble_lang::check(&policy.program).unwrap();
+            }
+            debug!("followers are running");
+            self.state_kind = PolicyStateKind::Validated {
+                client,
+                policy,
+                typed_program,
+            };
+            self.cmd_tx
+                .send(PolicyCmd::Run(run_request, None))
+                .await
+                .expect("unreachable");
+        } else {
+            // Schedule on  a follower
+            let client = self.client_builder.new(&policy);
 
-                            // TODO actually validate
-                            // validate and go to validated
-                            self.state_kind = PolicyStateKind::Validated {
-                                client,
-                                policy,
-                                typed_program,
-                            };
-                            schedule_ret.send(Ok(())).unwrap();
-                            ret.send(Ok(())).unwrap();
-                        }
-                        _ => panic!(),
-                    }
-                }
-                PolicyCmd::Run(run_request, opt_ret) => {
-                    match mem::take(&mut self.state_kind) {
-                        PolicyStateKind::Validated {
-                            client,
-                            policy,
-                            typed_program,
-                        } => {
-                            self.consts.insert(
-                                format!("PARTY_{}", policy.party),
-                                policy.constants.clone(),
-                            );
-                            let cmd_sender = self.cmd_tx.clone();
-                            let policy_cl = policy.clone();
-                            let (client_send, client_recv) = oneshot::channel();
-                            self.state_kind = PolicyStateKind::SendingConsts {
-                                policy,
-                                typed_program,
-                                client_recv,
-                            };
-                            if let Some(ret) = opt_ret {
-                                ret.send(Ok(())).unwrap();
-                            }
-                            tokio::spawn(async move {
-                                let const_futs = policy_cl.other_parties().map(async |p| {
-                                    let const_req = ConstsRequest {
-                                        from: policy_cl.party,
-                                        consts: policy_cl.constants.clone(),
-                                    };
-                                    client.consts(p, const_req).await
-                                });
-                                future::try_join_all(const_futs).await.unwrap();
-                                client_send.send(client);
-                                cmd_sender
-                                    .send(PolicyCmd::InternalConstsSent)
-                                    .await
-                                    .unwrap();
-                            });
-                        }
-                        PolicyStateKind::Running {
-                            typed_program,
-                            policy,
-                            channel,
-                        } => {
-                            let (compiled_tx, compiled_rx) = oneshot::channel();
-                            let program = policy.program.clone();
-                            let consts = mem::take(&mut self.consts);
-                            thread::spawn(move || {
-                                let compiled = compile_with_options(
-                                    &program,
-                                    CompileOptions {
-                                        circuit_kind: CircuitKind::Register,
-                                        consts,
-                                        // false reduces peak memory consumption
-                                        optimize_duplicate_gates: false,
-                                    },
-                                );
-                                // ignore send error as execute_run_request has been dropped
-                                let _ = compiled_tx.send(compiled);
-                            });
-                            let compiled = compiled_rx.await.unwrap().unwrap();
-
-                            let input = compiled
-                                .literal_arg(policy.party, policy.input.clone())
-                                .unwrap()
-                                .as_bits();
-                            info!("starting mpc comp");
-                            tokio::spawn(async move {
-                                let output = polytune::mpc(
-                                    &channel,
-                                    compiled.circuit.unwrap_register_ref(),
-                                    &input,
-                                    0,
-                                    policy.party,
-                                    &vec![policy.leader],
-                                    // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
-                                    // and the files will be in memory and not on the disk
-                                    None,
-                                )
-                                .await
-                                .unwrap();
-                                channel
-                                    .client
-                                    .output(
-                                        policy.output,
-                                        Ok(compiled.parse_output(&output).unwrap()),
-                                    )
-                                    .await;
-                            });
-                        }
-                        _ => panic!(),
-                    }
-                }
-                PolicyCmd::Consts(consts_request, ret) => match self.state_kind {
-                    state @ (PolicyStateKind::SendingConsts { .. }
-                    | PolicyStateKind::Validated { .. }) => {
-                        self.state_kind = state;
-                        let const_prefix = format!("PARTY_{}", consts_request.from);
-                        self.consts.insert(const_prefix, consts_request.consts);
-                        ret.send(Ok(()));
-                    }
-                    PolicyStateKind::SendingConstsCompleted {
-                        policy,
-                        typed_program,
+            match self.state_kind {
+                PolicyStateKind::Init => {
+                    self.state_kind = PolicyStateKind::AwaitingValidation {
                         client,
-                    } => {
-                        let const_prefix = format!("PARTY_{}", consts_request.from);
-                        self.consts.insert(const_prefix, consts_request.consts);
-                        ret.send(Ok(()));
-                        if self.consts.len() == typed_program.const_deps.len() {
-                            let receivers = self.channel_receivers.take().unwrap();
-                            let channel = Channel {
-                                client,
-                                receivers,
-                                party: policy.party,
-                            };
-                            let computation_id = policy.computation_id;
-                            self.state_kind = PolicyStateKind::Running {
-                                channel,
-                                typed_program,
-                                policy,
-                            };
-                            self.cmd_tx
-                                .send(PolicyCmd::Run(RunRequest { computation_id }, None))
-                                .await
-                                .unwrap();
-                        } else {
-                            self.state_kind = PolicyStateKind::SendingConstsCompleted {
-                                policy,
-                                typed_program,
-                                client,
-                            };
-                        }
+                        schedule_ret: ret,
+                        policy,
+                    };
+                }
+                PolicyStateKind::ValidateRequested {
+                    request,
+                    validate_ret,
+                } => {
+                    if request.leader != policy.leader {
+                        let _ = validate_ret.send(Err(ValidateError::LeaderMismatch {
+                            scheduled_leader: policy.leader,
+                            requested_leader: request.leader,
+                        }));
+                        return ControlFlow::Break(());
                     }
-                    _ => todo!(),
-                },
-                PolicyCmd::InternalConstsSent => match self.state_kind {
-                    PolicyStateKind::SendingConsts {
+                    let scheduled_hash = policy.program_hash();
+                    if request.program_hash != scheduled_hash {
+                        let _ = validate_ret.send(Err(ValidateError::ProgramHashMismatch {
+                            scheduled_hash,
+                            requested_hash: request.program_hash,
+                        }));
+                        return ControlFlow::Break(());
+                    }
+                    self.state_kind = PolicyStateKind::Validated {
+                        client,
                         policy,
                         typed_program,
-                        client_recv,
-                    } => {
-                        let client = client_recv.await.unwrap();
-                        // TODO DRY this with above
-                        if self.consts.len() == typed_program.const_deps.len() {
-                            let receivers = self.channel_receivers.take().unwrap();
-                            let channel = Channel {
-                                client,
-                                receivers,
-                                party: policy.party,
-                            };
-                            let computation_id = policy.computation_id;
-                            self.state_kind = PolicyStateKind::Running {
-                                channel,
-                                typed_program,
-                                policy,
-                            };
-                            self.cmd_tx
-                                .send(PolicyCmd::Run(RunRequest { computation_id }, None))
-                                .await
-                                .unwrap();
-                        } else {
-                            self.state_kind = PolicyStateKind::SendingConstsCompleted {
-                                policy,
-                                typed_program,
-                                client,
-                            };
-                        }
-                    }
-                    _ => panic!(),
-                },
-                PolicyCmd::MpcMsg(mpc_msg, ret) => {
-                    self.channel_senders[mpc_msg.from]
-                        .send(mpc_msg.data)
-                        .await
-                        .unwrap();
-                    ret.send(Ok(()));
+                    };
+                    let _ = validate_ret.send(Ok(()));
+                }
+                state => {
+                    let _ = ret.send(Err(ScheduleError::InvalidStateFollower {
+                        computation_id: policy.computation_id,
+                        state: format!("{state:?}"),
+                    }));
+                    // keep the state machine for this computation running in case
+                    // of an erronous schedule
+                    self.state_kind = state;
                 }
             }
         }
+        ControlFlow::Continue(self)
+    }
+
+    async fn validate(
+        mut self,
+        request: ValidateRequest,
+        validate_ret: Ret<Result<(), ValidateError>>,
+    ) -> ControlFlow<(), Self> {
+        match self.state_kind {
+            PolicyStateKind::Init => {
+                // go to state ValidateRequested, passing along return
+                self.state_kind = PolicyStateKind::ValidateRequested {
+                    request,
+                    validate_ret,
+                };
+            }
+            PolicyStateKind::AwaitingValidation {
+                client,
+                schedule_ret,
+                policy,
+            } => {
+                let typed_program = garble_lang::check(&policy.program).unwrap();
+
+                if request.leader != policy.leader {
+                    let _ = validate_ret.send(Err(ValidateError::LeaderMismatch {
+                        scheduled_leader: policy.leader,
+                        requested_leader: request.leader,
+                    }));
+                    return ControlFlow::Break(());
+                }
+                let scheduled_hash = policy.program_hash();
+                if request.program_hash != scheduled_hash {
+                    let _ = validate_ret.send(Err(ValidateError::ProgramHashMismatch {
+                        scheduled_hash,
+                        requested_hash: request.program_hash,
+                    }));
+                    return ControlFlow::Break(());
+                }
+
+                // validate and go to validated
+                self.state_kind = PolicyStateKind::Validated {
+                    client,
+                    policy,
+                    typed_program,
+                };
+                // TOOD is the ordering irrelevant here?
+                let _ = schedule_ret.send(Ok(()));
+                let _ = validate_ret.send(Ok(()));
+            }
+            state => {
+                let _ = validate_ret.send(Err(ValidateError::InvalidState {
+                    computation_id: request.computation_id,
+                    state: format!("{state:?}"),
+                }));
+                self.state_kind = state;
+            }
+        }
+        ControlFlow::Continue(self)
+    }
+
+    async fn run(
+        mut self,
+        req: RunRequest,
+        opt_ret: Option<Ret<Result<(), RunError>>>,
+    ) -> ControlFlow<(), Self> {
+        match mem::take(&mut self.state_kind) {
+            PolicyStateKind::Validated {
+                client,
+                policy,
+                typed_program,
+            } => {
+                self.consts
+                    .insert(format!("PARTY_{}", policy.party), policy.constants.clone());
+                let cmd_sender = self.cmd_tx.clone();
+                let policy_cl = policy.clone();
+                let (client_send, client_recv) = oneshot::channel();
+                self.state_kind = PolicyStateKind::SendingConsts {
+                    policy,
+                    typed_program,
+                    client_recv,
+                };
+                if let Some(ret) = opt_ret {
+                    let _ = ret.send(Ok(()));
+                }
+                tokio::spawn(async move {
+                    let const_futs = policy_cl.other_parties().map(async |p| {
+                        let const_req = ConstsRequest {
+                            from: policy_cl.party,
+                            consts: policy_cl.constants.clone(),
+                            computation_id: policy_cl.computation_id,
+                        };
+                        client.consts(p, const_req).await
+                    });
+                    future::try_join_all(const_futs).await.unwrap();
+                    client_send.send(client);
+                    cmd_sender
+                        .send(PolicyCmd::InternalConstsSent)
+                        .await
+                        .unwrap();
+                });
+            }
+            PolicyStateKind::Running {
+                typed_program,
+                policy,
+                channel,
+            } => {
+                let (compiled_tx, compiled_rx) = oneshot::channel();
+                let program = policy.program.clone();
+                let consts = mem::take(&mut self.consts);
+                thread::spawn(move || {
+                    let compiled = compile_with_options(
+                        &program,
+                        CompileOptions {
+                            circuit_kind: CircuitKind::Register,
+                            consts,
+                            // false reduces peak memory consumption
+                            optimize_duplicate_gates: false,
+                        },
+                    );
+                    // ignore send error as execute_run_request has been dropped
+                    let _ = compiled_tx.send(compiled);
+                });
+                let compiled = compiled_rx.await.unwrap().unwrap();
+
+                let input = compiled
+                    .literal_arg(policy.party, policy.input.clone())
+                    .unwrap()
+                    .as_bits();
+                info!("starting mpc comp");
+                tokio::spawn(async move {
+                    let output = polytune::mpc(
+                        &channel,
+                        compiled.circuit.unwrap_register_ref(),
+                        &input,
+                        0,
+                        policy.party,
+                        &vec![policy.leader],
+                        // create a tempdir in ./ and not /tmp because that is often backed by a tmpfs
+                        // and the files will be in memory and not on the disk
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                    if let Some(url) = policy.output {
+                        if !output.is_empty() {
+                            channel
+                                .client
+                                .output(url, Ok(compiled.parse_output(&output).unwrap()))
+                                .await
+                                .unwrap();
+                        }
+                    }
+                });
+            }
+            _ => panic!(),
+        }
+        ControlFlow::Continue(self)
+    }
+
+    async fn consts(
+        mut self,
+        consts_request: ConstsRequest,
+        ret: Ret<Result<(), ConstsError>>,
+    ) -> ControlFlow<(), Self> {
+        match self.state_kind {
+            state @ (PolicyStateKind::SendingConsts { .. } | PolicyStateKind::Validated { .. }) => {
+                self.state_kind = state;
+                let const_prefix = format!("PARTY_{}", consts_request.from);
+                self.consts.insert(const_prefix, consts_request.consts);
+                ret.send(Ok(()));
+            }
+            PolicyStateKind::SendingConstsCompleted {
+                policy,
+                typed_program,
+                client,
+            } => {
+                let const_prefix = format!("PARTY_{}", consts_request.from);
+                self.consts.insert(const_prefix, consts_request.consts);
+                ret.send(Ok(()));
+                if self.consts.len() == typed_program.const_deps.len() {
+                    let receivers = self.channel_receivers.take().unwrap();
+                    let channel = Channel {
+                        client,
+                        receivers,
+                        party: policy.party,
+                    };
+                    let computation_id = policy.computation_id;
+                    self.state_kind = PolicyStateKind::Running {
+                        channel,
+                        typed_program,
+                        policy,
+                    };
+                    self.cmd_tx
+                        .send(PolicyCmd::Run(RunRequest { computation_id }, None))
+                        .await
+                        .unwrap();
+                } else {
+                    self.state_kind = PolicyStateKind::SendingConstsCompleted {
+                        policy,
+                        typed_program,
+                        client,
+                    };
+                }
+            }
+            _ => todo!(),
+        }
+        ControlFlow::Continue(self)
+    }
+
+    async fn internal_consts_sent(mut self) -> ControlFlow<(), Self> {
+        match self.state_kind {
+            PolicyStateKind::SendingConsts {
+                policy,
+                typed_program,
+                client_recv,
+            } => {
+                let client = client_recv.await.unwrap();
+                // TODO DRY this with above
+                if self.consts.len() == typed_program.const_deps.len() {
+                    let receivers = self.channel_receivers.take().unwrap();
+                    let channel = Channel {
+                        client,
+                        receivers,
+                        party: policy.party,
+                    };
+                    let computation_id = policy.computation_id;
+                    self.state_kind = PolicyStateKind::Running {
+                        channel,
+                        typed_program,
+                        policy,
+                    };
+                    self.cmd_tx
+                        .send(PolicyCmd::Run(RunRequest { computation_id }, None))
+                        .await
+                        .unwrap();
+                } else {
+                    self.state_kind = PolicyStateKind::SendingConstsCompleted {
+                        policy,
+                        typed_program,
+                        client,
+                    };
+                }
+            }
+            _ => panic!(),
+        }
+        ControlFlow::Continue(self)
     }
 }
 
@@ -458,8 +652,19 @@ pub(crate) enum PolicyStateKind<C> {
     },
 }
 
-#[derive(Debug)]
-pub(crate) struct ScheduleError;
+impl<C> Debug for PolicyStateKind<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Init => write!(f, "Init"),
+            Self::AwaitingValidation { .. } => write!(f, "AwaitingValidation"),
+            Self::ValidateRequested { .. } => write!(f, "ValidateRequested"),
+            Self::Validated { .. } => write!(f, "Validated"),
+            Self::SendingConsts { .. } => write!(f, "SendingConsts"),
+            Self::SendingConstsCompleted { .. } => write!(f, "SendingConstsCompleted"),
+            Self::Running { .. } => write!(f, "Running"),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum PolicyCmd {
@@ -475,23 +680,35 @@ pub(crate) enum PolicyCmd {
 pub(crate) trait PolicyClientBuilder {
     type Client: PolicyClient;
 
-    fn new(&self, participants: Vec<Url>) -> Self::Client;
+    fn new(&self, policy: &Policy) -> Self::Client;
 }
 
 pub(crate) trait PolicyClient: Send + Sync + 'static {
-    async fn validate(&self, to: usize, req: ValidateRequest) -> Result<(), ValidateError>;
-    async fn run(&self, to: usize, req: RunRequest) -> Result<(), RunError>;
+    type ClientError<E>: std::error::Error + Send + Sync
+    where
+        E: std::error::Error + Send + Sync;
+
+    async fn validate(
+        &self,
+        to: usize,
+        req: ValidateRequest,
+    ) -> Result<(), Self::ClientError<ValidateError>>;
+    async fn run(&self, to: usize, req: RunRequest) -> Result<(), Self::ClientError<RunError>>;
     fn consts(
         &self,
         to: usize,
         req: ConstsRequest,
-    ) -> impl Future<Output = Result<(), ConstsError>> + Send;
-    fn msg(&self, to: usize, msg: MpcMsg) -> impl Future<Output = Result<(), MpcMsgError>> + Send;
+    ) -> impl Future<Output = Result<(), Self::ClientError<ConstsError>>> + Send;
+    fn msg(
+        &self,
+        to: usize,
+        msg: MpcMsg,
+    ) -> impl Future<Output = Result<(), Self::ClientError<MpcMsgError>>> + Send;
     fn output(
         &self,
-        to: Option<Url>,
-        result: Result<Literal, ()>,
-    ) -> impl Future<Output = Result<(), OutputError>> + Send;
+        to: Url,
+        result: Result<Literal, OutputError>,
+    ) -> impl Future<Output = Result<(), Self::ClientError<Infallible>>> + Send;
 }
 
 pub(crate) struct Channel<C> {
@@ -532,10 +749,11 @@ impl<C: PolicyClient> polytune::channel::Channel for Channel<C> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, time::Duration};
+    use std::{convert::Infallible, fmt::Debug, fs, time::Duration};
 
     use garble_lang::literal::Literal;
     use tokio::sync::{Semaphore, mpsc, oneshot};
+    use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 
     use crate::state::{
         MpcMsgError, OutputError, Policy, PolicyClient, PolicyClientBuilder, PolicyCmd, PolicyState,
@@ -544,19 +762,24 @@ mod tests {
     #[derive(Clone)]
     struct TestClient {
         cmd_senders: Vec<mpsc::Sender<PolicyCmd>>,
-        output: mpsc::Sender<Result<Literal, ()>>,
+        output: mpsc::Sender<Result<Literal, OutputError>>,
     }
 
     impl PolicyClientBuilder for TestClient {
         type Client = Self;
 
-        fn new(&self, participants: Vec<url::Url>) -> Self::Client {
-            assert_eq!(self.cmd_senders.len(), participants.len());
+        fn new(&self, policy: &Policy) -> Self::Client {
+            assert_eq!(self.cmd_senders.len(), policy.participants.len());
             self.clone()
         }
     }
 
     impl PolicyClient for TestClient {
+        type ClientError<E>
+            = E
+        where
+            E: std::error::Error + Send + Sync;
+
         async fn validate(
             &self,
             to: usize,
@@ -607,9 +830,9 @@ mod tests {
 
         async fn output(
             &self,
-            to: Option<url::Url>,
-            result: Result<Literal, ()>,
-        ) -> Result<(), OutputError> {
+            _to: url::Url,
+            result: Result<Literal, OutputError>,
+        ) -> Result<(), Infallible> {
             self.output.send(result).await.unwrap();
             Ok(())
         }
@@ -617,6 +840,11 @@ mod tests {
 
     #[tokio::test]
     async fn basic_test() {
+        let _g = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_test_writer()
+            .set_default();
+
         let cb = || {
             let mut senders = vec![];
             let mut receivers = vec![];
@@ -646,14 +874,14 @@ mod tests {
         let cmd_sender2_cl = cmd_sender2.clone();
         tokio::spawn(async move {
             while let Some(cmd) = receivers1[1].recv().await {
-                println!("transmitting {cmd:?}");
+                // println!("transmitting {cmd:?}");
                 cmd_sender2_cl.send(cmd).await.unwrap();
             }
         });
 
         tokio::spawn(async move {
             while let Some(cmd) = receivers2[0].recv().await {
-                println!("transmitting {cmd:?}");
+                // println!("transmitting {cmd:?}");
                 cmd_sender1_cl.send(cmd).await.unwrap();
             }
         });
