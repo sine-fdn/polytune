@@ -1,164 +1,360 @@
-use aide::{axum::IntoApiResponse, openapi::OpenApi, transform::TransformOperation};
-use axum::{
-    Extension, Json,
-    body::Bytes,
-    extract::{Path, State},
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    mem,
+    sync::Arc,
 };
-use polytune::garble_lang::literal::Literal;
-use reqwest::StatusCode;
+
+use aide::{OperationIo, axum::IntoApiResponse, openapi::OpenApi, transform::TransformOperation};
+use axum::{Extension, Json, extract::State, http::StatusCode, response::IntoResponse};
+use futures::future::try_join_all;
+use garble_lang::literal::Literal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{Mutex, Notify, mpsc::Sender};
-use tracing::{error, info};
+use tokio::sync::{Notify, oneshot};
+use tower_http::follow_redirect::policy;
+use tracing::{debug, info};
 use url::Url;
+use uuid::Uuid;
 
-use crate::{mpc::execute_mpc, policy::Policy};
+use crate::{
+    mpc::ScheduledPolicy,
+    state::{PolicyCompatError, PolicyState, PolytuneState},
+};
 
-/// HTTP request coming from another party to start an MPC session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
-pub struct PolicyRequest {
-    pub participants: Vec<Url>,
-    pub program_hash: String,
-    pub leader: usize,
-}
+// TOOD split this into public API and mpc specific API
 
-/// HTTP request to transmit constants necessary to compile a program.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConstsRequest {
-    pub consts: HashMap<String, Literal>,
-}
-
-pub struct MpcComms {
-    pub policy: Option<Policy>,
-    pub consts: HashMap<String, HashMap<String, Literal>>,
-    pub senders: Vec<Sender<Vec<u8>>>,
-    pub sync_received: Arc<Notify>,
-    pub sync_requested: Arc<Notify>,
-}
-
-pub type MpcState = Arc<Mutex<MpcComms>>;
-
-pub async fn serve_api(Extension(api): Extension<OpenApi>) -> impl IntoApiResponse {
+pub async fn serve_open_api(Extension(api): Extension<OpenApi>) -> impl IntoApiResponse {
     Json(api)
 }
 
-pub async fn ping() -> &'static str {
-    "pong"
+/// A policy containing everything necessary to run an MPC session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+pub struct Policy {
+    /// The unique `computation_id` of this mpc execution. This is used to identify
+    /// which `/launch/` requests belong to the same computation.
+    pub computation_id: Uuid,
+    /// The URLs at which we can reach the other parties. Their position in
+    /// in this array needs to be identical for all parties and will correspond
+    /// to their party ID (e.g. used for the leader).
+    pub participants: Vec<Url>,
+    /// The program as [Garble](https://garble-lang.org/) source code.
+    pub program: String,
+    /// The id of the leader of the computation.
+    pub leader: usize,
+    /// Our own party ID. Corresponds to our adress at participants[party].
+    pub party: usize,
+    /// The input to the Garble program as a serialized Garble `Literal` value.
+    pub input: Literal,
+    /// The optional output URL to which the output of the MPC computation is provided
+    /// as a json serialized Garble `Literal` value.
+    pub output: Option<Url>,
+    /// The constants needed of this party for the MPC computation. Note that the
+    /// identifier must not contain the `PARTY_{ID}::` prefix, but only the name.
+    /// E.g. if the Garble program contains `const ROWS_0: usize = PARTY_0::ROWS;`
+    /// this should contain e.g. `"ROWS": { "NumUnsigned": [200, "Usize"]}`.
+    pub constants: HashMap<String, Literal>,
 }
 
-pub async fn sync(State(state): State<MpcState>) {
-    state.lock().await.sync_requested.notified().await;
-    state.lock().await.sync_received.notify_one();
-}
-
-pub fn launch_docs(t: TransformOperation) -> TransformOperation {
-    t.id("launchMpcSession")
-        .description("Launch a new MPC session. This needs to be called for all contributors before it is called for the leader.")
-}
-
-// TODO Errors need to be returned to the caller of `/launch` and not only logged
-pub async fn launch(State(state): State<MpcState>, Json(policy): Json<Policy>) {
-    {
-        let mut state = state.lock().await;
-        state.policy = Some(policy.clone());
+impl Policy {
+    pub(crate) fn is_leader(&self) -> bool {
+        self.party == self.leader
     }
-    if policy.leader != policy.party {
-        return;
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            computation_id: Default::default(),
+            participants: Default::default(),
+            program: Default::default(),
+            leader: Default::default(),
+            party: Default::default(),
+            input: Literal::Tuple(vec![]),
+            output: Default::default(),
+            constants: Default::default(),
+        }
     }
-    let hash = blake3::hash(policy.program.as_bytes()).to_string();
-    let client = reqwest::Client::new();
-    let policy_request = PolicyRequest {
-        participants: policy.participants.clone(),
-        leader: policy.leader,
-        program_hash: hash,
-    };
-    // As a leader, we first make sure that all other participants join the session:
-    let mut participant_missing = false;
-    for party in policy.participants.iter() {
-        if party != &policy.participants[policy.party] {
-            info!("Waiting for confirmation from party {party}");
-            let url = format!("{party}run");
-            match client.post(&url).json(&policy_request).send().await {
-                Err(err) => {
-                    error!("Could not reach {url}: {err}");
-                    participant_missing = true;
-                    continue;
-                }
-                Ok(res) => match res.status() {
-                    StatusCode::OK => {}
-                    code => {
-                        error!(
-                            "Unexpected response while trying to start execution for {url}: {code}"
-                        );
-                        participant_missing = true;
-                    }
-                },
+}
+
+pub fn schedule_docs(t: TransformOperation) -> TransformOperation {
+    t.id("scheduleMpcSession")
+        .description("Schedule a new MPC session. This needs to be called in the same order for all participants for all computations.")
+}
+
+// TODO maybe a have a /schedule endpoint?
+// when does this endpoint return?
+// how do the different participants decide when to schedule a computation?
+// `/schedule` could be called in a different order for different parties
+// #[axum::debug_handler]
+pub(crate) async fn schedule(
+    State(state): State<PolytuneState>,
+    Json(policy): Json<Policy>,
+) -> Result<(), ScheduleError> {
+    let party = policy.party;
+    let is_leader = party == policy.leader;
+    let computation_id = policy.computation_id;
+
+    let (validate_sender, validate_receiver) = oneshot::channel();
+    let pol_request = {
+        let pol_request = ValidatePolicyRequest::from(&policy);
+        let mut computations = state.computations.lock();
+        match computations.entry(computation_id) {
+            Entry::Occupied(occupied_entry) => {
+                todo!()
+            },
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(PolicyState::Scheduled(policy.clone(), validate_sender))
             }
-        }
-    }
-    if participant_missing {
-        return error!("Some participants are missing, aborting...");
-    }
-    // Now we start the MPC session:
-    info!("All participants have accepted the session, starting calculation now...");
-    match execute_mpc(state, &policy).await {
-        Ok(Some(output)) => {
-            info!("MPC Output: {output}");
-            if let Some(endpoint) = policy.output {
-                info!("Sending {output} to {endpoint}");
-                if let Err(e) = client.post(endpoint.clone()).json(&output).send().await {
-                    error!("Could not send output to {endpoint}: {e}");
-                }
-            }
-        }
-        Ok(None) => {}
-        Err(e) => {
-            error!("Error while executing MPC: {e}")
-        }
-    }
-}
-
-// TODO errors should be returned to the caller of `/run` and not only logged
-pub async fn run(State(state): State<MpcState>, Json(body): Json<PolicyRequest>) {
-    let Some(policy) = state.lock().await.policy.clone() else {
-        return error!("Trying to start MPC execution without policy");
+        };
+        pol_request
     };
-    if policy.participants != body.participants || policy.leader != body.leader {
-        error!("Policy not accepted: {body:?}");
-        return;
-    }
-    let expected = blake3::hash(policy.program.as_bytes()).to_string();
-    if expected != body.program_hash {
-        error!("Aborting due to different hashes for program in policy {policy:?}");
-        return;
-    }
-    info!("Starting execution");
-    tokio::spawn(async move {
-        if let Err(e) = execute_mpc(state, &policy).await {
-            error!("{e}");
-        }
-    });
-}
 
-pub async fn consts(
-    State(state): State<MpcState>,
-    Path(from): Path<u32>,
-    Json(body): Json<ConstsRequest>,
-) {
-    let mut state = state.lock().await;
-    state.consts.insert(format!("PARTY_{from}"), body.consts);
-}
+    // TODO only parse here, not type check, as we will probably require constants to be known for
+    // type checking in the future
+    let own_part_const_ident = format!("PARTY_{party}");
+    let parsed_prog = garble_lang::check(&policy.program).unwrap();
+    let const_count = parsed_prog
+        .const_deps
+        .iter()
+        .filter_map(|(party, deps)| (party != &own_part_const_ident).then(|| deps.len()))
+        .sum();
+    let own_consts = HashMap::from_iter([(own_part_const_ident, policy.constants.clone())]);
+    state
+        .const_state
+        .init_consts(computation_id, const_count, own_consts);
 
-// TODO errors should be returned to the caller of `/run` and not only logged
-pub async fn msg(State(state): State<MpcState>, Path(from): Path<u32>, body: Bytes) {
-    let state = state.lock().await;
-    if state.senders.len() > from as usize {
-        state.senders[from as usize]
-            .send(body.to_vec())
+    if is_leader {
+        let client = state.0.client.clone();
+        let validate_futs = pol_request
+            .participants
+            .iter()
+            .enumerate()
+            .filter(|(id, _)| *id != party)
+            .map(async |(_, participant)| {
+                let url = participant.join("validate").unwrap();
+                info!("validating {url}");
+                // TODO the policy request should contain the queue position at which we will schedule this
+                let ret = client.post(url).json(&pol_request).send().await;
+                debug!("validated ret: {ret:?}");
+                ret
+            });
+        // TODO: What happens if validate fails for one of the parties? We should send /cancel to the others
+        try_join_all(validate_futs).await.unwrap();
+        let channel = state
+            .msg_state
+            .create_channel(&policy, state.client.clone())
+            .await;
+
+        let (const_sender, const_receiver) = oneshot::channel();
+        state
+            .const_state
+            .insert_const_sender(computation_id, const_sender);
+
+        state
+            .schedule_sender
+            .send(ScheduledPolicy {
+                pol: policy,
+                channel,
+                const_receiver,
+            })
             .await
             .unwrap();
     } else {
-        error!("No sender for party {from}");
+        // TODO have a timeout here? If policy is not validated in reasonable time we should not schedule it
+        validate_receiver.await.unwrap().unwrap();
+    }
+
+    Ok(())
+
+    // prev /launch comments:
+    // each party receives /launch call in arbitrary order
+    // compute ComputationId hash from Policy
+    // check in state if such a computation is already running, if yes, return error
+    // if not, add to state
+    // if not leader, wait for notify that mpc computation is started, then return
+    // if leader, send /validate requests to all other parties, retrying in case of failure
+    //  for a few minutes
+    // if /validate returns error for one of the parties, send /cancel to all
+    // as leader: send /run to all other parties
+    // when /run returns, mpc calc is scheduled, return from /launch with success
+}
+
+#[derive(OperationIo)]
+#[aide(output)]
+pub(crate) struct ScheduleError;
+
+impl IntoResponse for ScheduleError {
+    fn into_response(self) -> axum::response::Response {
+        todo!()
+    }
+}
+
+/// HTTP request coming from another party to start an MPC session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct ValidatePolicyRequest {
+    pub(crate) computation_id: Uuid,
+    /// TODO I'm not sure how much sense it makes to include the participants in here
+    /// and check whether they're equal to the ones in the `Policy`. It could be the case
+    /// that P1 reaches P3 under a different URL than P2 if they're running in some
+    /// weird containerized environment
+    /// Could there be any weird consequences or angles for attack when not checking this?
+    /// I don't think so, either we reach the parties in our policy and coordinate for the
+    /// provided ID or not
+    pub(crate) participants: Vec<Url>,
+    pub(crate) program_hash: String,
+    pub(crate) leader: usize,
+}
+
+impl From<&Policy> for ValidatePolicyRequest {
+    fn from(pol: &Policy) -> Self {
+        Self {
+            computation_id: pol.computation_id,
+            participants: pol.participants.clone(),
+            program_hash: blake3::hash(pol.program.as_bytes()).to_string(),
+            leader: pol.leader,
+        }
+    }
+}
+
+pub(crate) async fn validate(
+    State(state): State<PolytuneState>,
+    Json(policy_request): Json<ValidatePolicyRequest>,
+) -> Result<(), ValidateError> {
+    let computation_id = policy_request.computation_id;
+    let (notify, notify_schedule_sender) = match state.computations.lock().entry(computation_id) {
+        Entry::Occupied(mut occupied_entry) => {
+            match occupied_entry.get_mut() {
+                scheduled @ PolicyState::Scheduled(..) => {
+                    let (const_sender, const_receiver) = oneshot::channel();
+                    state
+                        .const_state
+                        .insert_const_sender(computation_id, const_sender);
+                    let notify_schedule = scheduled.to_validated(const_receiver);
+                    // TODO check policy
+                    // TODO what happens if we can't send to schedule?
+                    notify_schedule.send(Ok(()));
+                    return Ok(());
+                }
+                state => {
+                    // TODO send cancel to others?
+                    let err = ValidateError::PolicyStateInvalid;
+                    return Err(err);
+                }
+            }
+        }
+        Entry::Vacant(vacant_entry) => {
+            let notify = Arc::new(Notify::new());
+            let (notify_schedule_sender, notify_schedule_receiver) = oneshot::channel();
+            let state =
+                PolicyState::ValidateRequested(Arc::clone(&notify), notify_schedule_receiver);
+            vacant_entry.insert(state);
+            (notify, notify_schedule_sender)
+        }
+    };
+    notify.notified_owned().await;
+    let ret = Box::pin(validate(State(state), Json(policy_request))).await;
+    notify_schedule_sender.send(ret);
+
+    Ok(())
+}
+
+#[derive(OperationIo, Debug)]
+#[aide(output)]
+pub(crate) enum ValidateError {
+    PolicyStateInvalid,
+}
+
+impl From<PolicyCompatError> for ValidateError {
+    fn from(value: PolicyCompatError) -> Self {
+        todo!()
+    }
+}
+
+impl IntoResponse for ValidateError {
+    fn into_response(self) -> axum::response::Response {
+        StatusCode::IM_A_TEAPOT.into_response()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RunRequest {
+    pub(crate) computation_id: Uuid,
+}
+
+pub(crate) async fn run(
+    State(state): State<PolytuneState>,
+    Json(run_request): Json<RunRequest>,
+) -> Result<(), RunError> {
+    let policy_state = state
+        .computations
+        .lock()
+        .remove(&run_request.computation_id)
+        .unwrap();
+
+    match policy_state {
+        PolicyState::Validated(policy, const_receiver) => {
+            let channel = state
+                .msg_state
+                .create_channel(&policy, state.client.clone())
+                .await;
+            state
+                .schedule_sender
+                .send(ScheduledPolicy {
+                    pol: policy,
+                    channel,
+                    const_receiver,
+                })
+                .await
+                .unwrap();
+        }
+        _ => panic!("invalid policy state"),
+    }
+
+    Ok(())
+
+    // take HttpChannel from state
+    // parse garble program so that we know how many constants we need
+    // insert (const_count, HashMap::new()) into ConstState for Id
+    // insert oneshot::Sender into ConstState for Id
+    // send constants to other parties
+    // wait on oneshot::receiver for constants
+    // compile circuit
+    // if error, return error from run, and also notify still ongoing
+    // /launch call that compile failed (or const exchanging) so that
+    // /launch can return error (TODO, if an error occurs here, should we
+    // send /cancel to the other parties?)
+}
+
+#[derive(OperationIo)]
+#[aide(output)]
+pub(crate) struct RunError;
+
+impl IntoResponse for RunError {
+    fn into_response(self) -> axum::response::Response {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+pub(crate) struct CancelRequest {
+    pub(crate) computation_id: Uuid,
+}
+
+pub(crate) async fn cancel(
+    State(state): State<PolytuneState>,
+    Json(cancel_request): Json<CancelRequest>,
+) -> Result<(), CancelError> {
+    // if still within /launch, notify /launch so that it can return error to caller
+    // TODO, what if mpc exec already started?
+    todo!()
+}
+
+#[derive(OperationIo)]
+#[aide(output)]
+pub(crate) struct CancelError;
+
+impl IntoResponse for CancelError {
+    fn into_response(self) -> axum::response::Response {
+        todo!()
     }
 }
