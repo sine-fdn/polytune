@@ -1,5 +1,22 @@
 # Polytune Server
 
+`/launch`
+
+Schedules an MPC computation for execution. `/launch` needs to be called with the same
+UUID, participants, program, and leader for all parties listed in `participants`. Once `/launch` 
+is called on all of them, the parties will start executing the provided program with the inputs.
+`/launch` returns with 200 if the computation is succesfully started, or with an error if there
+was an issue in coordinating the computation, exchanging the constants, or compiling the circuit.
+
+TODO: Should `/launch` return before compiling the circ, or after? This can take multiple minutes
+and timeouts for `/launch` call need to be set appropriately. Alternatively, errors in compilation, etc.
+could also be sent to the output endpoint.
+
+
+
+
+-----
+
 This crate implements a full-fledged MPC server which can receive requests containing a program specified as a Garble program, coordinate with multiple instances of this server, execute the provided program securely using Polytune, and return the result.
 
 The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call to the `polytune-server`.
@@ -25,9 +42,7 @@ docker run -t -p 8000:8000 polytune-server
 
 Starting the container does not immediately start an MPC execution, this needs to be explicitly triggered with a POST request to `localhost:8000/launch` while providing the necessary configuration file (see `policy0.json` and `policy1.json` for example configs) as a JSON body.
 
-The `"input"` part of the JSON needs to use Garble's serialization format, as described in the [Garble Serialization How-To](https://garble-lang.org/serde.html). The result of the MPC execution will use the same serialization format and is sent to the endpoint specified as `"output"` in the JSON.
-
-**Please note that you must call `/launch` for all contributors (who will then start waiting for incoming MPC requests) _before_ you call `/launch` for the MPC leader (who will immediately start sending requests to all the other participants and fail if one of them is unreachable).**
+The `"input"` part of the JSON needs to use Garble's serialization format, as described in the [Garble Serialization How-To](https://garble-lang.org/serde.html) (or as JsonSchema as part of the OpenAPI spec at `/api.json`). The result of the MPC execution will use the same serialization format and is sent to the endpoint specified as `"output"` in the JSON.
 
 You can check that the party is running and listening by making a GET request to its `/ping` route (in this example thus `localhost:8000/ping`), which should respond with a `pong` message.
 
