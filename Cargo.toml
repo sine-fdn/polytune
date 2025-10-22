@@ -1,12 +1,20 @@
-workspace = { members = [
+[workspace]
+members = [
     "crates/polytune-test-utils",
-    "crates/polytune-server",
+    "crates/polytune-server-core",
     "examples/api-integration",
     "examples/http-multi-server-channels",
     "examples/http-single-server-channels",
     "examples/wasm-http-channels",
     "examples/sql-integration",
-] }
+]
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "warn"
+
 [package]
 name = "polytune"
 version = "0.2.0-alpha.2"
@@ -30,9 +38,7 @@ keywords = [
 autobenches = false
 
 [package.metadata.docs.rs]
-rustdoc-args = [
-    "--generate-link-to-definition",
-]
+rustdoc-args = ["--generate-link-to-definition"]
 
 [lib]
 bench = false

@@ -1,13 +1,14 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 
+use garble_lang::literal::Literal as GarbleLiteral;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
-use garble_lang::literal::Literal as  GarbleLiteral;
 
 /// A policy containing everything necessary to run an MPC session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Policy {
     /// The unique `computation_id` of this mpc execution. This is used to identify
     /// which `/launch/` requests belong to the same computation.
@@ -20,7 +21,7 @@ pub struct Policy {
     pub program: String,
     /// The id of the leader of the computation.
     pub leader: usize,
-    /// Our own party ID. Corresponds to our adress at participants[party].
+    /// Our own party ID. Corresponds to our adress at participants\[party\].
     pub party: usize,
     /// The input to the Garble program as a serialized Garble `Literal` value.
     pub input: GarbleLiteral,
@@ -35,11 +36,35 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Calculate the hash of a policy's program.
+    /// This hash is used during Policy validation with the other parties.
     pub fn program_hash(&self) -> String {
         blake3::hash(self.program.as_bytes()).to_string()
     }
-    
+
+    /// Iterator of other party Ids, excluding self.party.
     pub fn other_parties(&self) -> impl Iterator<Item = usize> + Clone {
         (0..self.participants.len()).filter(|p| *p != self.party)
+    }
+
+    /// All party Ids.
+    pub fn party_ids(&self) -> Vec<usize> {
+        (0..self.participants.len()).collect()
+    }
+}
+
+impl Debug for Policy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Policy")
+            .field("computation_id", &self.computation_id)
+            .field("participants", &self.participants)
+            .field("program", &self.program)
+            .field("leader", &self.leader)
+            .field("party", &self.party)
+            // We don't want to potentially log the sensitive input information
+            .field("input", &"<REDACTED>")
+            .field("output", &self.output)
+            .field("constants", &self.constants)
+            .finish()
     }
 }

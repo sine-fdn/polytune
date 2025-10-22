@@ -1,3 +1,7 @@
+#![allow(missing_docs)] // Remove once module is improved
+// TODO I think this module will require some changes once we actually implement
+// a client using HTTP communication, specifically the error handling might need
+// changes.
 use std::convert::Infallible;
 
 use garble_lang::literal::Literal as GarbleLiteral;
@@ -46,6 +50,27 @@ pub trait PolicyClient: Send + Sync + 'static {
         msg: MpcMsg,
     ) -> impl Future<Output = Result<(), Self::ClientError<MpcMsgError>>> + Send;
 
+    /// Send the output to the specified Url.
+    ///
+    /// Implementations should log the result in case it is an error
+    ///  with a [`tracing::Level::ERROR`] event. Implementations should
+    /// emit an error event in case they return an error. This can be conveniently
+    /// done by instrumenting the implementation with the `err` annotation.
+    ///
+    /// ```rust, ignore
+    /// #[tracing::instrument(skip(self), err)]
+    /// async fn output(
+    ///     &self,
+    ///     to: Url,
+    ///     result: Result<Literal, OutputError>,
+    /// ) -> Result<(), Self::ClientError<Infallible>> {
+    ///     if let Err(err) = result {
+    ///         tracing::error!(%err);
+    ///     }
+    ///     todo!()
+    /// }
+    ///
+    /// ```
     fn output(
         &self,
         to: Url,

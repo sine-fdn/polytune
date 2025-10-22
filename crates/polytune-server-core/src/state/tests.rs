@@ -1,8 +1,9 @@
-use std::{convert::Infallible, fs};
+use std::{convert::Infallible, fs, sync::Arc};
 
 use garble_lang::literal::Literal;
 use tokio::sync::{Semaphore, mpsc, oneshot};
-use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
+use tracing::{Level, error, trace};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 use crate::{
     client::{PolicyClient, PolicyClientBuilder},
@@ -30,23 +31,22 @@ impl PolicyClient for TestClient {
     where
         E: std::error::Error + Send + Sync;
 
+    #[tracing::instrument(level = Level::DEBUG, skip(self))]
     async fn validate(
         &self,
         to: usize,
         req: super::ValidateRequest,
     ) -> Result<(), super::ValidateError> {
         let (ret_tx, ret_rx) = oneshot::channel();
-        println!("sending validate to {to}");
         self.cmd_senders[to]
             .send(PolicyCmd::Validate(req, ret_tx))
             .await
             .unwrap();
-        println!("sent validate to {to}");
         ret_rx.await.unwrap().unwrap();
-        println!("ret validate {to}");
         Ok(())
     }
 
+    #[tracing::instrument(level = Level::DEBUG, skip(self))]
     async fn run(&self, to: usize, req: super::RunRequest) -> Result<(), super::RunError> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
@@ -56,6 +56,7 @@ impl PolicyClient for TestClient {
         ret_rx.await.unwrap()
     }
 
+    #[tracing::instrument(level = Level::DEBUG, skip(self))]
     async fn consts(&self, to: usize, req: super::ConstsRequest) -> Result<(), super::ConstsError> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
@@ -65,6 +66,7 @@ impl PolicyClient for TestClient {
         ret_rx.await.unwrap()
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn msg(&self, to: usize, msg: super::MpcMsg) -> Result<(), MpcMsgError> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
@@ -74,11 +76,15 @@ impl PolicyClient for TestClient {
         ret_rx.await.unwrap()
     }
 
+    #[tracing::instrument(level = Level::INFO, skip(self, result))]
     async fn output(
         &self,
         _to: url::Url,
         result: Result<Literal, OutputError>,
     ) -> Result<(), Infallible> {
+        if let Err(err) = &result {
+            error!(%err)
+        }
         self.output.send(result).await.unwrap();
         Ok(())
     }
@@ -86,10 +92,11 @@ impl PolicyClient for TestClient {
 
 #[tokio::test]
 async fn basic_test() {
-    let _g = tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_test_writer()
-        .set_default();
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .try_init();
 
     let cb = || {
         let mut senders = vec![];
@@ -109,40 +116,35 @@ async fn basic_test() {
             out_rx,
         )
     };
-    let (cb1, mut receivers1, mut out_rx) = cb();
-    let (cb2, mut receivers2, _) = cb();
-
-    let (state1, cmd_sender1) = PolicyState::new(cb1, Semaphore::new(2));
-    let (state2, cmd_sender2) = PolicyState::new(cb2, Semaphore::new(2));
+    let (cb0, mut receivers0, mut out_rx) = cb();
+    let (cb1, mut receivers1, _) = cb();
+    let concurrency = Arc::new(Semaphore::new(2));
+    let (state0, handle0) = PolicyState::new(cb0, concurrency.clone());
+    let (state1, handle1) = PolicyState::new(cb1, concurrency);
+    tokio::spawn(state0.start());
     tokio::spawn(state1.start());
-    tokio::spawn(state2.start());
-    let cmd_sender1_cl = cmd_sender1.clone();
-    let cmd_sender2_cl = cmd_sender2.clone();
+    let handle0_cl = handle0.clone();
+    let handle1_cl = handle1.clone();
     tokio::spawn(async move {
-        while let Some(cmd) = receivers1[1].recv().await {
-            // println!("transmitting {cmd:?}");
-            cmd_sender2_cl.send(cmd).await.unwrap();
+        while let Some(cmd) = receivers0[1].recv().await {
+            trace!(?cmd, "forwarding cmd to 1");
+            handle1_cl.0.send(cmd).await.unwrap();
         }
     });
 
     tokio::spawn(async move {
-        while let Some(cmd) = receivers2[0].recv().await {
-            // println!("transmitting {cmd:?}");
-            cmd_sender1_cl.send(cmd).await.unwrap();
+        while let Some(cmd) = receivers1[0].recv().await {
+            trace!(?cmd, "forwarding cmd to 0");
+            handle0_cl.0.send(cmd).await.unwrap();
         }
     });
 
-    let pol1: Policy =
+    let pol0: Policy =
         serde_json::from_str(&fs::read_to_string("policies/policy0.json").unwrap()).unwrap();
-    let pol2: Policy =
+    let pol1: Policy =
         serde_json::from_str(&fs::read_to_string("policies/policy1.json").unwrap()).unwrap();
-    let (ret1_tx, ret1_rx) = oneshot::channel();
-    let (ret2_tx, ret2_rx) = oneshot::channel();
-    let sched1 = cmd_sender1.send(PolicyCmd::Schedule(pol1, ret1_tx));
-    let sched2 = cmd_sender2.send(PolicyCmd::Schedule(pol2, ret2_tx));
-    tokio::try_join!(sched1, sched2).unwrap();
-    let (a, b) = tokio::try_join!(ret1_rx, ret2_rx).unwrap();
-    a.unwrap();
-    b.unwrap();
+    let sched0 = handle0.schedule(pol0);
+    let sched1 = handle1.schedule(pol1);
+    tokio::try_join!(sched0, sched1).unwrap();
     dbg!(out_rx.recv().await.unwrap().unwrap());
 }
