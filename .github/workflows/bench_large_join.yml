@@ -40,7 +40,7 @@ jobs:
           POLYTUNE_API_INTEGRATION_BIG: 1
           POLYTUNE_API_INTEGRATION_HEAPTRACK: 1
       - name: Upload heaptrack profile files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: heaptrack-profiles
