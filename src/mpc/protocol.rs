@@ -42,7 +42,7 @@ use garble_lang::register_circuit::CircuitError;
 use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
-use tracing::debug;
+use tracing::{Level, debug, instrument};
 
 use crate::utils::file_or_mem_buf::FileOrMemBuf;
 use crate::{
@@ -272,6 +272,9 @@ pub(crate) enum Preprocessor {
 /// [wires](`garble_lang::circuit::Wire`). The primary benefit is that instructions specifically
 /// denote their output register, which can be reused once the stored value is not needed anymore
 /// during the execution. This reduces the memory consumption of the MPC evaluation.
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    party_id = p_own
+))]
 pub async fn mpc(
     channel: &impl Channel,
     circuit: &Circuit,
@@ -358,6 +361,10 @@ impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p,
 pub(crate) async fn _mpc(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<Vec<bool>, Error> {
+    debug!(
+        "MPC protocol execution with {} parties, of which output parties have indices {:?} and the circuit has {} AND gates",
+        ctx.p_max, ctx.p_out, ctx.num_and_ops
+    );
     validate(ctx)?;
     // fn-independent preprocessing:
     let (delta, mut random_shares, shared_two_by_two, multi_shared_rand) =
@@ -390,6 +397,7 @@ pub(crate) async fn _mpc(
     Ok(outputs)
 }
 
+#[instrument(level=Level::DEBUG, skip(ctx))]
 fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
     let &Context {
         p_own,
@@ -421,6 +429,9 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
     Ok(())
 }
 
+// TODO Consider optimizing type complexity of Result here
+#[allow(clippy::type_complexity)]
+#[instrument(level=Level::DEBUG, skip(ctx))]
 async fn fn_independent_pre(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<
@@ -447,6 +458,7 @@ async fn fn_independent_pre(
     let mut shared_two_by_two = None;
     let mut multi_shared_rand = None;
     if let Preprocessor::TrustedDealer(p_fpre) = p_fpre {
+        debug!("Using trusted dealer for preprocessing to receive delta and random shares");
         send_to::<()>(channel, p_fpre, "delta", &[]).await?;
         delta = recv_from(channel, p_fpre, "delta")
             .await?
@@ -457,6 +469,7 @@ async fn fn_independent_pre(
         let fpre_shares = recv_vec_from(channel, p_fpre, "random shares", secret_bits).await?;
         random_shares = FileOrMemBuf::Memory { data: fpre_shares };
     } else {
+        debug!("Using preprocessing without trusted dealer, generating delta and random shares");
         random_shares = FileOrMemBuf::new(ctx.tmp_dir, secret_bits)?;
         delta = Delta(random());
         shared_two_by_two = Some(shared_rng_pairwise(channel, p_own, p_max).await?);
@@ -477,6 +490,7 @@ async fn fn_independent_pre(
     Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
+#[instrument(level=Level::DEBUG, skip_all)]
 fn init_and_shares(
     ctx: &Context<impl Channel>,
     random_shares: &mut FileOrMemBuf<Share>,
@@ -524,6 +538,7 @@ fn init_and_shares(
     Ok(and_shares)
 }
 
+#[instrument(level=Level::DEBUG, skip_all)]
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -591,6 +606,9 @@ async fn gen_auth_bits(
     Ok(auth_bits)
 }
 
+// TODO Consider optimizing type complexity of Result here
+#[allow(clippy::type_complexity)]
+#[instrument(level=Level::DEBUG, skip_all)]
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -626,6 +644,7 @@ async fn garble(
     let max_garbled_gates_per_chunk = ctx.and_share_batch_size();
 
     if is_contrib {
+        debug!("Contributing party to garbled circuit");
         let mut preprocessed_gates = vec![];
         for (w, inst) in circ.insts.iter().enumerate() {
             match inst.op {
@@ -701,6 +720,7 @@ async fn garble(
             send_to(channel, p_eval, "preprocessed gates", &preprocessed_gates).await?;
         }
     } else {
+        debug!("Evaluator party, receiving preprocessed gates");
         files = try_join_all((0..p_max).map(async |p| {
             let mut f = FileOrMemBuf::new(ctx.tmp_dir, num_and_ops)?;
             if p != p_eval {
@@ -769,6 +789,11 @@ async fn garble(
     Ok((table_shares, files, shares, labels, input_labels))
 }
 
+// TODO Consider optimizing type complexity of Result here
+#[allow(clippy::type_complexity)]
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_inputs = ctx.num_inputs,
+))]
 async fn input_processing(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -856,6 +881,7 @@ async fn input_processing(
     }
     let other_input_labels = Mutex::new(vec![None; circ.max_reg_count]);
     if is_contrib {
+        debug!("Contributing party, sending masked inputs and labels");
         let labels_of_other_inputs: Vec<Option<Label>> = masked_inputs
             .iter()
             .enumerate()
@@ -863,6 +889,7 @@ async fn input_processing(
             .collect();
         send_to(channel, p_eval, "labels", &labels_of_other_inputs).await?;
     } else {
+        debug!("Evaluator party, receiving masked inputs and labels");
         try_join_all((0..p_max).filter(|p| *p != p_own).map(async |p| {
             let labels_of_own_inputs =
                 recv_vec_from::<Option<Label>>(channel, p, "labels", circ.max_reg_count).await?;
@@ -881,6 +908,11 @@ async fn input_processing(
     Ok((masked_inputs, input_labels))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_garble_files= garble_files.len(),
+    num_masked_inputs = masked_inputs.len(),
+    num_input_labels = input_labels.len(),
+))]
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
@@ -906,6 +938,7 @@ fn evaluate(
 
     let mut table_shares = table_shares.iter()?;
     if !is_contrib {
+        debug!("Evaluator party, performing circuit evaluation");
         for (w, inst) in circ.insts.iter().enumerate() {
             let (value, label) = match inst.op {
                 Op::Input(_) => {
@@ -989,6 +1022,9 @@ fn evaluate(
     Ok((values, labels_eval))
 }
 
+#[instrument(level=Level::DEBUG, skip_all, fields(
+    num_output_wires = ctx.circ.output_regs.len(),
+))]
 async fn output(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
