@@ -5,6 +5,7 @@ use garble_lang::{
 };
 use polytune::{Error, channel, mpc};
 use tempfile::tempdir;
+use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt, fmt::format::FmtSpan};
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
@@ -59,14 +60,14 @@ async fn simulate_mpc_async(
             .await
             {
                 Ok(res) => {
-                    println!(
+                    info!(
                         "Party {p_own} sent {:.2}MB of messages",
                         channel.bytes_sent() as f64 / 1024.0 / 1024.0
                     );
                     res
                 }
                 Err(e) => {
-                    eprintln!("SMPC protocol failed for party {p_own}: {e:?}");
+                    error!("SMPC protocol failed for party {p_own}: {e:?}");
                     vec![]
                 }
             }
@@ -84,7 +85,7 @@ async fn simulate_mpc_async(
     .await;
     match eval_result {
         Err(e) => {
-            eprintln!("SMPC protocol failed for Evaluator: {e:?}");
+            error!("SMPC protocol failed for Evaluator: {e:?}");
             Ok(vec![])
         }
         Ok(res) => {
@@ -96,11 +97,11 @@ async fn simulate_mpc_async(
             }
             outputs.retain(|o| !o.is_empty());
             if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                eprintln!("The result does not match for all output parties: {outputs:?}");
+                error!("The result does not match for all output parties: {outputs:?}");
             }
             let mb = eval_channel.bytes_sent() as f64 / 1024.0 / 1024.0;
-            println!("Party {p_eval} sent {mb:.2}MB of messages");
-            println!("MPC simulation finished successfully!");
+            info!("Party {p_eval} sent {mb:.2}MB of messages");
+            info!("MPC simulation finished successfully!");
             Ok(outputs.pop().unwrap_or_default())
         }
     }
@@ -341,7 +342,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
                     &output_parties,
                 )?;
                 let result = prg.parse_output(&output).unwrap();
-                println!("{calculation} = {result}");
+                info!("{calculation} = {result}");
                 assert_eq!(format!("{result}"), format!("{expected}"));
             }
         }
@@ -450,7 +451,7 @@ fn eval_mixed_circuits() -> Result<(), Error> {
             circuits_with_inputs.push((circuit.clone(), a, b));
         }
     }
-    println!("{} combinations generated", circuits_with_inputs.len());
+    info!("{} combinations generated", circuits_with_inputs.len());
 
     let eval_only_every_n = 31; // prime, to avoid periodic patterns
     let mut total_tests = 0;
@@ -460,14 +461,14 @@ fn eval_mixed_circuits() -> Result<(), Error> {
             let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], &output_parties)?;
             let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
             if output_smpc != output_direct {
-                println!("Circuit: {circuit:?}");
-                println!("A: {in_a:?}");
-                println!("B: {in_b:?}\n");
-                panic!("Output did not match: {output_smpc:?} vs {output_direct:?}");
+                info!("Circuit: {circuit:?}");
+                info!("A: {in_a:?}");
+                info!("B: {in_b:?}\n");
+                error!("Output did not match: {output_smpc:?} vs {output_direct:?}");
             }
         }
     }
-    println!("Successfully ran {total_tests} tests");
+    info!("Successfully ran {total_tests} tests");
     Ok(())
 }
 
@@ -541,7 +542,7 @@ fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {
         for in_b in 1..=(n / 2) {
             for gates in (in_a + in_b)..n {
                 let wires = in_a + in_b + gates;
-                println!(
+                info!(
                     "Generating circuits with {in_a} inputs from A + {in_b} inputs from B + {gates} gates = {wires} total"
                 );
                 let mut circuits = vec![vec![]];
