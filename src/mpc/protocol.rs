@@ -42,7 +42,7 @@ use garble_lang::register_circuit::CircuitError;
 use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
-use tracing::{Level, debug, instrument};
+use tracing::{Level, debug, info, instrument};
 
 use crate::utils::file_or_mem_buf::FileOrMemBuf;
 use crate::{
@@ -377,6 +377,8 @@ pub(crate) async fn _mpc(
     let (table_shares, garbled_gates, shares, labels, input_labels) =
         garble(ctx, delta, auth_bits, &mut random_shares).await?;
 
+    info!("Preprocessing phase completed successfully");
+
     // input processing:
     let (masked_inputs, input_labels) =
         input_processing(ctx, delta, &input_labels, &mut random_shares).await?;
@@ -394,6 +396,10 @@ pub(crate) async fn _mpc(
     // output determination:
     let outputs = output(ctx, delta, shares, labels, values, labels_eval).await?;
 
+    info!(
+        "MPC protocol execution of a circuit with {} AND gates completed successfully",
+        ctx.num_and_ops
+    );
     Ok(outputs)
 }
 
