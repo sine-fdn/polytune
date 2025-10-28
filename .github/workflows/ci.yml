@@ -25,8 +25,8 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -F __bench -- -Dwarnings
+      - run: cargo fmt --check --all
+      - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core -- -Dwarnings
       - name: Install cargo-machete
         uses: taiki-e/install-action@c5b1b6f479c32f356cc6f4ba672a47f63853b13b
         with:
@@ -42,7 +42,9 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-      - run: cargo doc --no-deps
+      - run: cargo doc --no-deps --package polytune --package polytune-server-core
+        env:
+          RUSTDOCFLAGS: '-D warnings'
 
   # This job checks that we can build polytune with the msrv specified in the
   # Cargo.toml and that we *can't build* with one previous version.
@@ -143,6 +145,17 @@ jobs:
         working-directory: ./examples/wasm-http-channels
         env:
           RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
+
+  test-polytune-server-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - run: cargo test --release --package polytune-server-core
 
   build-api-integration-image:
     runs-on: ubuntu-latest
