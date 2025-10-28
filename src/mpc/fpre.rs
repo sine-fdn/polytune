@@ -2,6 +2,7 @@
 
 use futures::future::try_join_all;
 use rand::random;
+use tracing::{Level, debug, instrument};
 
 use crate::{
     channel::{self, Channel, recv_from, send_to},
@@ -46,7 +47,9 @@ impl From<channel::Error> for Error {
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
 #[allow(dead_code)]
+#[instrument(level=Level::DEBUG, skip_all)]
 pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Result<(), Error> {
+    debug!("FPre with {parties} parties");
     try_join_all((0..parties).map(async |p| recv_from::<()>(channel, p, "delta (fpre)").await))
         .await?;
 
@@ -56,6 +59,8 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
         Ok::<_, Error>(delta)
     }))
     .await?;
+
+    debug!("FPre sent deltas to all parties");
 
     let num_shares: Vec<u32> = try_join_all((0..parties).map(async |p| {
         recv_from(channel, p, "random shares (fpre)")
@@ -112,6 +117,8 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
             .map(async |(p, shares)| send_to(channel, p, "random shares (fpre)", &shares).await),
     )
     .await?;
+
+    debug!("FPre sent random shares to all parties");
 
     let all_and_shares: Vec<Vec<(Share, Share)>> =
         try_join_all((0..parties).map(async |p| recv_from(channel, p, "AND shares (fpre)").await))
@@ -214,6 +221,9 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
             }),
     )
     .await?;
+
+    debug!("FPre sent AND shares to all parties");
+
     Ok(())
 }
 
