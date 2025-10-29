@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Write};
 
 use garble_lang::literal::Literal as GarbleLiteral;
 use schemars::JsonSchema;
@@ -57,7 +57,7 @@ impl Debug for Policy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Policy")
             .field("computation_id", &self.computation_id)
-            .field("participants", &self.participants)
+            .field("participants", &debug_urls_as_display(&self.participants)?)
             .field("program", &self.program)
             .field("leader", &self.leader)
             .field("party", &self.party)
@@ -67,4 +67,17 @@ impl Debug for Policy {
             .field("constants", &self.constants)
             .finish()
     }
+}
+
+fn debug_urls_as_display(urls: &[Url]) -> Result<String, std::fmt::Error> {
+    let mut s = "[".to_string();
+    let mut iter = urls.iter();
+    if let Some(url) = iter.next() {
+        write!(&mut s, "{url}")?;
+    }
+    for url in iter {
+        write!(&mut s, ", {url}")?;
+    }
+    s.push(']');
+    Ok(s)
 }

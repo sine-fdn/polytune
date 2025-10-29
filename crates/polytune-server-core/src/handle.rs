@@ -1,4 +1,5 @@
 use tokio::sync::{mpsc, oneshot};
+use tracing::error;
 
 use crate::{
     policy::Policy,
@@ -93,6 +94,7 @@ impl<T, E> From<mpsc::error::SendError<T>> for HandleError<E> {
 
 impl<E> From<oneshot::error::RecvError> for HandleError<E> {
     fn from(_: oneshot::error::RecvError) -> Self {
+        error!("ret sender dropped");
         Self::StateMachineStopped
     }
 }

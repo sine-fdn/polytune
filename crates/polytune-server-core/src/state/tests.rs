@@ -1,4 +1,5 @@
-use std::{convert::Infallible, fs, sync::Arc};
+#![allow(clippy::unwrap_used)]
+use std::{fs, sync::Arc};
 
 use garble_lang::literal::Literal;
 use tokio::sync::{Semaphore, mpsc, oneshot};
@@ -6,6 +7,7 @@ use tracing::{Level, error, trace};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 use crate::{
+    ConstsError, RunError, ValidateError,
     client::{PolicyClient, PolicyClientBuilder},
     state::{MpcMsgError, OutputError, Policy, PolicyCmd, PolicyState},
 };
@@ -25,55 +27,59 @@ impl PolicyClientBuilder for TestClient {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("validate failed")]
+    Validate(#[from] ValidateError),
+    #[error("run failed")]
+    Run(#[from] RunError),
+    #[error("consts failed")]
+    Consts(#[from] ConstsError),
+    #[error("msg failed")]
+    Msg(#[from] MpcMsgError),
+}
+
 impl PolicyClient for TestClient {
-    type ClientError<E>
-        = E
-    where
-        E: std::error::Error + Send + Sync;
+    type Error = Error;
 
     #[tracing::instrument(level = Level::DEBUG, skip(self))]
-    async fn validate(
-        &self,
-        to: usize,
-        req: super::ValidateRequest,
-    ) -> Result<(), super::ValidateError> {
+    async fn validate(&self, to: usize, req: super::ValidateRequest) -> Result<(), Self::Error> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
             .send(PolicyCmd::Validate(req, ret_tx))
             .await
             .unwrap();
-        ret_rx.await.unwrap().unwrap();
-        Ok(())
+        ret_rx.await.unwrap().map_err(Into::into)
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self))]
-    async fn run(&self, to: usize, req: super::RunRequest) -> Result<(), super::RunError> {
+    async fn run(&self, to: usize, req: super::RunRequest) -> Result<(), Self::Error> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
             .send(PolicyCmd::Run(req, Some(ret_tx)))
             .await
             .unwrap();
-        ret_rx.await.unwrap()
+        ret_rx.await.unwrap().map_err(Into::into)
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self))]
-    async fn consts(&self, to: usize, req: super::ConstsRequest) -> Result<(), super::ConstsError> {
+    async fn consts(&self, to: usize, req: super::ConstsRequest) -> Result<(), Self::Error> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
             .send(PolicyCmd::Consts(req, ret_tx))
             .await
             .unwrap();
-        ret_rx.await.unwrap()
+        ret_rx.await.unwrap().map_err(Into::into)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn msg(&self, to: usize, msg: super::MpcMsg) -> Result<(), MpcMsgError> {
+    async fn msg(&self, to: usize, msg: super::MpcMsg) -> Result<(), Self::Error> {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.cmd_senders[to]
             .send(PolicyCmd::MpcMsg(msg, ret_tx))
             .await
             .unwrap();
-        ret_rx.await.unwrap()
+        ret_rx.await.unwrap().map_err(Into::into)
     }
 
     #[tracing::instrument(level = Level::INFO, skip(self, result))]
@@ -81,7 +87,7 @@ impl PolicyClient for TestClient {
         &self,
         _to: url::Url,
         result: Result<Literal, OutputError>,
-    ) -> Result<(), Infallible> {
+    ) -> Result<(), Self::Error> {
         if let Err(err) = &result {
             error!(%err)
         }
