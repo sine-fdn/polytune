@@ -65,7 +65,7 @@ seq-macro = "0.3.6"
 serde = { version = "1.0.228", features = ["derive"] }
 subtle = "2.6.1"
 tempfile = "3.23.0"
-thiserror = "2.0.16"
+thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1.41"
 wide = { version = "0.7.33", features = ["serde"] }
