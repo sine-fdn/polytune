@@ -87,9 +87,9 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
         for i in 0..parties {
             bits.push(random());
             keys.push(vec![Key(0); parties]);
-            for j in 0..parties {
+            for (j, key) in keys[i].iter_mut().enumerate() {
                 if i != j {
-                    keys[i][j] = Key(random());
+                    *key = Key(random());
                 }
             }
         }
@@ -187,9 +187,9 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
                 share
             };
             keys.push(vec![Key(0); parties]);
-            for j in 0..parties {
+            for (j, key) in keys[i].iter_mut().enumerate() {
                 if i != j {
-                    keys[i][j] = Key(random());
+                    *key = Key(random());
                 }
             }
         }
