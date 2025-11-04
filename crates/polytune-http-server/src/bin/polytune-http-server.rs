@@ -14,13 +14,13 @@ use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 #[command(version)]
 struct Cli {
     /// The socket address to bind the server to.
-    #[arg(long, short, default_value = "127.0.0.1:8123")]
+    #[arg(long, short, default_value = "127.0.0.1:8123", env = "SERVER_ADDR")]
     addr: SocketAddr,
     /// Number of concurrent policy evaluations this party can be the leader of.
-    #[arg(long, default_value_t = 2)]
+    #[arg(long, default_value_t = 2, env = "SERVER_CONCURRENCY")]
     concurrency: usize,
     /// Directory to store temporary files to reduce memory consumption. Should not be on a tmpfs.
-    #[arg(long)]
+    #[arg(long, env = "SERVER_TMP_DIR")]
     tmp_dir: Option<PathBuf>,
 }
 

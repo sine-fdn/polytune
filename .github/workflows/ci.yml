@@ -162,9 +162,9 @@ jobs:
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
       - run: cargo test --release --package polytune-server-core
 
-  build-api-integration-image:
+  build-polytune-http-server-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Build examples/api-integration Dockerfile
-        run: docker build . -f examples/api-integration/Dockerfile --tag 'polytune-api-integration'
+      - name: Build crates/polytune-http-server Dockerfile
+        run: docker build . -f crates/polytune-http-server/Dockerfile --tag 'polytune-http-server'

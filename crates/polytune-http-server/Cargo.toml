@@ -16,7 +16,7 @@ aide = { version = "0.15.1", features = [
 ] }
 anyhow = "1.0.99"
 axum = { version = "0.8.4", features = ["macros"] }
-clap = { version = "4.5.47", features = ["derive"] }
+clap = { version = "4.5.47", features = ["derive", "env"] }
 garble_lang = { version = "0.7.0", features = ["json_schema"] }
 polytune-server-core = { path = "../polytune-server-core", version = "0.1.0" }
 reqwest = { version = "0.12.23", features = ["blocking", "json"] }
