@@ -20,7 +20,7 @@ pub struct Server {
 }
 
 /// Configuration options for a [`Server`].
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ServerOpts {
     /// Maximum number of policies this party can concurrently evaluate as a leader.
     pub concurrency: usize,

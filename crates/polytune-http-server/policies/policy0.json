@@ -12,7 +12,7 @@
         { "Array": [{ "NumUnsigned": [3, "U8"] }] }
     ]
   },
-  "output": "http://localhost:8099/output",
+  "output": "http://localhost:8099/output/d942cbff-899f-44a6-9891-f6c01bee0ff2",
   "constants": {
     "ROWS": { "NumUnsigned": [4, "Usize"] },
     "ID_LEN": { "NumUnsigned": [1, "Usize"] }
