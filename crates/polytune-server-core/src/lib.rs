@@ -9,6 +9,6 @@ pub use client::{PolicyClient, PolicyClientBuilder};
 pub use handle::{HandleError, PolicyStateHandle};
 pub use policy::Policy;
 pub use state::{
-    BoxError, Consts, ConstsError, ConstsRequest, MpcMsg, MpcMsgError, OutputError, PolicyState,
-    RunError, RunRequest, ScheduleError, ValidateError, ValidateRequest,
+    Consts, ConstsError, ConstsRequest, MpcMsg, MpcMsgError, OutputError, PolicyState, RunError,
+    RunRequest, ScheduleError, ValidateError, ValidateRequest,
 };

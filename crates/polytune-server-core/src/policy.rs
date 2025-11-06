@@ -57,7 +57,7 @@ impl Debug for Policy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Policy")
             .field("computation_id", &self.computation_id)
-            .field("participants", &self.participants)
+            .field("participants", &debug_urls_as_display(&self.participants))
             .field("program", &self.program)
             .field("leader", &self.leader)
             .field("party", &self.party)
@@ -67,4 +67,13 @@ impl Debug for Policy {
             .field("constants", &self.constants)
             .finish()
     }
+}
+
+fn debug_urls_as_display(urls: &[Url]) -> String {
+    let joined = urls
+        .iter()
+        .map(|u| u.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{}]", joined)
 }

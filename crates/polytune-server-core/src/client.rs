@@ -2,17 +2,13 @@
 // TODO I think this module will require some changes once we actually implement
 // a client using HTTP communication, specifically the error handling might need
 // changes.
-use std::convert::Infallible;
 
 use garble_lang::literal::Literal as GarbleLiteral;
 use url::Url;
 
 use crate::{
     policy::Policy,
-    state::{
-        ConstsError, ConstsRequest, MpcMsg, MpcMsgError, OutputError, RunError, RunRequest,
-        ValidateError, ValidateRequest,
-    },
+    state::{ConstsRequest, MpcMsg, OutputError, RunRequest, ValidateRequest},
 };
 
 pub trait PolicyClientBuilder {
@@ -22,33 +18,27 @@ pub trait PolicyClientBuilder {
 }
 
 pub trait PolicyClient: Send + Sync + 'static {
-    type ClientError<E>: std::error::Error + Send + Sync
-    where
-        E: std::error::Error + Send + Sync;
+    type Error: std::error::Error + Send + Sync;
 
     fn validate(
         &self,
         to: usize,
         req: ValidateRequest,
-    ) -> impl std::future::Future<Output = Result<(), Self::ClientError<ValidateError>>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 
     fn run(
         &self,
         to: usize,
         req: RunRequest,
-    ) -> impl std::future::Future<Output = Result<(), Self::ClientError<RunError>>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 
     fn consts(
         &self,
         to: usize,
         req: ConstsRequest,
-    ) -> impl Future<Output = Result<(), Self::ClientError<ConstsError>>> + Send;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    fn msg(
-        &self,
-        to: usize,
-        msg: MpcMsg,
-    ) -> impl Future<Output = Result<(), Self::ClientError<MpcMsgError>>> + Send;
+    fn msg(&self, to: usize, msg: MpcMsg) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Send the output to the specified Url.
     ///
@@ -63,7 +53,7 @@ pub trait PolicyClient: Send + Sync + 'static {
     ///     &self,
     ///     to: Url,
     ///     result: Result<Literal, OutputError>,
-    /// ) -> Result<(), Self::ClientError<Infallible>> {
+    /// ) -> Result<(), Self::Error>> {
     ///     if let Err(err) = result {
     ///         tracing::error!(%err);
     ///     }
@@ -75,5 +65,5 @@ pub trait PolicyClient: Send + Sync + 'static {
         &self,
         to: Url,
         result: Result<GarbleLiteral, OutputError>,
-    ) -> impl Future<Output = Result<(), Self::ClientError<Infallible>>> + Send;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

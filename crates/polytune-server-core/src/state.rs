@@ -97,7 +97,10 @@ where
             while let Some(cmd) = self.cmd_rx.recv().await {
                 self = match self.handle_cmd(cmd).await {
                     ControlFlow::Continue(this) => this,
-                    ControlFlow::Break(_) => return,
+                    ControlFlow::Break(_) => {
+                        debug!("stopping state machine");
+                        return;
+                    }
                 }
             }
         }
@@ -229,6 +232,13 @@ pub enum ScheduleError {
     InvalidStateFollower { computation_id: Uuid, state: String },
     #[error("validation of party {to} failed")]
     ValidateFailed { to: usize, source: BoxError },
+    #[error(
+        "scheduled leader {scheduled_leader} but got validate request with leader: {requested_leader}"
+    )]
+    LeaderMismatch {
+        scheduled_leader: usize,
+        requested_leader: usize,
+    },
 }
 
 /// Error that is sent via the [`PolicyClient::output`] method to the output url.
@@ -333,7 +343,7 @@ where
             if let Err(err) = future::try_join_all(run_futs).await
                 && let Some(url) = policy.output
             {
-                let res = client
+                let _ = client
                     .output(
                         url.clone(),
                         Err(OutputError::RequestRunError {
@@ -341,9 +351,6 @@ where
                         }),
                     )
                     .await;
-                if let Err(err) = res {
-                    error!(?err, "unable to notify output {url} of request run error")
-                }
                 return ControlFlow::Break(());
             }
             debug!("followers are running");
@@ -374,11 +381,18 @@ where
                     request,
                     validate_ret,
                 } => {
-                    record_span_fields(&self.start_span, &policy.computation_id, policy.party);
+                    record_span_party(&self.start_span, policy.party);
                     if request.leader != policy.leader {
                         ret_err(
                             validate_ret,
                             ValidateError::LeaderMismatch {
+                                scheduled_leader: policy.leader,
+                                requested_leader: request.leader,
+                            },
+                        );
+                        ret_err(
+                            ret,
+                            ScheduleError::LeaderMismatch {
                                 scheduled_leader: policy.leader,
                                 requested_leader: request.leader,
                             },
@@ -394,6 +408,7 @@ where
                                 requested_hash: request.program_hash,
                             },
                         );
+                        // TODO also ret_err for schedule ret
                         return ControlFlow::Break(());
                     }
                     self.state_kind = PolicyStateKind::Validated {
@@ -402,6 +417,7 @@ where
                         typed_program,
                     };
                     let _ = validate_ret.send(Ok(()));
+                    let _ = ret.send(Ok(()));
                 }
                 state => {
                     ret_err(
@@ -436,6 +452,12 @@ where
 fn record_span_computation_id(span: &Option<Span>, computation_id: &Uuid) {
     if let Some(span) = &span {
         span.record("computation_id", format!("{:?}", computation_id));
+    }
+}
+
+fn record_span_party(span: &Option<Span>, party: usize) {
+    if let Some(span) = &span {
+        span.record("party", party);
     }
 }
 
@@ -653,6 +675,7 @@ where
                 let span = Span::current();
                 thread::spawn(move || {
                     let _g = span.enter();
+                    debug!("compiling garble program");
                     let compiled = compile_with_options(
                         &program,
                         CompileOptions {
@@ -688,6 +711,11 @@ where
                         return ControlFlow::Break(());
                     }
                 };
+                debug!(
+                    and_ops = compiled.circuit.ands(),
+                    total_ops = compiled.circuit.ops(),
+                    "compiled garble program"
+                );
 
                 let input = match compiled.literal_arg(policy.party, policy.input.clone()) {
                     Ok(args) => args.as_bits(),
@@ -744,14 +772,13 @@ where
                                 warn!("policy contained output url but party received no output");
                             }
                             Err(err) => {
-                                error!(?err);
                                 let _ = client.output(url, Err(OutputError::MpcError(err))).await;
                             }
                         }
                     } else if let Err(err) = output {
                         error!(?err);
                     }
-                    // This break from the `start` loop and drop the state machine
+                    // This breaks from the `start` loop and drops the state machine
                     let _ = cmd_tx.send(PolicyCmd::Stop).await;
                 };
 
@@ -848,8 +875,13 @@ where
                 typed_program,
                 client_recv,
             } => {
-                let client = client_recv.await.unwrap();
-                // TODO DRY this with above
+                let client = match client_recv.await {
+                    Ok(client) => client,
+                    Err(_) => {
+                        // The task sending the constants crashed, so we stop the state machine.
+                        return ControlFlow::Break(());
+                    }
+                };
                 self.check_consts(client, policy, typed_program).await;
             }
             _ => panic!(),
@@ -965,7 +997,7 @@ enum RecvErr {
 }
 
 impl<C: PolicyClient> polytune::channel::Channel for Channel<C> {
-    type SendError = C::ClientError<MpcMsgError>;
+    type SendError = C::Error;
 
     type RecvError = RecvErr;
 
