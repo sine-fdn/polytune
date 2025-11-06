@@ -1,0 +1,31 @@
+name: Build and push polytune-http-server image
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push-http-server:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push http-server image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          file: ./crates/polytune-http-server/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/polytune-http-server:latest

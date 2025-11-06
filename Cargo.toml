@@ -2,6 +2,7 @@
 members = [
     "crates/polytune-test-utils",
     "crates/polytune-server-core",
+    "crates/polytune-http-server",
     "examples/api-integration",
     "examples/http-multi-server-channels",
     "examples/http-single-server-channels",
@@ -11,6 +12,9 @@ members = [
 
 [workspace.lints.rust]
 missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "warn"
@@ -109,6 +113,7 @@ ignored = ["hybrid-array"]
 # Use this profile when profiling polytune with e.g. samply or perf
 [profile.debug-release]
 debug = true
+debug-assertions = true
 inherits = "release"
 
 [patch.crates-io]

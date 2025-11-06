@@ -1,0 +1,18 @@
+{
+  "computation_id": "d942cbff-899f-44a6-9891-f6c01bee0ff2",
+  "participants": ["http://localhost:8000", "http://localhost:8001"],
+  "program": "const ROWS_0: usize = PARTY_0::ROWS;\nconst ROWS_1: usize = PARTY_1::ROWS;\nconst ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);\n\npub fn main(\n    measles_cases: [[u8; ID_LEN]; ROWS_0],\n    school_examinations: [[u8; ID_LEN]; ROWS_1],\n) -> bool {\n    let mut result: bool = false; \n    for measles_case in measles_cases {\n        for school_exam in school_examinations {\n            result ^= (measles_case == school_exam);\n        }\n    }\n    result\n}\n",
+  "leader": 0,
+  "party": 1,
+  "input": {
+    "Array": [
+        { "Array": [{ "NumUnsigned": [0, "U8"] }] },
+        { "Array": [{ "NumUnsigned": [1, "U8"] }] },
+        { "Array": [{ "NumUnsigned": [2, "U8"] }] }
+    ]
+  },
+  "constants": {
+    "ROWS": { "NumUnsigned": [3, "Usize"] },
+    "ID_LEN": { "NumUnsigned": [1, "Usize"] }
+  }
+}

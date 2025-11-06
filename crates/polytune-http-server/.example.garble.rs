@@ -5,6 +5,12 @@ const ID_LEN: usize = max(PARTY_0::ID_LEN, PARTY_1::ID_LEN);
 pub fn main(
     measles_cases: [[u8; ID_LEN]; ROWS_0],
     school_examinations: [[u8; ID_LEN]; ROWS_1],
-) -> [(bool, [u8; ID_LEN]); const { ROWS_0 + ROWS_1 - 1usize}] {
-    join(measles_cases, school_examinations)
+) -> bool {
+    let mut result: bool = false; 
+    for measles_case in measles_cases {
+        for school_exam in school_examinations {
+            result ^= (measles_case == school_exam);
+        }
+    }
+    result
 }

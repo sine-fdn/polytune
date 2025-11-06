@@ -13,6 +13,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_LOG: debug
+  POLYTUNE_LOG: debug
   RUSTFLAGS: "-C target-feature=+avx2"
 
 jobs:
@@ -27,7 +28,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
       - run: cargo fmt --check --all
-      - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core -- -Dwarnings
+      - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core --package polytune-http-server -- -Dwarnings
       - name: Install cargo-machete
         uses: taiki-e/install-action@c5b1b6f479c32f356cc6f4ba672a47f63853b13b
         with:
@@ -151,7 +152,7 @@ jobs:
         env:
           RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
 
-  test-polytune-server-core:
+  test-crates:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -160,11 +161,11 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-      - run: cargo test --release --package polytune-server-core
+      - run: cargo test --package polytune-server-core --package polytune-http-server -- --nocapture
 
-  build-api-integration-image:
+  build-polytune-http-server-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Build examples/api-integration Dockerfile
-        run: docker build . -f examples/api-integration/Dockerfile --tag 'polytune-api-integration'
+      - name: Build crates/polytune-http-server Dockerfile
+        run: docker build . -f crates/polytune-http-server/Dockerfile --tag 'polytune-http-server'
