@@ -22,7 +22,7 @@ jobs:
       - name: CPU information
         run: lscpu
       - name: Install Nix
-        uses: cachix/install-nix-action@fd24c48048070c1be9acd18c9d369a83f0fe94d7
+        uses: cachix/install-nix-action@456688f15bc354bef6d396e4a35f4f89d40bf2b7
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
