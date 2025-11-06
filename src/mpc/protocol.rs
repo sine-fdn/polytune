@@ -272,7 +272,7 @@ pub(crate) enum Preprocessor {
 /// [wires](`garble_lang::circuit::Wire`). The primary benefit is that instructions specifically
 /// denote their output register, which can be reused once the stored value is not needed anymore
 /// during the execution. This reduces the memory consumption of the MPC evaluation.
-#[instrument(level=Level::DEBUG, skip_all, fields(
+#[instrument(level=Level::INFO, skip_all, fields(
     party_id = p_own
 ))]
 pub async fn mpc(
@@ -377,7 +377,7 @@ pub(crate) async fn _mpc(
     let (table_shares, garbled_gates, shares, labels, input_labels) =
         garble(ctx, delta, auth_bits, &mut random_shares).await?;
 
-    info!("Preprocessing phase completed successfully");
+    debug!("Preprocessing phase completed successfully");
 
     // input processing:
     let (masked_inputs, input_labels) =
