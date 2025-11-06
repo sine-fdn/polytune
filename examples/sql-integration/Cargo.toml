@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.99"
-axum = "0.8.4"
+axum = "0.8.6"
 blake3 = "1.5.1"
 clap = { version = "4.5.47", features = ["derive"] }
 futures = "0.3.31"
