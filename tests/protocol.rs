@@ -5,6 +5,24 @@ use garble_lang::{
 };
 use polytune::{Error, channel, mpc};
 use tempfile::tempdir;
+use tracing::{error, info};
+use tracing_subscriber::{EnvFilter, fmt, fmt::format::FmtSpan};
+
+/// Initializes the tracing subscriber for test logging.
+///
+/// This function sets up the `tracing` subscriber with default environment filters
+/// and ensures logs are properly captured in test output. It should be called
+/// at the start of each test before any `info!()` or `error!()` macros are used.
+fn init_tracing() {
+    let _ = fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_test_writer()
+        .with_target(false)
+        .with_level(true)
+        .compact()
+        .try_init();
+}
 
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 fn simulate_mpc(
@@ -53,14 +71,14 @@ async fn simulate_mpc_async(
             .await
             {
                 Ok(res) => {
-                    println!(
+                    info!(
                         "Party {p_own} sent {:.2}MB of messages",
                         channel.bytes_sent() as f64 / 1024.0 / 1024.0
                     );
                     res
                 }
                 Err(e) => {
-                    eprintln!("SMPC protocol failed for party {p_own}: {e:?}");
+                    error!("SMPC protocol failed for party {p_own}: {e:?}");
                     vec![]
                 }
             }
@@ -78,7 +96,7 @@ async fn simulate_mpc_async(
     .await;
     match eval_result {
         Err(e) => {
-            eprintln!("SMPC protocol failed for Evaluator: {e:?}");
+            error!("SMPC protocol failed for Evaluator: {e:?}");
             Ok(vec![])
         }
         Ok(res) => {
@@ -90,11 +108,11 @@ async fn simulate_mpc_async(
             }
             outputs.retain(|o| !o.is_empty());
             if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                eprintln!("The result does not match for all output parties: {outputs:?}");
+                error!("The result does not match for all output parties: {outputs:?}");
             }
             let mb = eval_channel.bytes_sent() as f64 / 1024.0 / 1024.0;
-            println!("Party {p_eval} sent {mb:.2}MB of messages");
-            println!("MPC simulation finished successfully!");
+            info!("Party {p_eval} sent {mb:.2}MB of messages");
+            info!("MPC simulation finished successfully!");
             Ok(outputs.pop().unwrap_or_default())
         }
     }
@@ -115,6 +133,10 @@ async fn simulate_mpc_async(
 /// - The output gate contains the final result `x ^ y ^ z`.
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_xor_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![1];
     for x in [true, false] {
         for y in [true, false] {
@@ -148,6 +170,10 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
 /// - The final output gate contains the result `x ^ y ^ z`.
 #[test]
 fn eval_xor_circuits_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_xor_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![1, 2];
     for x in [true, false] {
         for y in [true, false] {
@@ -184,6 +210,10 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
 /// - The final output gates contain the values `[!x, !y, x, y]`.
 #[test]
 fn eval_not_circuits_2pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_not_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![1];
     for x in [true, false] {
         for y in [true, false] {
@@ -216,6 +246,10 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
 /// - The final output gates contain both negated and original values: `[!x, !y, !z, x, y, z]`.
 #[test]
 fn eval_not_circuits_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_not_circuits_3pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
@@ -256,6 +290,10 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
 /// - The final output gate contains the result `x & y & z`.
 #[test]
 fn eval_and_circuits_2pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_and_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1];
     for x in [true, false] {
         for y in [true, false] {
@@ -288,6 +326,10 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
 /// - The final output gate contains the result `x & y & z`.
 #[test]
 fn eval_and_circuits_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_and_circuits_3pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
@@ -319,6 +361,10 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
 ///   the product of the inputs `x`, `y`, and `z`.
 #[test]
 fn eval_garble_prg_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_garble_prg_3pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1, 2];
     let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
     for x in 0..3 {
@@ -335,7 +381,7 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
                     &output_parties,
                 )?;
                 let result = prg.parse_output(&output).unwrap();
-                println!("{calculation} = {result}");
+                info!("{calculation} = {result}");
                 assert_eq!(format!("{result}"), format!("{expected}"));
             }
         }
@@ -365,6 +411,10 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
 /// This test runs with 2 parties and 100 AND gates.
 #[test]
 fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_large_and_circuit_dynamic");
+    let _enter = span.enter();
+
     fn run_test(num_parties: usize, num_and_gates: usize) -> Result<(), Error> {
         let output_parties: Vec<usize> = vec![0, 1];
         let input_len = (num_and_gates as f32 / num_parties as f32).ceil() as usize;
@@ -407,6 +457,10 @@ fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
 ///   variety of circuits with different gate configurations (e.g., AND, NOT, XOR).
 #[test]
 fn eval_mixed_circuits() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_mixed_circuits");
+    let _enter = span.enter();
+
     let circuits = gen_circuits_up_to(5);
     let mut circuits_with_inputs = Vec::new();
     let output_parties: Vec<usize> = vec![0, 1];
@@ -444,7 +498,7 @@ fn eval_mixed_circuits() -> Result<(), Error> {
             circuits_with_inputs.push((circuit.clone(), a, b));
         }
     }
-    println!("{} combinations generated", circuits_with_inputs.len());
+    info!("{} combinations generated", circuits_with_inputs.len());
 
     let eval_only_every_n = 31; // prime, to avoid periodic patterns
     let mut total_tests = 0;
@@ -454,14 +508,14 @@ fn eval_mixed_circuits() -> Result<(), Error> {
             let output_smpc = simulate_mpc(&circuit, &[&in_a, &in_b], &output_parties)?;
             let output_direct = eval_directly(&circuit, &[&in_a, &in_b]);
             if output_smpc != output_direct {
-                println!("Circuit: {circuit:?}");
-                println!("A: {in_a:?}");
-                println!("B: {in_b:?}\n");
-                panic!("Output did not match: {output_smpc:?} vs {output_direct:?}");
+                info!("Circuit: {circuit:?}");
+                info!("A: {in_a:?}");
+                info!("B: {in_b:?}\n");
+                error!("Output did not match: {output_smpc:?} vs {output_direct:?}");
             }
         }
     }
-    println!("Successfully ran {total_tests} tests");
+    info!("Successfully ran {total_tests} tests");
     Ok(())
 }
 
@@ -535,7 +589,7 @@ fn gen_circuits_up_to(n: usize) -> Vec<Circuit> {
         for in_b in 1..=(n / 2) {
             for gates in (in_a + in_b)..n {
                 let wires = in_a + in_b + gates;
-                println!(
+                info!(
                     "Generating circuits with {in_a} inputs from A + {in_b} inputs from B + {gates} gates = {wires} total"
                 );
                 let mut circuits = vec![vec![]];
