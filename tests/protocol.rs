@@ -8,17 +8,28 @@ use tempfile::tempdir;
 use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt, fmt::format::FmtSpan};
 
+/// Initializes the tracing subscriber for test logging.
+///
+/// This function sets up the `tracing` subscriber with default environment filters
+/// and ensures logs are properly captured in test output. It should be called
+/// at the start of each test before any `info!()` or `error!()` macros are used.
+fn init_tracing() {
+    let _ = fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_test_writer()
+        .with_target(false)
+        .with_level(true)
+        .compact()
+        .try_init();
+}
+
 /// Simulates the multi party computation with the given inputs and party 0 as the evaluator.
 fn simulate_mpc(
     circuit: &Circuit,
     inputs: &[&[bool]],
     output_parties: &[usize],
 ) -> Result<Vec<bool>, Error> {
-    let _ = fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_span_events(fmt::format::FmtSpan::NEW | FmtSpan::CLOSE)
-        .with_test_writer()
-        .try_init();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
@@ -122,6 +133,10 @@ async fn simulate_mpc_async(
 /// - The output gate contains the final result `x ^ y ^ z`.
 #[test]
 fn eval_xor_circuits_2pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_xor_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![1];
     for x in [true, false] {
         for y in [true, false] {
@@ -155,6 +170,10 @@ fn eval_xor_circuits_2pc() -> Result<(), Error> {
 /// - The final output gate contains the result `x ^ y ^ z`.
 #[test]
 fn eval_xor_circuits_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_xor_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![1, 2];
     for x in [true, false] {
         for y in [true, false] {
@@ -191,6 +210,10 @@ fn eval_xor_circuits_3pc() -> Result<(), Error> {
 /// - The final output gates contain the values `[!x, !y, x, y]`.
 #[test]
 fn eval_not_circuits_2pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_not_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![1];
     for x in [true, false] {
         for y in [true, false] {
@@ -223,6 +246,10 @@ fn eval_not_circuits_2pc() -> Result<(), Error> {
 /// - The final output gates contain both negated and original values: `[!x, !y, !z, x, y, z]`.
 #[test]
 fn eval_not_circuits_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_not_circuits_3pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
@@ -263,6 +290,10 @@ fn eval_not_circuits_3pc() -> Result<(), Error> {
 /// - The final output gate contains the result `x & y & z`.
 #[test]
 fn eval_and_circuits_2pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_and_circuits_2pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1];
     for x in [true, false] {
         for y in [true, false] {
@@ -295,6 +326,10 @@ fn eval_and_circuits_2pc() -> Result<(), Error> {
 /// - The final output gate contains the result `x & y & z`.
 #[test]
 fn eval_and_circuits_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_and_circuits_3pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1, 2];
     for x in [true, false] {
         for y in [true, false] {
@@ -326,6 +361,10 @@ fn eval_and_circuits_3pc() -> Result<(), Error> {
 ///   the product of the inputs `x`, `y`, and `z`.
 #[test]
 fn eval_garble_prg_3pc() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_garble_prg_3pc");
+    let _enter = span.enter();
+
     let output_parties: Vec<usize> = vec![0, 1, 2];
     let prg = compile("pub fn main(x: u8, y: u8, z: u8) -> u8 { x * y * z }").unwrap();
     for x in 0..3 {
@@ -372,6 +411,10 @@ fn eval_garble_prg_3pc() -> Result<(), Error> {
 /// This test runs with 2 parties and 100 AND gates.
 #[test]
 fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_large_and_circuit_dynamic");
+    let _enter = span.enter();
+
     fn run_test(num_parties: usize, num_and_gates: usize) -> Result<(), Error> {
         let output_parties: Vec<usize> = vec![0, 1];
         let input_len = (num_and_gates as f32 / num_parties as f32).ceil() as usize;
@@ -414,6 +457,10 @@ fn eval_large_and_circuit_dynamic() -> Result<(), Error> {
 ///   variety of circuits with different gate configurations (e.g., AND, NOT, XOR).
 #[test]
 fn eval_mixed_circuits() -> Result<(), Error> {
+    init_tracing();
+    let span = tracing::info_span!("test eval_mixed_circuits");
+    let _enter = span.enter();
+
     let circuits = gen_circuits_up_to(5);
     let mut circuits_with_inputs = Vec::new();
     let output_parties: Vec<usize> = vec![0, 1];
