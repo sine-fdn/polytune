@@ -11,7 +11,7 @@ blake3 = "1.5.1"
 futures = "0.3.31"
 garble_lang = { version = "0.7.0-alpha.1", features = ["json_schema"] }
 polytune = { path = "../../", version = "0.2.0-alpha.2" }
-schemars = { version = "0.9", features = ["url2", "uuid1"] }
+schemars = { version = "1.1", features = ["url2", "uuid1"] }
 serde = "1.0.197"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["macros", "rt", "rt-multi-thread"] }

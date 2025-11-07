@@ -22,7 +22,7 @@ polytune-server-core = { path = "../polytune-server-core", version = "0.1.0" }
 reqwest = { version = "0.12.24", features = ["blocking", "json"] }
 reqwest-middleware = { version = "0.4.2", features = ["json"] }
 reqwest-retry = "0.7.0"
-schemars = { version = "0.9", features = ["url2", "uuid1"] }
+schemars = { version = "1.1", features = ["url2", "uuid1"] }
 serde = "1.0.197"
 serde_json = "1.0.143"
 thiserror = "2.0.17"
