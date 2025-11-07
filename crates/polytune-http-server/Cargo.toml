@@ -19,7 +19,7 @@ axum = { version = "0.8.6", features = ["macros"] }
 clap = { version = "4.5.47", features = ["derive", "env"] }
 garble_lang = { version = "0.7.0", features = ["json_schema"] }
 polytune-server-core = { path = "../polytune-server-core", version = "0.1.0" }
-reqwest = { version = "0.12.23", features = ["blocking", "json"] }
+reqwest = { version = "0.12.24", features = ["blocking", "json"] }
 reqwest-middleware = { version = "0.4.2", features = ["json"] }
 reqwest-retry = "0.7.0"
 schemars = { version = "0.9", features = ["url2", "uuid1"] }
