@@ -13,16 +13,17 @@ use std::{
 };
 
 use garble_lang::literal::Literal;
-use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 
-use crate::output_server::MpcResult;
+use crate::common::output_server::{self, MpcResult};
+
+mod common;
 
 /// This test supports profiling with heaptrack or samply if installed by setting the corresponding
 /// env variables. By setting the `POLYTUNE_TEST_BIG` variable, policies with a larger input
 /// will be used.
 #[test]
-fn simulate() {
+fn test_and_profile_server() {
     let millis = 2000;
     println!("\n\n--- {millis}ms ---\n\n");
     let mut children = vec![];
@@ -113,7 +114,9 @@ fn simulate() {
             .build()
             .unwrap();
 
-        rt.block_on(async move { output_server::server(s).await });
+        rt.block_on(
+            async move { output_server::server("127.0.0.1:8099".parse().unwrap(), s).await },
+        );
     });
 
     thread::spawn(move || {
@@ -139,16 +142,6 @@ fn simulate() {
             fs::read_to_string(crate_dir.join("policies/policy1.json")).unwrap(),
         )
     };
-    #[derive(Deserialize)]
-    struct PolicyProgram {
-        program: String,
-    }
-    let pol0_program: PolicyProgram = serde_json::from_str(&pol0).expect("Invalid policy");
-    let pol1_program: PolicyProgram = serde_json::from_str(&pol1).expect("Invalid policy");
-    let expected_policy = fs::read_to_string(crate_dir.join(".example.garble.rs"))
-        .expect("error reading example garble program");
-    assert_eq!(expected_policy, pol0_program.program);
-    assert_eq!(expected_policy, pol1_program.program);
 
     sleep(Duration::from_millis(millis));
     let client = reqwest::blocking::Client::new();
@@ -178,7 +171,7 @@ fn simulate() {
         });
     });
 
-    let result = r.blocking_recv().expect("output server crashed");
+    let (_id, result) = r.blocking_recv().expect("output server crashed");
     eprintln!("Got result: {result:?}");
 
     // To properly write out profiling data, we need to send a SIGINT to the
@@ -206,37 +199,4 @@ fn simulate() {
         true.into()
     };
     assert_eq!(MpcResult::Success(expected_lit), result);
-}
-
-/// A small server that listens for requests to the `/output` url and
-/// returns those via an mpsc::channel.
-mod output_server {
-    use axum::{Json, Router, extract::State, routing::post};
-    use garble_lang::literal::Literal;
-    use serde::Deserialize;
-    use tokio::sync::mpsc;
-
-    pub(super) async fn server(sender: mpsc::Sender<MpcResult>) {
-        let app = Router::new()
-            .route("/output", post(output))
-            .with_state(sender);
-
-        // Run the server.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:8099")
-            .await
-            .unwrap();
-        axum::serve(listener, app).await.unwrap();
-    }
-
-    #[derive(Debug, Deserialize, PartialEq, Eq)]
-    #[serde(tag = "type", content = "details")]
-    #[serde(rename_all = "camelCase")]
-    pub(super) enum MpcResult {
-        Success(Literal),
-        Error(serde_json::Value),
-    }
-
-    async fn output(State(sender): State<mpsc::Sender<MpcResult>>, Json(result): Json<MpcResult>) {
-        sender.send(result).await.unwrap()
-    }
 }

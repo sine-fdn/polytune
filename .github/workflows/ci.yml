@@ -161,7 +161,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-      - run: cargo test --package polytune-server-core --package polytune-http-server -- --nocapture
+      - run: cargo test --profile debug-release --package polytune-server-core --package polytune-http-server -- --nocapture
 
   build-polytune-http-server-image:
     runs-on: ubuntu-latest
