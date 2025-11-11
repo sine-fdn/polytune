@@ -1,7 +1,10 @@
 //! Tests of polytune-http-server.
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use std::{
+    collections::HashMap, env::current_dir, fs, net::SocketAddr, path::PathBuf, time::Duration,
+};
 
-use polytune_http_server::ServerOpts;
+use jsonwebtoken::EncodingKey;
+use polytune_http_server::{JwtConf, ServerOpts};
 use polytune_server_core::Policy;
 use rand::seq::SliceRandom;
 use tokio::{sync::mpsc, task::JoinSet};
@@ -34,11 +37,26 @@ async fn concurrent_eval() {
     let output_url: Url = format!("http://{output_addr}/output/")
         .parse()
         .expect("parsing output url");
+    let jwt_key = fs::read(
+        env!("CARGO_MANIFEST_DIR")
+            .parse::<PathBuf>()
+            .expect("crate dir")
+            .join("test_key/test-private.pem"),
+    )
+    .expect("reading test private ky");
+    let key =
+        EncodingKey::from_ec_pem(&jwt_key).expect("JWT key is not a valid ECDSA PEM PKCS#8 key");
     start_servers(
         addrs,
         ServerOpts {
             concurrency: 3,
-            tmp_dir: None,
+            tmp_dir: Some(current_dir().expect("current dir")),
+            jwt_conf: Some(JwtConf {
+                key,
+                claims: Some(serde_json::json!({"roles":["TEST_ROLE"]})),
+                iss: "polytune".to_string(),
+                exp: 300,
+            }),
         },
     )
     .await;

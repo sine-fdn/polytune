@@ -1,4 +1,10 @@
+use std::{
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
 use garble_lang::literal::Literal;
+use jsonwebtoken::{Algorithm, Header, encode};
 use polytune_server_core::{
     ConstsRequest, MpcMsg, OutputError, Policy, PolicyClient, PolicyClientBuilder, RunRequest,
     ValidateRequest,
@@ -6,34 +12,94 @@ use polytune_server_core::{
 use reqwest_middleware::ClientWithMiddleware;
 use schemars::JsonSchema;
 use serde::Serialize;
-use tracing::{Level, error};
+use tracing::{Level, debug, error};
 use url::Url;
 use uuid::Uuid;
 
-use crate::format_error_chain;
+use crate::{format_error_chain, server::JwtConf};
 
 #[derive(Clone)]
 pub(crate) struct HttpClientBuilder {
     pub(crate) client: ClientWithMiddleware,
+    pub(crate) jwt_conf: Option<JwtConf>,
 }
 
 impl PolicyClientBuilder for HttpClientBuilder {
     type Client = HttpClient;
 
     fn new_client(&self, policy: &Policy) -> Self::Client {
+        let jwt_data = self.jwt_conf.as_ref().map(|conf| {
+            Mutex::new(JwtData {
+                expiry: SystemTime::now(),
+                jwt: String::new(),
+                conf: conf.clone(),
+            })
+        });
         HttpClient {
             client: self.client.clone(),
             participants: policy.participants.clone(),
             party: policy.party,
             computation_id: policy.computation_id,
+            jwt_data,
         }
     }
 }
+
 pub(crate) struct HttpClient {
     client: ClientWithMiddleware,
     party: usize,
     computation_id: Uuid,
     participants: Vec<Url>,
+    jwt_data: Option<Mutex<JwtData>>,
+}
+
+struct JwtData {
+    expiry: SystemTime,
+    jwt: String,
+    conf: JwtConf,
+}
+
+#[derive(Debug, Serialize)]
+struct JwtClaims {
+    iss: String,
+    iat: u64,
+    exp: u64,
+    #[serde(flatten)]
+    additional_claims: Option<serde_json::Value>,
+}
+
+impl JwtData {
+    fn update_jwt(&mut self) -> Result<(), jsonwebtoken::errors::Error> {
+        // if we're less than 30 seconds from the JWT expiring
+        if SystemTime::now()
+            .checked_add(Duration::from_secs(30))
+            .expect("Invalid SystemTime")
+            > self.expiry
+        {
+            debug!("signing new JWT");
+            let now = SystemTime::now();
+            let expiry = now + Duration::from_secs(self.conf.exp);
+            let iat = now
+                .duration_since(UNIX_EPOCH)
+                .expect("invalid system time")
+                .as_secs();
+            let exp = expiry
+                .duration_since(UNIX_EPOCH)
+                .expect("invalid system time")
+                .as_secs();
+            let claims = JwtClaims {
+                iss: self.conf.iss.clone(),
+                iat,
+                exp,
+                additional_claims: self.conf.claims.clone(),
+            };
+            let header = Header::new(Algorithm::ES256);
+            let jwt = encode(&header, &claims, &self.conf.key)?;
+            self.expiry = expiry;
+            self.jwt = jwt;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -53,9 +119,21 @@ pub(crate) enum HttpClientError {
     MpcMsg(String),
     #[error("output request failed with error: {0}")]
     Output(String),
+    #[error("JWT signing failed")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
 }
 
 impl HttpClient {
+    fn jwt(&self) -> Result<Option<String>, jsonwebtoken::errors::Error> {
+        if let Some(jwt_data) = &self.jwt_data {
+            let mut jwt_data = jwt_data.lock().expect("jwt_data poison");
+            jwt_data.update_jwt()?;
+            Ok(Some(jwt_data.jwt.clone()))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn make_request<R, F>(
         &self,
         route: &str,
@@ -70,10 +148,11 @@ impl HttpClient {
         let url = self.participants[to]
             .join(route)
             .expect("unable to parse URL");
-        let resp = self
-            .client
-            .post(url.clone())
-            .json(&req)
+        let mut req = self.client.post(url.clone()).json(&req);
+        if let Some(jwt) = self.jwt()? {
+            req = req.bearer_auth(jwt);
+        }
+        let resp = req
             .send()
             .await
             .map_err(|err| HttpClientError::Request { url, source: err })?;
@@ -118,10 +197,11 @@ impl PolicyClient for HttpClient {
         let url = self.participants[to]
             .join(route)
             .expect("unable to parse URL");
-        let resp = self
-            .client
-            .post(url.clone())
-            .body(msg.data)
+        let mut req = self.client.post(url.clone()).body(msg.data);
+        if let Some(jwt) = self.jwt()? {
+            req = req.bearer_auth(jwt);
+        }
+        let resp = req
             .send()
             .await
             .map_err(|err| HttpClientError::Request { url, source: err })?;
@@ -146,16 +226,14 @@ impl PolicyClient for HttpClient {
             error!(%err, "Sending error to output party");
         }
         let result = MpcResult::from(result);
-        let resp = self
-            .client
-            .post(to.clone())
-            .json(&result)
-            .send()
-            .await
-            .map_err(|err| HttpClientError::Request {
-                url: to,
-                source: err,
-            })?;
+        let mut req = self.client.post(to.clone()).json(&result);
+        if let Some(jwt) = self.jwt()? {
+            req = req.bearer_auth(jwt);
+        }
+        let resp = req.send().await.map_err(|err| HttpClientError::Request {
+            url: to,
+            source: err,
+        })?;
         if resp.status().is_success() {
             Ok(())
         } else {
