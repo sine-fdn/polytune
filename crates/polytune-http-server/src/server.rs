@@ -47,7 +47,7 @@ pub struct JwtConf {
     /// PEM encoded ECDSA key in PKCS#8 form for creating JWTs that are added to requests.
     pub key: EncodingKey,
     /// Additional claims to add to the signed JWTs encoded as json object.
-    pub claims: Option<serde_json::Value>,
+    pub claims: Option<serde_json::Map<String, serde_json::Value>>,
     /// The JWT `iss` claim to use for signed JWTs
     pub iss: String,
     /// The JWT `exp` expiry in seconds from creation claim to use for signed JWTs.

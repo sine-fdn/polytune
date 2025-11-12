@@ -65,7 +65,7 @@ struct JwtClaims {
     iat: u64,
     exp: u64,
     #[serde(flatten)]
-    additional_claims: Option<serde_json::Value>,
+    additional_claims: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl JwtData {
