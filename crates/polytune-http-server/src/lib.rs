@@ -9,7 +9,7 @@ mod router;
 mod server;
 
 pub use policy_client::MpcResult;
-pub use server::{Server, ServerOpts};
+pub use server::{JwtConf, Server, ServerOpts};
 
 fn serialize_error_chain<S>(
     err: &(dyn std::error::Error + 'static),

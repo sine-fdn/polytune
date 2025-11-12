@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use aide::openapi::{Info, OpenApi};
 use anyhow::Context;
 use axum::{Extension, routing::IntoMakeService};
+use jsonwebtoken::EncodingKey;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use tokio::sync::Semaphore;
 use tracing::info;
@@ -20,12 +21,37 @@ pub struct Server {
 }
 
 /// Configuration options for a [`Server`].
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ServerOpts {
     /// Maximum number of policies this party can concurrently evaluate as a leader.
     pub concurrency: usize,
     /// Temporary directory to store intermediate files during [`polytune::mpc`] evaluation.
     pub tmp_dir: Option<PathBuf>,
+    /// JWT configuration for requests made to other Polytune instances..
+    pub jwt_conf: Option<JwtConf>,
+}
+
+impl Default for ServerOpts {
+    fn default() -> Self {
+        Self {
+            concurrency: 1,
+            tmp_dir: None,
+            jwt_conf: None,
+        }
+    }
+}
+
+/// JWT configuration options for a [`Server`].
+#[derive(Clone)]
+pub struct JwtConf {
+    /// PEM encoded ECDSA key in PKCS#8 form for creating JWTs that are added to requests.
+    pub key: EncodingKey,
+    /// Additional claims to add to the signed JWTs encoded as json object.
+    pub claims: Option<serde_json::Value>,
+    /// The JWT `iss` claim to use for signed JWTs
+    pub iss: String,
+    /// The JWT `exp` expiry in seconds from creation claim to use for signed JWTs.
+    pub exp: u64,
 }
 
 impl Server {
@@ -55,7 +81,7 @@ impl Server {
     }
 }
 
-fn client() -> anyhow::Result<HttpClientBuilder> {
+fn client(jwt_conf: Option<JwtConf>) -> anyhow::Result<HttpClientBuilder> {
     #[allow(unused_mut)]
     let mut builder = reqwest::ClientBuilder::new();
 
@@ -71,7 +97,7 @@ fn client() -> anyhow::Result<HttpClientBuilder> {
     let client_builder = reqwest_middleware::ClientBuilder::new(reqwest_client)
         .with(RetryTransientMiddleware::new_with_policy(retry_policy));
     let client = client_builder.build();
-    Ok(HttpClientBuilder { client })
+    Ok(HttpClientBuilder { client, jwt_conf })
 }
 
 fn service(opts: ServerOpts) -> anyhow::Result<IntoMakeService<axum::Router>> {
@@ -89,7 +115,7 @@ fn service(opts: ServerOpts) -> anyhow::Result<IntoMakeService<axum::Router>> {
         },
         ..OpenApi::default()
     };
-    let client_builder = client()?;
+    let client_builder = client(opts.jwt_conf)?;
     let state = PolytuneState::new(PolytuneStateInner {
         client_builder,
         state_handles: Default::default(),

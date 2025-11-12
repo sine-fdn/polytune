@@ -34,8 +34,71 @@ Let's assume that party 0 is listening at `http://1.2.3.4:8000` and party 1 at `
 }
 ```
 
+## Configuration
+
+The polytune server can be configured via its CLI arguments (use `--help` to see the valid arguments) or via ENV variables when deployed as a Docker container.
+```
+Logging can be controlled with an EnvFilter via the `POLYTUNE_LOG` environment variable.
+
+Usage: polytune-http-server [OPTIONS]
+
+Options:
+  -a, --addr <ADDR>
+          The socket address to bind the server to
+          
+          [env: POLYTUNE_ADDR=]
+          [default: 0.0.0.0:8000]
+
+      --concurrency <CONCURRENCY>
+          Number of concurrent policy evaluations this party can be the leader of
+          
+          This limits how many policy evaluations this instance can be the the leader of at the same time. It does not limit the total number of concurrent evaluations.
+          
+          [env: POLYTUNE_CONCURRENCY=]
+          [default: 2]
+
+      --tmp-dir <TMP_DIR>
+          Directory to store temporary files to reduce memory consumption. Should not be on a tmpfs
+          
+          Polytune will create temporary files in this directory to store intermediate values. This reduces the peak memory consumption significantly. Make sure that the directory is not on a tmpfs filesystem (as /tmp usually is), as these files will be stored in memory, negating the memory benefit.
+          
+          [env: POLYTUNE_TMP_DIR=]
+
+      --jwt-key <JWT_KEY>
+          Path to PEM file with an ECDSA key in PKCS#8 form for creating JWTs that are added to requests
+          
+          Note that these JWTs are intended to be checked by a proxy between the Polytune instances. Polytune does not itself verify the JWTs of requests it receives.
+          
+          [env: POLYTUNE_JWT_KEY=]
+
+      --jwt-iss <JWT_ISS>
+          The JWT `iss` claim to use for signed JWTs
+          
+          [env: POLYTUNE_JWT_ISS=]
+          [default: polytune]
+
+      --jwt-exp <JWT_EXP>
+          The JWT `exp` expiry in seconds from creation claim to use for signed JWTs
+          
+          [env: POLYTUNE_JWT_EXP=]
+          [default: 300]
+
+      --jwt-claims <JWT_CLAIMS>
+          Additional claims to add to the signed JWTs. Needs to be a json object
+          
+          If this is set, --jwt-key is required.
+          
+          Examples:
+          
+          POLYTUNE_JWT_CLAIMS='{"roles": ["TEST_ROLE"]}' polytune-http-server
+          
+          [env: POLYTUNE_JWT_CLAIMS=]
+```
+
 ## OpenAPI spec
+
 The server provides an OpenAPI spec at `/api.json` and a Swagger UI for the spec at `/swagger`.
 
 ## Logging
+
 The logging output of the server can be configured using the `POLYTUNE_LOG` environment variable using an [`EnvFilter` directive](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
