@@ -1,6 +1,7 @@
 FROM rust:1.91 AS builder
 WORKDIR /usr/src/polytune
 COPY . .
+ARG RUSTFLAGS=""
 RUN cargo build --release --package polytune-http-server
 
 FROM debian:bookworm-slim
