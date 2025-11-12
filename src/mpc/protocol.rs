@@ -1124,16 +1124,15 @@ async fn output(
             output_wires[out] = Some(input ^ bit);
         }
         for p in (0..p_max).filter(|p| *p != p_own) {
-            for &out in circ.output_regs.iter() {
-                let output_wire = &output_wire_shares[p][out];
+            for (out, output_wire) in output_wire_shares[p].iter().enumerate() {
                 let Share(_, Auth(mac_s_key_r)) = &shares[out];
                 let Some((_, key_r)) = mac_s_key_r.get(p).copied() else {
-                    return Err(MpcError::InvalidOutputMac(out).into());
+                    return Err(MpcError::InvalidOutputMac(Reg(out as u32)).into());
                 };
                 if let Some((r, mac_r)) = output_wire {
                     if *mac_r != key_r ^ (*r & delta) {
-                        return Err(MpcError::InvalidOutputMac(out).into());
-                    } else if let Some(o) = output_wires.get(out.0 as usize).copied().flatten() {
+                        return Err(MpcError::InvalidOutputMac(Reg(out as u32)).into());
+                    } else if let Some(o) = output_wires.get(out).copied().flatten() {
                         output_wires[out] = Some(o ^ r);
                     };
                 }
