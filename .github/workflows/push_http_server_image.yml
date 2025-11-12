@@ -4,10 +4,6 @@ on:
   push:
     branches: [ "main" ]
 
-env:
-  # Reset the RUSTFLAGS so we don't compile for target-cpu=native
-  RUSTFLAGS: ""
-
 jobs:
   build-and-push-http-server:
     runs-on: ubuntu-latest
