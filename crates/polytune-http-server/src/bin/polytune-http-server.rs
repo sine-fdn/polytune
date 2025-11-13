@@ -51,7 +51,7 @@ struct Cli {
     ///
     /// POLYTUNE_JWT_CLAIMS='{"roles": ["TEST_ROLE"]}' polytune-http-server
     #[arg(long, requires = "jwt_key", env = "POLYTUNE_JWT_CLAIMS")]
-    jwt_claims: Option<serde_json::Value>,
+    jwt_claims: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[tokio::main]

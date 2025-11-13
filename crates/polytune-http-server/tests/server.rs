@@ -53,7 +53,12 @@ async fn concurrent_eval() {
             tmp_dir: Some(current_dir().expect("current dir")),
             jwt_conf: Some(JwtConf {
                 key,
-                claims: Some(serde_json::json!({"roles":["TEST_ROLE"]})),
+                claims: Some(
+                    serde_json::json!({"roles":["TEST_ROLE"]})
+                        .as_object()
+                        .expect("json is object")
+                        .clone(),
+                ),
                 iss: "polytune".to_string(),
                 exp: 300,
             }),

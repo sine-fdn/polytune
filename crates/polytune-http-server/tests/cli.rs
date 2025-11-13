@@ -31,6 +31,7 @@ fn test_and_profile_server() {
     let heaptrack_profiling = env::var("POLYTUNE_TEST_HEAPTRACK").is_ok();
     let samply_profiling = env::var("POLYTUNE_TEST_SAMPLY").is_ok();
     let polytune_bin = PathBuf::from(env!("CARGO_BIN_EXE_polytune-http-server"));
+    let crate_dir: PathBuf = env!("CARGO_MANIFEST_DIR").parse().unwrap();
 
     #[cfg(not(debug_assertions))]
     if samply_profiling || heaptrack_profiling {
@@ -51,6 +52,16 @@ fn test_and_profile_server() {
     } else {
         vec![]
     };
+    let jwt_key_arg = format!(
+        "--jwt-key={}",
+        crate_dir.join("test_key/test-private.pem").display()
+    );
+    common_args.extend([
+        &jwt_key_arg,
+        "--jwt-iss=polytune",
+        "--jwt-exp=1",
+        r#"--jwt-claims={"roles": ["TEST_ROLE"]}"#,
+    ]);
 
     if use_big_input {
         common_args.push("--tmp-dir=.");
@@ -130,7 +141,6 @@ fn test_and_profile_server() {
         }
     });
 
-    let crate_dir: PathBuf = env!("CARGO_MANIFEST_DIR").parse().unwrap();
     let (pol0, pol1) = if use_big_input {
         (
             fs::read_to_string(crate_dir.join("policies/policy0-big.json")).unwrap(),
