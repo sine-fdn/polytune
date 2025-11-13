@@ -142,6 +142,17 @@ pub(crate) async fn msg(
         .map_err(ApiError::from)
 }
 
+pub fn health_docs(t: TransformOperation) -> TransformOperation {
+    t.id("health")
+        .description("Health check. Returns a status code 200 if the service is running.")
+}
+
+pub(crate) async fn health(State(state): State<PolytuneState>) {
+    // We try to get the state handles lock. If for some reason the service is deadlocked on
+    // this lock, the /health call will timeout and fail
+    let _ = state.state_handles.read().await;
+}
+
 #[derive(OperationIo, Serialize)]
 #[serde(tag = "type", content = "details")]
 #[aide(output)]
