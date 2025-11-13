@@ -469,7 +469,8 @@ mod tests {
         };
         let p_fpre = Preprocessor::TrustedDealer(p_pre);
 
-        let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
+        let mut computation: tokio::task::JoinSet<(Vec<bool>, usize)> = tokio::task::JoinSet::new();
+
         for (p_own, (channel, inputs)) in parties {
             let circuit = circuit.clone();
             let inputs = inputs.to_vec();
@@ -491,11 +492,10 @@ mod tests {
                             "Party {p_own} sent {:.2}MB of messages",
                             channel.bytes_sent() as f64 / 1024.0 / 1024.0
                         );
-                        res
+                        (res, p_own)
                     }
                     Err(e) => {
-                        eprintln!("SMPC protocol failed for party {p_own}: {e:?}");
-                        vec![]
+                        panic!("SMPC protocol failed for party {p_own}: {e:?}");
                     }
                 }
             });
@@ -511,21 +511,23 @@ mod tests {
             None,
         );
         let eval_result = _mpc(&ctx).await;
+        let mut outputs = vec![vec![]; circuit.input_regs.len()];
         match eval_result {
             Err(e) => {
-                eprintln!("SMPC protocol failed for Evaluator: {e:?}");
-                Ok(vec![])
+                panic!("SMPC protocol failed for Evaluator: {e:?}");
             }
             Ok(res) => {
-                let mut outputs = vec![res];
+                outputs[p_eval] = res;
                 while let Some(output) = computation.join_next().await {
-                    if let Ok(output) = output {
-                        outputs.push(output);
+                    if let Ok((out, p)) = output {
+                        outputs[p] = out;
                     }
                 }
-                outputs.retain(|o| !o.is_empty());
-                if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                    eprintln!("The result does not match for all output parties: {outputs:?}");
+                let expected_output = outputs[output_parties[0]].clone();
+                for &p in &output_parties[1..] {
+                    if outputs[p] != expected_output {
+                        panic!("The result does not match for all output parties: {outputs:?}");
+                    }
                 }
                 let mb = eval_channel.bytes_sent() as f64 / 1024.0 / 1024.0;
                 println!("Party {p_eval} sent {mb:.2}MB of messages");
