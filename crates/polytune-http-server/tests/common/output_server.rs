@@ -11,6 +11,7 @@ use garble_lang::literal::Literal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tower_http::{classify::StatusInRangeAsFailures, trace::TraceLayer};
+use tracing::info;
 use uuid::Uuid;
 
 pub(crate) async fn server(addr: SocketAddr, sender: mpsc::Sender<(Uuid, MpcResult)>) {
@@ -43,6 +44,7 @@ async fn output(
     Path(computation_id): Path<Uuid>,
     Json(result): Json<MpcResult>,
 ) {
+    info!(?result, "mpc result");
     sender
         .send((computation_id, result))
         .await

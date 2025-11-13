@@ -62,6 +62,7 @@ async fn concurrent_eval() {
                 iss: "polytune".to_string(),
                 exp: 300,
             }),
+            cancel: None,
         },
     )
     .await;
