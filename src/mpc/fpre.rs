@@ -47,7 +47,7 @@ impl From<channel::Error> for Error {
 
 /// Runs FPre as a trusted dealer, communicating with all other parties.
 #[allow(dead_code)]
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Result<(), Error> {
     debug!("FPre with {parties} parties");
     try_join_all((0..parties).map(async |p| recv_from::<()>(channel, p, "delta (fpre)").await))
