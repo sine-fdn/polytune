@@ -403,7 +403,7 @@ pub(crate) async fn _mpc(
     Ok(outputs)
 }
 
-#[instrument(level=Level::DEBUG, skip(ctx))]
+#[instrument(level=Level::DEBUG, skip(ctx), err)]
 fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
     let &Context {
         p_own,
@@ -437,7 +437,7 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
 
 // TODO Consider optimizing type complexity of Result here
 #[allow(clippy::type_complexity)]
-#[instrument(level=Level::DEBUG, skip(ctx))]
+#[instrument(level=Level::DEBUG, skip(ctx), err)]
 async fn fn_independent_pre(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<
@@ -496,7 +496,7 @@ async fn fn_independent_pre(
     Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 fn init_and_shares(
     ctx: &Context<impl Channel>,
     random_shares: &mut FileOrMemBuf<Share>,
@@ -544,7 +544,7 @@ fn init_and_shares(
     Ok(and_shares)
 }
 
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -614,7 +614,7 @@ async fn gen_auth_bits(
 
 // TODO Consider optimizing type complexity of Result here
 #[allow(clippy::type_complexity)]
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -799,7 +799,7 @@ async fn garble(
 #[allow(clippy::type_complexity)]
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_inputs = ctx.num_inputs,
-))]
+), err)]
 async fn input_processing(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -918,7 +918,7 @@ async fn input_processing(
     num_garble_files= garble_files.len(),
     num_masked_inputs = masked_inputs.len(),
     num_input_labels = input_labels.len(),
-))]
+), err)]
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
@@ -1030,7 +1030,7 @@ fn evaluate(
 
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_output_wires = ctx.circ.output_regs.len(),
-))]
+), err)]
 async fn output(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -1124,16 +1124,15 @@ async fn output(
             output_wires[out] = Some(input ^ bit);
         }
         for p in (0..p_max).filter(|p| *p != p_own) {
-            for &out in circ.output_regs.iter() {
-                let output_wire = &output_wire_shares[p][out];
+            for (out, output_wire) in output_wire_shares[p].iter().enumerate() {
                 let Share(_, Auth(mac_s_key_r)) = &shares[out];
                 let Some((_, key_r)) = mac_s_key_r.get(p).copied() else {
-                    return Err(MpcError::InvalidOutputMac(out).into());
+                    return Err(MpcError::InvalidOutputMac(Reg(out as u32)).into());
                 };
                 if let Some((r, mac_r)) = output_wire {
                     if *mac_r != key_r ^ (*r & delta) {
-                        return Err(MpcError::InvalidOutputMac(out).into());
-                    } else if let Some(o) = output_wires.get(out.0 as usize).copied().flatten() {
+                        return Err(MpcError::InvalidOutputMac(Reg(out as u32)).into());
+                    } else if let Some(o) = output_wires.get(out).copied().flatten() {
                         output_wires[out] = Some(o ^ r);
                     };
                 }

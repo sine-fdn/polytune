@@ -5,7 +5,7 @@ use garble_lang::{
 };
 use polytune::{Error, channel, mpc};
 use tempfile::tempdir;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, fmt::format::FmtSpan};
 
 /// Initializes the tracing subscriber for test logging.
@@ -52,7 +52,7 @@ async fn simulate_mpc_async(
         return Ok(vec![]);
     };
 
-    let mut computation: tokio::task::JoinSet<Vec<bool>> = tokio::task::JoinSet::new();
+    let mut computation: tokio::task::JoinSet<(Vec<bool>, usize)> = tokio::task::JoinSet::new();
     let circuit: RegisterCircuit = circuit.clone().into();
     for (p_own, (channel, inputs)) in parties {
         let circuit = circuit.clone();
@@ -75,11 +75,10 @@ async fn simulate_mpc_async(
                         "Party {p_own} sent {:.2}MB of messages",
                         channel.bytes_sent() as f64 / 1024.0 / 1024.0
                     );
-                    res
+                    (res, p_own)
                 }
                 Err(e) => {
-                    error!("SMPC protocol failed for party {p_own}: {e:?}");
-                    vec![]
+                    panic!("SMPC protocol failed for party {p_own}: {e:?}");
                 }
             }
         });
@@ -94,21 +93,24 @@ async fn simulate_mpc_async(
         Some(tempdir().unwrap().path()),
     )
     .await;
+    let mut outputs = vec![vec![]; circuit.input_regs.len()];
     match eval_result {
         Err(e) => {
-            error!("SMPC protocol failed for Evaluator: {e:?}");
-            Ok(vec![])
+            panic!("SMPC protocol failed for Evaluator: {e:?}");
         }
         Ok(res) => {
-            let mut outputs = vec![res];
+            outputs[p_eval] = res;
             while let Some(output) = computation.join_next().await {
-                if let Ok(output) = output {
-                    outputs.push(output);
+                if let Ok((out, p)) = output {
+                    outputs[p] = out;
                 }
             }
-            outputs.retain(|o| !o.is_empty());
-            if !outputs.windows(2).all(|w| w[0] == w[1]) {
-                error!("The result does not match for all output parties: {outputs:?}");
+
+            let expected_output = outputs[output_parties[0]].clone();
+            for &p in &output_parties[1..] {
+                if outputs[p] != expected_output {
+                    panic!("The result does not match for all output parties: {outputs:?}");
+                }
             }
             let mb = eval_channel.bytes_sent() as f64 / 1024.0 / 1024.0;
             info!("Party {p_eval} sent {mb:.2}MB of messages");
@@ -511,7 +513,7 @@ fn eval_mixed_circuits() -> Result<(), Error> {
                 info!("Circuit: {circuit:?}");
                 info!("A: {in_a:?}");
                 info!("B: {in_b:?}\n");
-                error!("Output did not match: {output_smpc:?} vs {output_direct:?}");
+                panic!("Output did not match: {output_smpc:?} vs {output_direct:?}");
             }
         }
     }
