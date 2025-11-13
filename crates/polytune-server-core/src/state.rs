@@ -128,6 +128,7 @@ pub(crate) enum PolicyCmd {
     MpcMsg(MpcMsg, Ret<MpcMsgError>),
     InternalConstsSent,
     Stop,
+    Cancel(Ret<CancelError>),
 }
 
 impl Debug for PolicyCmd {
@@ -138,8 +139,9 @@ impl Debug for PolicyCmd {
             Self::Run(arg0, ..) => f.debug_tuple("Run").field(arg0).finish(),
             Self::Consts(arg0, ..) => f.debug_tuple("Consts").field(arg0).finish(),
             Self::MpcMsg(arg0, ..) => f.debug_tuple("MpcMsg").field(arg0).finish(),
-            Self::InternalConstsSent => write!(f, "InternalConstsSent"),
-            Self::Stop => write!(f, "Stop"),
+            Self::InternalConstsSent => f.write_str("InternalConstsSent"),
+            Self::Stop => f.write_str("Stop"),
+            Self::Cancel(_) => f.write_str("Cancel"),
         }
     }
 }
@@ -207,6 +209,10 @@ where
             PolicyCmd::Stop => {
                 return ControlFlow::Break(());
             }
+            PolicyCmd::Cancel(ret) => {
+                self.cancel(ret).await;
+                return ControlFlow::Break(());
+            }
         }
         ControlFlow::Continue(self)
     }
@@ -262,6 +268,8 @@ pub enum OutputError {
     MpcError(polytune::Error),
     #[error("internal error: unable to convert polytune output to Garble Literal. {0:?}")]
     InvalidOutput(garble_lang::eval::EvalError),
+    #[error("policy evaluation has been cancelled")]
+    Cancelled,
 }
 
 impl<B, C> PolicyState<B, C>
@@ -957,6 +965,68 @@ where
             }
         }
     }
+}
+
+/// Error during transmission of MPC message.
+#[derive(Debug, thiserror::Error)]
+#[allow(missing_docs)]
+#[non_exhaustive]
+pub enum CancelError {
+    #[error("PolicyClient is not available, unable to notify output destination")]
+    ClientNotAvailable,
+    #[error("unable to notify output destination of cancellation")]
+    Client(BoxError),
+}
+
+impl<B, C> PolicyState<B, C>
+where
+    B: PolicyClientBuilder<Client = C>,
+    C: PolicyClient,
+{
+    #[tracing::instrument(level = Level::WARN, skip_all)]
+    async fn cancel(self, ret: Ret<CancelError>) {
+        let (client, policy) = match self.state_kind {
+            PolicyStateKind::Init | PolicyStateKind::ValidateRequested { .. } => {
+                let _ = ret.send(Ok(()));
+                return;
+            }
+            PolicyStateKind::SendingConsts {
+                policy,
+                client_recv,
+                ..
+            } => {
+                let Ok(client) = client_recv.await else {
+                    ret_err(ret, CancelError::ClientNotAvailable);
+                    return;
+                };
+                (client, policy)
+            }
+            PolicyStateKind::AwaitingValidation { policy, client, .. }
+            | PolicyStateKind::Validated { policy, client, .. }
+            | PolicyStateKind::SendingConstsCompleted { policy, client, .. }
+            | PolicyStateKind::Running {
+                policy,
+                channel: Channel { client, .. },
+                ..
+            } => (client, policy),
+        };
+        match send_cancel(client, policy).await {
+            Ok(_) => {
+                let _ = ret.send(Ok(()));
+            }
+            Err(err) => ret_err(ret, err),
+        };
+    }
+}
+
+async fn send_cancel<C: PolicyClient>(client: C, policy: Policy) -> Result<(), CancelError> {
+    if let Some(url) = &policy.output {
+        client
+            .output(url.clone(), Err(OutputError::Cancelled))
+            .await
+            .map_err(|err| CancelError::Client(Box::new(err)))?;
+    }
+    Ok(())
 }
 
 impl<C> Debug for PolicyStateKind<C> {

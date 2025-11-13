@@ -9,8 +9,8 @@ use axum::{
     response::IntoResponse,
 };
 use serde::Serialize;
-use tokio::sync::Semaphore;
-use tracing::{debug, error};
+use tokio::{sync::Semaphore, task::JoinSet};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use polytune_server_core::{
@@ -59,6 +59,31 @@ impl PolytuneState {
                 state_handle
             })
             .clone()
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(crate) async fn cancel_all(&self) {
+        let handles = self.state_handles.read().await;
+        let mut js = JoinSet::new();
+        for (computation_id, handle) in handles.iter() {
+            warn!(%computation_id, "cancelling");
+            js.spawn(handle.cancel());
+        }
+
+        // There is no need to remove the handles from the state, as they will be automatically
+        // removed when the state machine finishes execution due to cancellation
+
+        while let Some(res) = js.join_next().await {
+            match res {
+                Err(err) => {
+                    error!(%err, "unable to join cancel request");
+                }
+                Ok(Err(err)) => {
+                    warn!(%err, "cancel request errored. computation is canceled but output destination likely not notified");
+                }
+                Ok(Ok(_)) => {}
+            }
+        }
     }
 }
 

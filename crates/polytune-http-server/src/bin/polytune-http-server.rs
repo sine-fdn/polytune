@@ -4,7 +4,7 @@ use std::{fs, net::SocketAddr, path::PathBuf};
 use anyhow::Context;
 use clap::Parser;
 use jsonwebtoken::EncodingKey;
-use polytune_http_server::{JwtConf, Server, ServerOpts};
+use polytune_http_server::{Cancel, JwtConf, Server, ServerOpts};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 /// A HTTP-based server for the Polytune secure multi-party computation engine.
@@ -73,14 +73,28 @@ async fn main() -> anyhow::Result<()> {
         }
         None => None,
     };
+    let cancel = Cancel::new();
     let server = Server::new_with_opts(
         cli.addr,
         ServerOpts {
             concurrency: cli.concurrency,
             tmp_dir: cli.tmp_dir,
             jwt_conf,
+            cancel: Some(cancel.clone()),
         },
     );
+    #[cfg(unix)]
+    {
+        tokio::select! {
+            res = server.start() => {
+                return res
+            }
+            _ = sigterm::handle_sigterm(cancel) => {
+                return Ok(())
+            }
+        }
+    }
+    #[cfg(not(unix))]
     server.start().await
 }
 
@@ -96,4 +110,23 @@ fn init_tracing() -> anyhow::Result<()> {
         .init();
 
     Ok(())
+}
+
+#[cfg(unix)]
+mod sigterm {
+    use polytune_http_server::Cancel;
+    use tokio::signal::unix::{SignalKind, signal};
+    use tracing::warn;
+
+    pub(super) async fn handle_sigterm(cancel: Cancel) {
+        let mut signal = match signal(SignalKind::terminate()) {
+            Ok(signal) => signal,
+            Err(err) => {
+                warn!(%err, "unable to install SIGTERM signal");
+                return;
+            }
+        };
+        signal.recv().await;
+        cancel.cancel().await;
+    }
 }
