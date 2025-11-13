@@ -2,7 +2,7 @@
 
 This crate implements a full-fledged MPC server which can receive requests containing a program specified as a Garble program, coordinate with multiple instances of this server, execute the provided program securely using Polytune, and return the result.
 
-The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call to the `polytune-server`.
+The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call to the `polytune-http-server`.
 
 ## How to Deploy the Engine
 
