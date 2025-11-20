@@ -1,5 +1,5 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
-use std::vec;
+use std::{fmt, vec};
 
 use futures::future::try_join_all;
 use rand::{Rng, SeedableRng, random, seq::SliceRandom};
@@ -54,6 +54,31 @@ pub enum Error {
     BeaverWrongMAC,
     /// Too short hash for statistical security parameter.
     InvalidHashLength,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::ChannelErr(e) => write!(f, "Channel error: {e:?}"),
+            Error::InvalidBitValue => write!(f, "Invalid bit value (expected 0 or 1)"),
+            Error::CommitmentCouldNotBeOpened => write!(f, "Commitment could not be opened"),
+            Error::EmptyVector => write!(f, "Empty vector"),
+            Error::ConversionErr => write!(f, "Conversion error"),
+            Error::EmptyBucket => write!(f, "Empty bucket"),
+            Error::EmptyMsg => write!(f, "Empty message"),
+            Error::InvalidLength => write!(f, "Invalid array length"),
+            Error::InconsistentBroadcast => write!(f, "Inconsistent broadcast"),
+            Error::KOSConsistencyCheckFailed => write!(f, "KOS OT consistency check failed"),
+            Error::ABitWrongMAC => write!(f, "Wrong MAC in aBit"),
+            Error::AShareWrongMAC => write!(f, "Wrong MAC in aShare"),
+            Error::LaANDXorNotZero => write!(f, "XOR of values in LaAND not zero"),
+            Error::AANDWrongMAC => write!(f, "Wrong MAC of d in leaky AND combination"),
+            Error::BeaverWrongMAC => write!(f, "Wrong MAC of e (Beaver triple)"),
+            Error::InvalidHashLength => {
+                write!(f, "Too short hash for statistical security parameter")
+            }
+        }
+    }
 }
 
 /// Converts a `channel::Error` into a custom `Error` type.
@@ -227,7 +252,7 @@ pub(crate) async fn broadcast_first_scatter_second<
 /// to the randomness generation, and all contributions are combined securely to generate
 /// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
 /// cryptographically secure random number generator.
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 pub(crate) async fn shared_rng(
     channel: &impl Channel,
     i: usize,
@@ -289,7 +314,7 @@ pub(crate) async fn shared_rng(
 ///
 /// This function generates a shared random number generator (RNG) between every two parties using
 /// two-party coin tossing for the two-party KOS OT protocol.
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 pub(crate) async fn shared_rng_pairwise(
     channel: &impl Channel,
     i: usize,
@@ -353,7 +378,7 @@ pub(crate) async fn shared_rng_pairwise(
 /// where RHO is the statistical security parameter.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_bits = l,
-))]
+), err)]
 async fn fabitn(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -553,7 +578,7 @@ fn chunked_update_with_rbits<T>(x: &[T], rbits: &[Block], mut update: impl FnMut
 /// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_shares = l,
-))]
+), err)]
 pub(crate) async fn fashare(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -671,7 +696,7 @@ pub(crate) async fn fashare(
 /// This protocol computes the half-authenticated AND of two bit strings.
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 async fn fhaand(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -773,7 +798,7 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// the XOR of the output values z.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_leaky_auth_ands = l,
-))]
+), err)]
 async fn flaand(
     (channel, delta): (&impl Channel, Delta),
     (xshares, yshares, rshares): (&[Share], &[Share], &[Share]),
@@ -900,7 +925,7 @@ type Bucket<'a> = Vec<(&'a Share, &'a Share, &'a Share)>;
 /// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_ands = l,
-))]
+), err)]
 async fn faand(
     (channel, delta): (&impl Channel, Delta),
     i: usize,
@@ -963,7 +988,7 @@ async fn faand(
 /// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_ands = l,
-))]
+), err)]
 pub(crate) async fn beaver_aand(
     (channel, delta): (&impl Channel, Delta),
     alpha_beta_shares: &[(Share, Share)],
@@ -1056,7 +1081,7 @@ pub(crate) async fn beaver_aand(
 }
 
 /// Check and return d-values for a vector of shares.
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 async fn check_dvalue(
     (channel, delta): (&impl Channel, Delta),
     i: usize,

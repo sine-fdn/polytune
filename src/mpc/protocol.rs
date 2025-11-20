@@ -32,6 +32,7 @@
 //!
 //! Security is enforced through message authentication codes (MACs), delta-based key generation,
 //! and comprehensive verification of all protocol steps.
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::iter;
 use std::path::Path;
@@ -403,7 +404,7 @@ pub(crate) async fn _mpc(
     Ok(outputs)
 }
 
-#[instrument(level=Level::DEBUG, skip(ctx))]
+#[instrument(level=Level::DEBUG, skip(ctx), err)]
 fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
     let &Context {
         p_own,
@@ -437,7 +438,7 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
 
 // TODO Consider optimizing type complexity of Result here
 #[allow(clippy::type_complexity)]
-#[instrument(level=Level::DEBUG, skip(ctx))]
+#[instrument(level=Level::DEBUG, skip(ctx), err)]
 async fn fn_independent_pre(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<
@@ -496,7 +497,7 @@ async fn fn_independent_pre(
     Ok((delta, random_shares, shared_two_by_two, multi_shared_rand))
 }
 
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 fn init_and_shares(
     ctx: &Context<impl Channel>,
     random_shares: &mut FileOrMemBuf<Share>,
@@ -544,7 +545,7 @@ fn init_and_shares(
     Ok(and_shares)
 }
 
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 async fn gen_auth_bits(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -614,7 +615,7 @@ async fn gen_auth_bits(
 
 // TODO Consider optimizing type complexity of Result here
 #[allow(clippy::type_complexity)]
-#[instrument(level=Level::DEBUG, skip_all)]
+#[instrument(level=Level::DEBUG, skip_all, err)]
 async fn garble(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -799,7 +800,7 @@ async fn garble(
 #[allow(clippy::type_complexity)]
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_inputs = ctx.num_inputs,
-))]
+), err)]
 async fn input_processing(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -918,7 +919,7 @@ async fn input_processing(
     num_garble_files= garble_files.len(),
     num_masked_inputs = masked_inputs.len(),
     num_input_labels = input_labels.len(),
-))]
+), err)]
 fn evaluate(
     ctx: &Context<impl Channel>,
     delta: Delta,
@@ -1030,7 +1031,7 @@ fn evaluate(
 
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_output_wires = ctx.circ.output_regs.len(),
-))]
+), err)]
 async fn output(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
     delta: Delta,
@@ -1049,6 +1050,14 @@ async fn output(
         p_out,
         ..
     } = ctx;
+
+    // We need to exchange shares and macs for each output register. However, in circ.output_regs
+    // the same register might be present multiple times if the output should contain the same bit
+    // multiple times. For efficiency and correctness, we operate on the set of unique registers
+    // in most cases. Only in the very end of this method, when actually collecting the result bits
+    // we use `circ.output_regs` including the potentially duplicate registers.
+    let unqiue_output_regs: BTreeSet<_> = circ.output_regs.iter().copied().collect();
+
     try_join_all(
         p_out
             .iter()
@@ -1058,7 +1067,7 @@ async fn output(
                 // TODO rework this to not allocate max_reg_count but only output size
                 //  see https://github.com/sine-fdn/polytune/issues/113
                 let mut outputs = vec![None; circ.max_reg_count];
-                for out in circ.output_regs.iter().copied() {
+                for &out in &unqiue_output_regs {
                     let Share(bit, Auth(macs_and_keys)) = shares[out].clone();
                     if let Some((mac, _)) = macs_and_keys.get(p_out).copied() {
                         outputs[out] = Some((bit, mac));
@@ -1090,21 +1099,21 @@ async fn output(
                     // TODO rework this to not allocate max_reg_count but only output size
                     //  see https://github.com/sine-fdn/polytune/issues/113
                     let mut wires_and_labels = vec![None; circ.max_reg_count];
-                    for out in circ.output_regs.iter().copied() {
+                    for &out in &unqiue_output_regs {
                         wires_and_labels[out] = Some((values[out], labels_eval[out][p_out]));
                     }
                     send_to(channel, p_out, "lambda", &wires_and_labels).await
                 }),
         )
         .await?;
-        for out in circ.output_regs.iter().copied() {
+        for &out in &unqiue_output_regs {
             input_regs[out] = Some(values[out]);
         }
     } else if p_out.contains(&p_own) {
         let wires_and_labels =
             recv_vec_from::<Option<(bool, Label)>>(channel, p_eval, "lambda", circ.max_reg_count)
                 .await?;
-        for out in circ.output_regs.iter().copied() {
+        for &out in &unqiue_output_regs {
             if !(wires_and_labels[out] == Some((true, labels[out] ^ delta))
                 || wires_and_labels[out] == Some((false, labels[out])))
             {
@@ -1116,7 +1125,7 @@ async fn output(
     let mut outputs = vec![];
     if p_out.contains(&p_own) {
         let mut output_wires = vec![None; circ.max_reg_count];
-        for out in circ.output_regs.iter().copied() {
+        for &out in &unqiue_output_regs {
             let Some(input) = input_regs.get(out.0 as usize).copied().flatten() else {
                 return Err(MpcError::MissingOutputShareForOutReg(out).into());
             };
@@ -1124,7 +1133,9 @@ async fn output(
             output_wires[out] = Some(input ^ bit);
         }
         for p in (0..p_max).filter(|p| *p != p_own) {
-            for &out in circ.output_regs.iter() {
+            // It is crucial for correctness that here we iterate over the unique registers,
+            // as otherwise we XOR output_wires[out] a wrong number of times for duplicate registers.
+            for &out in &unqiue_output_regs {
                 let output_wire = &output_wire_shares[p][out];
                 let Share(_, Auth(mac_s_key_r)) = &shares[out];
                 let Some((_, key_r)) = mac_s_key_r.get(p).copied() else {
@@ -1139,6 +1150,8 @@ async fn output(
                 }
             }
         }
+        // Here, we explicitly don't use unique_output_regs, as duplicate output registers
+        // must also result in duplicate output bits
         for out in circ.output_regs.iter() {
             if let Some(o) = output_wires.get(out.0 as usize).copied().flatten() {
                 outputs.push(o);
