@@ -1,0 +1,97 @@
+services:
+  polytune0:
+    # image: ghcr.io/sine-fdn/polytune/polytune-http-server:latest
+    build:
+      context: ../..
+      dockerfile: crates/polytune-http-server/Dockerfile
+    networks:
+      - atlas-network
+    volumes:
+      - ./test_key/test-private.pem:/etc/secrets/test-private.pem:ro
+    environment:
+      POLYTUNE_LOG: "trace"
+      POLYTUNE_JWT_KEY: "/etc/secrets/test-private.pem"
+      POLYTUNE_JWT_ISS: "polytune0"
+      POLYTUNE_JWT_EXP: "1"
+      POLYTUNE_JWT_CLAIMS: '{"roles": ["TEST_ROLE"]}'
+      POLYTUNE_CONCURRENCY: "2"
+
+  polytune1:
+    # image: ghcr.io/sine-fdn/polytune/polytune-http-server:latest
+    build:
+      context: ../..
+      dockerfile: crates/polytune-http-server/Dockerfile
+    networks:
+      - atlas-network
+    volumes:
+      - ./test_key/test-private.pem:/etc/secrets/test-private.pem:ro
+    environment:
+      POLYTUNE_LOG: "trace"
+      POLYTUNE_JWT_KEY: "/etc/secrets/test-private.pem"
+      POLYTUNE_JWT_ISS: "polytune0"
+      POLYTUNE_JWT_EXP: "1"
+      POLYTUNE_JWT_CLAIMS: '{"roles": ["TEST_ROLE"]}'
+      POLYTUNE_CONCURRENCY: "2"
+
+  esu:
+    image: ghcr.io/polyteia-connect/mpc-connector-frankfurt-esu:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./test_key/test-private.pem:/etc/secrets/test-private.pem:ro
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - VACCINATION_BASE_URL=http://mock:3000
+      - JWT_KEY_FILE=/etc/secrets/test-private.pem
+      - JWT_ISSUER=https://example.com
+      - MPC_BASE_URL=http://polytune1:8000
+      - MPC_LEADER_ID=0
+      - MPC_PARTY_ID=1
+      - MPC_PARTICIPANTS=http://polytune0:8000,http://polytune1:8000
+    networks:
+      - atlas-network
+    depends_on:
+      - polytune0
+      - polytune1
+
+  measles:
+    image: ghcr.io/polyteia-connect/mpc-connector-frankfurt-measles:latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./test_key/test-private.pem:/etc/secrets/test-private.pem:ro
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - JWT_KEY_FILE=/etc/secrets/test-private.pem
+      - JWT_ISSUER=https://example.com
+      - MPC_BASE_URL=http://polytune0:8000
+      - MPC_LEADER_ID=0
+      - MPC_PARTY_ID=0
+      - MPC_PARTICIPANTS=http://polytune0:8000,http://polytune1:8000
+      - CALLBACK_BASE_URL=http://measles:3000
+      - ESU_BASE_URL=http://esu:3000
+    depends_on:
+      - esu
+      - polytune0
+      - polytune1
+    networks:
+      - atlas-network
+
+  mock:
+    build:
+      context: ../../../../mpc-connector-frankfurt/
+      dockerfile: Dockerfile-mock
+    ports:
+      - "3002:3000"
+    networks:
+      - atlas-network
+
+networks:
+  atlas-network:
+    driver: bridge
+
+volumes:
+  atlas-data:
+    driver: local

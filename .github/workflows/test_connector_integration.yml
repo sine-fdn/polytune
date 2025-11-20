@@ -1,0 +1,25 @@
+name: test-connector-integration
+
+on:
+  - push
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_LOG: info
+
+jobs:
+    test-connector-integration:
+      runs-on: ubuntu-latest
+      defaults:
+          run:
+              working-directory: crates/polytune-http-server
+      steps:
+        - uses: actions/checkout@v5
+        - name: Start Polytune and Connector
+          run: docker compose up -d
+        - name: Wait for containers
+          run: sleep 1
+        - name: Run Tests
+          run: bash ./tests/polytune-connector-integration.sh
+        - run: docker compose logs
+          if: always()
