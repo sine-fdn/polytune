@@ -14,7 +14,7 @@ aide = { version = "0.15.1", features = [
     "macros",
     "swagger",
 ] }
-anyhow = "1.0.99"
+anyhow = "1.0.100"
 axum = { version = "0.8.6", features = ["macros"] }
 clap = { version = "4.5.47", features = ["derive", "env"] }
 garble_lang = { version = "0.7.0", features = ["json_schema"] }
