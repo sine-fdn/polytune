@@ -5,7 +5,7 @@ use anyhow::Context;
 use axum::{Extension, routing::IntoMakeService};
 use jsonwebtoken::EncodingKey;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use tokio::sync::Semaphore;
+use tokio::sync::{Notify, Semaphore};
 use tracing::info;
 
 use crate::{
@@ -29,6 +29,12 @@ pub struct ServerOpts {
     pub tmp_dir: Option<PathBuf>,
     /// JWT configuration for requests made to other Polytune instances..
     pub jwt_conf: Option<JwtConf>,
+    /// An optional [`Cancel`] that can be used to gracefully shut down the server.
+    ///
+    /// If `cancel()` is called, all ongoing and scheduled policy evaluations
+    /// are canceled and, if possible, an error is sent to the URL specified in the Policy `output`
+    /// field.
+    pub cancel: Option<Cancel>,
 }
 
 impl Default for ServerOpts {
@@ -37,6 +43,7 @@ impl Default for ServerOpts {
             concurrency: 1,
             tmp_dir: None,
             jwt_conf: None,
+            cancel: None,
         }
     }
 }
@@ -52,6 +59,15 @@ pub struct JwtConf {
     pub iss: String,
     /// The JWT `exp` expiry in seconds from creation claim to use for signed JWTs.
     pub exp: u64,
+}
+
+/// A [`Cancel`] is used to cancel all running and scheduled [`Policies`] on a [`Server`].
+///
+/// [`Policies`]: polytune_server_core::Policy
+#[derive(Clone, Default)]
+pub struct Cancel {
+    cancel_requested: Arc<Notify>,
+    cancelled: Arc<Notify>,
 }
 
 impl Server {
@@ -123,10 +139,35 @@ fn service(opts: ServerOpts) -> anyhow::Result<IntoMakeService<axum::Router>> {
         tmp_dir: opts.tmp_dir,
     });
 
+    if let Some(cancel) = opts.cancel {
+        let state = state.clone();
+        tokio::spawn(async move {
+            cancel.cancel_requested.notified().await;
+            state.cancel_all().await;
+            cancel.cancelled.notify_one();
+        });
+    }
+
     let router = router::router(state);
 
     Ok(router
         .finish_api(&mut api)
         .layer(Extension(api))
         .into_make_service())
+}
+
+impl Cancel {
+    /// Create a [`Cancel`] to cancel ongoing and scheduled computations.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cancel ongoing and scheduled computations.
+    ///
+    /// This will return once all computations are cancelled, which potentially includes
+    /// notifying the output destination specified in the policy.
+    pub async fn cancel(&self) {
+        self.cancel_requested.notify_one();
+        self.cancelled.notified().await
+    }
 }

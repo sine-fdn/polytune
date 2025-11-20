@@ -13,7 +13,7 @@ use garble_lang::{
     CircuitKind, CompileOptions, GarbleConsts, TypedProgram, compile_with_options, literal::Literal,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tracing::{Instrument, Level, Span, debug, debug_span, error, field, info_span, trace, warn};
 use uuid::Uuid;
 
@@ -128,6 +128,7 @@ pub(crate) enum PolicyCmd {
     MpcMsg(MpcMsg, Ret<MpcMsgError>),
     InternalConstsSent,
     Stop,
+    Cancel(Ret<CancelError>),
 }
 
 impl Debug for PolicyCmd {
@@ -138,8 +139,9 @@ impl Debug for PolicyCmd {
             Self::Run(arg0, ..) => f.debug_tuple("Run").field(arg0).finish(),
             Self::Consts(arg0, ..) => f.debug_tuple("Consts").field(arg0).finish(),
             Self::MpcMsg(arg0, ..) => f.debug_tuple("MpcMsg").field(arg0).finish(),
-            Self::InternalConstsSent => write!(f, "InternalConstsSent"),
-            Self::Stop => write!(f, "Stop"),
+            Self::InternalConstsSent => f.write_str("InternalConstsSent"),
+            Self::Stop => f.write_str("Stop"),
+            Self::Cancel(_) => f.write_str("Cancel"),
         }
     }
 }
@@ -177,6 +179,9 @@ enum PolicyStateKind<C> {
         policy: Policy,
         channel: Channel<C>,
     },
+    Executing {
+        cancel: Arc<Notify>,
+    },
 }
 
 impl<B, C> PolicyState<B, C>
@@ -205,6 +210,10 @@ where
                 self.msg(mpc_msg, ret).await?;
             }
             PolicyCmd::Stop => {
+                return ControlFlow::Break(());
+            }
+            PolicyCmd::Cancel(ret) => {
+                self.cancel(ret).await;
                 return ControlFlow::Break(());
             }
         }
@@ -262,6 +271,8 @@ pub enum OutputError {
     MpcError(polytune::Error),
     #[error("internal error: unable to convert polytune output to Garble Literal. {0:?}")]
     InvalidOutput(garble_lang::eval::EvalError),
+    #[error("policy evaluation has been cancelled")]
+    Cancelled,
 }
 
 impl<B, C> PolicyState<B, C>
@@ -741,45 +752,64 @@ where
                 let span = debug_span!("polytune_mpc").or_current();
                 let tmp_dir = self.tmp_dir_path.clone();
                 let cmd_tx = self.cmd_tx.clone();
+                let cancel = Arc::new(Notify::new());
+                self.state_kind = PolicyStateKind::Executing {
+                    cancel: Arc::clone(&cancel),
+                };
                 let fut = async move {
-                    debug!("starting mpc computation");
-                    // Move permit into the async task so that its desctructor is run when the task is finished
-                    let _permit = permit;
-                    let output = polytune::mpc(
-                        &channel,
-                        compiled.circuit.unwrap_register_ref(),
-                        &input,
-                        0,
-                        policy.party,
-                        &p_out,
-                        tmp_dir.as_deref(),
-                    )
-                    .await;
-                    if let Some(url) = policy.output {
-                        let client = channel.client;
-                        match output {
-                            Ok(output) if !output.is_empty() => {
-                                let _ = client
-                                    .output(
-                                        url,
-                                        compiled
-                                            .parse_output(&output)
-                                            .map_err(OutputError::InvalidOutput),
-                                    )
-                                    .await;
+                    let mpc_fut = async {
+                        debug!("starting mpc computation");
+                        // Move permit into the async task so that its desctructor is run when the task is finished
+                        let _permit = permit;
+                        let output = polytune::mpc(
+                            &channel,
+                            compiled.circuit.unwrap_register_ref(),
+                            &input,
+                            0,
+                            policy.party,
+                            &p_out,
+                            tmp_dir.as_deref(),
+                        )
+                        .await;
+                        if let Some(url) = &policy.output {
+                            let client = &channel.client;
+                            match output {
+                                Ok(output) if !output.is_empty() => {
+                                    let _ = client
+                                        .output(
+                                            url.clone(),
+                                            compiled
+                                                .parse_output(&output)
+                                                .map_err(OutputError::InvalidOutput),
+                                        )
+                                        .await;
+                                }
+                                Ok(_) => {
+                                    warn!(
+                                        "policy contained output url but party received no output"
+                                    );
+                                }
+                                Err(err) => {
+                                    let _ = client
+                                        .output(url.clone(), Err(OutputError::MpcError(err)))
+                                        .await;
+                                }
                             }
-                            Ok(_) => {
-                                warn!("policy contained output url but party received no output");
-                            }
-                            Err(err) => {
-                                let _ = client.output(url, Err(OutputError::MpcError(err))).await;
-                            }
+                        } else if let Err(err) = output {
+                            error!(?err);
                         }
-                    } else if let Err(err) = output {
-                        error!(?err);
-                    }
-                    // This breaks from the `start` loop and drops the state machine
-                    let _ = cmd_tx.send(PolicyCmd::Stop).await;
+                        // This breaks from the `start` loop and drops the state machine
+                        let _ = cmd_tx.send(PolicyCmd::Stop).await;
+                    };
+                    tokio::select!(
+                        _ = mpc_fut => {},
+                        _ = cancel.notified() => {
+                            if let Err(err) = send_cancel(channel.client, policy).await {
+                                error!(%err, "unable to send cancelled error to output destination")
+                            }
+                            cancel.notify_one();
+                        }
+                    )
                 };
 
                 tokio::spawn(fut.instrument(span));
@@ -959,16 +989,88 @@ where
     }
 }
 
+/// Error during transmission of MPC message.
+#[derive(Debug, thiserror::Error)]
+#[allow(missing_docs)]
+#[non_exhaustive]
+pub enum CancelError {
+    #[error("PolicyClient is not available, unable to notify output destination")]
+    ClientNotAvailable,
+    #[error("unable to notify output destination of cancellation")]
+    Client(BoxError),
+}
+
+impl<B, C> PolicyState<B, C>
+where
+    B: PolicyClientBuilder<Client = C>,
+    C: PolicyClient,
+{
+    #[tracing::instrument(level = Level::WARN, skip_all, fields(?self.state_kind))]
+    async fn cancel(self, ret: Ret<CancelError>) {
+        let (client, policy) = match self.state_kind {
+            PolicyStateKind::Init | PolicyStateKind::ValidateRequested { .. } => {
+                let _ = ret.send(Ok(()));
+                return;
+            }
+            PolicyStateKind::SendingConsts {
+                policy,
+                client_recv,
+                ..
+            } => {
+                let Ok(client) = client_recv.await else {
+                    ret_err(ret, CancelError::ClientNotAvailable);
+                    return;
+                };
+                (client, policy)
+            }
+            PolicyStateKind::AwaitingValidation { policy, client, .. }
+            | PolicyStateKind::Validated { policy, client, .. }
+            | PolicyStateKind::SendingConstsCompleted { policy, client, .. }
+            | PolicyStateKind::Running {
+                policy,
+                channel: Channel { client, .. },
+                ..
+            } => (client, policy),
+            PolicyStateKind::Executing { cancel } => {
+                // send_cancel is called in spawned mpc tokio task
+                cancel.notify_one();
+                // when this is notified, the error has been sent to output
+                // destination if available
+                cancel.notified().await;
+                let _ = ret.send(Ok(()));
+                return;
+            }
+        };
+        match send_cancel(client, policy).await {
+            Ok(_) => {
+                let _ = ret.send(Ok(()));
+            }
+            Err(err) => ret_err(ret, err),
+        };
+    }
+}
+
+async fn send_cancel<C: PolicyClient>(client: C, policy: Policy) -> Result<(), CancelError> {
+    if let Some(url) = policy.output {
+        client
+            .output(url, Err(OutputError::Cancelled))
+            .await
+            .map_err(|err| CancelError::Client(Box::new(err)))?;
+    }
+    Ok(())
+}
+
 impl<C> Debug for PolicyStateKind<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Init => write!(f, "Init"),
-            Self::AwaitingValidation { .. } => write!(f, "AwaitingValidation"),
-            Self::ValidateRequested { .. } => write!(f, "ValidateRequested"),
-            Self::Validated { .. } => write!(f, "Validated"),
-            Self::SendingConsts { .. } => write!(f, "SendingConsts"),
-            Self::SendingConstsCompleted { .. } => write!(f, "SendingConstsCompleted"),
-            Self::Running { .. } => write!(f, "Running"),
+            Self::Init => f.write_str("Init"),
+            Self::AwaitingValidation { .. } => f.write_str("AwaitingValidation"),
+            Self::ValidateRequested { .. } => f.write_str("ValidateRequested"),
+            Self::Validated { .. } => f.write_str("Validated"),
+            Self::SendingConsts { .. } => f.write_str("SendingConsts"),
+            Self::SendingConstsCompleted { .. } => f.write_str("SendingConstsCompleted"),
+            Self::Running { .. } => f.write_str("Running"),
+            Self::Executing { .. } => f.write_str("Executing"),
         }
     }
 }

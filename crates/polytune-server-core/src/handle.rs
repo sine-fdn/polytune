@@ -4,8 +4,8 @@ use tracing::error;
 use crate::{
     policy::Policy,
     state::{
-        ConstsError, ConstsRequest, MpcMsg, MpcMsgError, PolicyCmd, RunError, RunRequest,
-        ScheduleError, ValidateError, ValidateRequest,
+        CancelError, ConstsError, ConstsRequest, MpcMsg, MpcMsgError, PolicyCmd, RunError,
+        RunRequest, ScheduleError, ValidateError, ValidateRequest,
     },
 };
 
@@ -83,6 +83,19 @@ impl PolicyStateHandle {
         let (ret_tx, ret_rx) = oneshot::channel();
         self.0.send(PolicyCmd::MpcMsg(req, ret_tx)).await?;
         ret_rx.await?.map_err(HandleError::PolicyStateError)
+    }
+
+    /// Cancel this [`Policy`] evaluation.
+    ///
+    /// If [`Policy.output`](`Policy`) is set, cancelling will try to notify the output
+    /// destination.
+    pub fn cancel(&self) -> impl Future<Output = Result<(), HandleError<CancelError>>> + use<> {
+        let (ret_tx, ret_rx) = oneshot::channel();
+        let cmd_tx = self.0.clone();
+        async move {
+            cmd_tx.send(PolicyCmd::Cancel(ret_tx)).await?;
+            ret_rx.await?.map_err(HandleError::PolicyStateError)
+        }
     }
 }
 
