@@ -36,6 +36,10 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 url = { version = "2.5.7", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["serde"] }
 
+[target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.dependencies]
+tikv-jemallocator = "0.6.1"
+tikv-jemalloc-ctl = { version = "0.6.1", features = ["stats"] }
+
 [dev-dependencies]
 futures = "0.3.31"
 uuid = { version = "1.18.1", features = ["v4"] }

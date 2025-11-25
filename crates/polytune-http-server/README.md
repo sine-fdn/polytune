@@ -95,10 +95,14 @@ Options:
           [env: POLYTUNE_JWT_CLAIMS=]
 ```
 
-## OpenAPI spec
+## OpenAPI Spec
 
 The server provides an OpenAPI spec at `/api.json` and a Swagger UI for the spec at `/swagger`.
 
 ## Logging
 
 The logging output of the server can be configured using the `POLYTUNE_LOG` environment variable using an [`EnvFilter` directive](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
+
+## Concurrency and Memory Consumption
+
+Polytune HTTP server exposes a `concurrency` parameter, that controls how many concurrent policy evaluations this instance can be the leader of. This parameter needs to be tuned based on available RAM the server is running on and the Garble programs that are executed. To help estimate the memory needs of the service and the concurrency value, Polytune will print its current memory consumption regularly as a debug message. To view this message, set the `POLYTUNE_LOG` env variable to `debug` (this displays all debug variables) or to `polytune_http_server::memory_tracking=debug` to just receive memory tracking messages. This memory tracking is only available on the `x86_64-unknown-linux-gnu` target, i.e. `x86_64` architecture on Linux with glibc. If you're using the provided docker image, this is enabled.

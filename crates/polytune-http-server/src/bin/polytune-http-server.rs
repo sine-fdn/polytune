@@ -7,6 +7,15 @@ use jsonwebtoken::EncodingKey;
 use polytune_http_server::{Cancel, JwtConf, Server, ServerOpts};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
+// x86_64-unknown-linux-gnu is the only tier 1 platform for tikv_jemalloc
+// so we only use it on that.
+// See https://github.com/tikv/jemallocator?tab=readme-ov-file#platform-support
+// On that platform, we log the memory consumption at the debug level every
+// second.
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+#[global_allocator]
+static ALLOACTOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 /// A HTTP-based server for the Polytune secure multi-party computation engine.
 ///
 /// Logging can be controlled with an EnvFilter via the `POLYTUNE_LOG` environment
@@ -59,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
     init_tracing().context("tracing initialization")?;
 
     let cli = Cli::parse();
+    #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+    memory_tracking::log_memory_consumption();
+
     let jwt_conf = match cli.jwt_key {
         Some(path) => {
             let key = fs::read(path).context("unable to read JWT key file")?;
@@ -132,5 +144,97 @@ mod sigterm {
         };
         signal.recv().await;
         cancel.cancel().await;
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+mod memory_tracking {
+    use std::{ops::ControlFlow, time::Duration};
+
+    use tikv_jemalloc_ctl::{
+        epoch,
+        stats::{self, active_mib, allocated_mib, resident_mib},
+    };
+    use tracing::{debug, warn};
+
+    // Small extension trait for tikv_jemalloc_ctl::Result to reduce boilerplate
+    // from logging allocation stats errors
+    trait JemallocCtrlErrorCtx<T> {
+        fn log_warning(self, context: &str) -> ControlFlow<(), T>;
+    }
+
+    impl<T> JemallocCtrlErrorCtx<T> for tikv_jemalloc_ctl::Result<T> {
+        fn log_warning(self, context: &str) -> ControlFlow<(), T> {
+            match self {
+                Ok(val) => ControlFlow::Continue(val),
+                Err(err) => {
+                    warn!(%err, context);
+                    ControlFlow::Break(())
+                }
+            }
+        }
+    }
+
+    pub(super) fn log_memory_consumption() {
+        tokio::spawn(async {
+            let ControlFlow::Continue(mibs) = log_memory_init() else {
+                return;
+            };
+            loop {
+                // We ignore intermittent errors in memory reporting
+                let _ = log_memory_loop_body(mibs);
+                tokio::time::sleep(Duration::from_secs(1)).await
+            }
+        });
+    }
+
+    fn log_memory_init() -> ControlFlow<(), (allocated_mib, active_mib, resident_mib)> {
+        let allocated = stats::allocated::mib().log_warning("unable to get allocated MiB")?;
+        let active = stats::active::mib().log_warning("unable to get active MiB")?;
+        let resident = stats::resident::mib().log_warning("unable to get resident MiB")?;
+        ControlFlow::Continue((allocated, active, resident))
+    }
+
+    fn log_memory_loop_body(
+        (allocated, active, resident): (allocated_mib, active_mib, resident_mib),
+    ) -> ControlFlow<()> {
+        epoch::advance().log_warning("unable to advance jemalloc epoch")?;
+
+        // Number of actually allocated bytes.
+        let allocated = allocated
+            .read()
+            .log_warning("unable to get allocated value")?;
+        // Number of bytes in active pages.
+        let active = active.read().log_warning("unable to get active value")?;
+        // Number of bytes of data pages mapped by the allocator.
+        let resident = resident
+            .read()
+            .log_warning("unable to get resident value")?;
+        // Calculates memory overhead percentage. This can give an indication of memory fragmentation if
+        // the percentage is high.
+        let overhead = resident as f64 / allocated as f64 - 1.0;
+        debug!(
+            allocated = scale_memory(allocated),
+            active = scale_memory(active),
+            resident = scale_memory(resident),
+            overhead,
+            "current memory consumption"
+        );
+        ControlFlow::Continue(())
+    }
+
+    fn scale_memory(bytes: usize) -> String {
+        let bytes = bytes as f64;
+        let (denom, unit) = if bytes < 1_000.0 {
+            (1.0, "B")
+        } else if bytes < 1_000.0_f64.powi(2) {
+            (1_000.0, "KB")
+        } else if bytes < 1_000.0_f64.powi(3) {
+            (1_000.0_f64.powi(2), "MB")
+        } else {
+            (1_000.0_f64.powi(3), "GB")
+        };
+        let scaled = bytes / denom;
+        format!("{scaled} {unit}")
     }
 }
