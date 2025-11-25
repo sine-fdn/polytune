@@ -3,6 +3,7 @@ name: Build and push polytune-http-server image
 on:
   push:
     branches: [ "main" ]
+    tags: ["http-server-v[0-9]*"]
 
 jobs:
   build-and-push-http-server:
@@ -13,13 +14,41 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
+      - run: cargo test --profile debug-release --package polytune --package polytune-server-core --package polytune-http-server
+      - name: Install taplo for extracting http-server version
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
+        if: startsWith(github.ref, 'refs/tags/http-server-v')
+        with:
+          tool: taplo@0.10.0
+      - name: Check that crate version matches tag version
+        if: startsWith(github.ref, 'refs/tags/http-server-v')
+        run: |
+          http_server_version=$(taplo get -f crates/polytune-http-server/Cargo.toml 'package.version')
+          tag_version=$(echo "${{ github.ref_name }}" | sed 's/^http-server-v//')
+          
+          if [[ "$http_server_version" != "$tag_version" ]]; then
+            echo "::error:: polytune-http-server crate version ${http_server_version} does not match tag version ${tag_version}"
+            exit 1
+          fi
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893
+        with:
+          images: ghcr.io/${{ github.repository }}/polytune-http-server
+          tags: |
+            # 1. Branch: main -> 'dev'
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+
+            # 2. Tag: http-server-v1.2.3 -> '1.2.3', '1.2', '1'
+            type=semver,pattern=^http-server-v(.*)$,value={{version}}
+            type=semver,pattern=^http-server-v(.*)$,value={{major}}.{{minor}}
+            type=semver,pattern=^http-server-v(.*)$,value={{major}}
 
       - name: Build and push http-server image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
@@ -27,4 +56,5 @@ jobs:
           context: .
           file: ./crates/polytune-http-server/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}/polytune-http-server:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
