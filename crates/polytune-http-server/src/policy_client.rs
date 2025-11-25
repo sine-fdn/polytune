@@ -9,10 +9,10 @@ use polytune_server_core::{
     ConstsRequest, MpcMsg, OutputError, Policy, PolicyClient, PolicyClientBuilder, RunRequest,
     ValidateRequest,
 };
-use reqwest_middleware::ClientWithMiddleware;
+use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use schemars::JsonSchema;
 use serde::Serialize;
-use tracing::{Level, debug, error};
+use tracing::{Level, debug, error, trace};
 use url::Url;
 use uuid::Uuid;
 
@@ -76,7 +76,6 @@ impl JwtData {
             .expect("Invalid SystemTime")
             > self.expiry
         {
-            debug!("signing new JWT");
             let now = SystemTime::now();
             let expiry = now + Duration::from_secs(self.conf.exp);
             let iat = now
@@ -95,6 +94,7 @@ impl JwtData {
             };
             let header = Header::new(Algorithm::ES256);
             let jwt = encode(&header, &claims, &self.conf.key)?;
+            debug!(?header, ?claims, "signed new JWT");
             self.expiry = expiry;
             self.jwt = jwt;
         }
@@ -148,15 +148,31 @@ impl HttpClient {
         let url = self.participants[to]
             .join(route)
             .expect("unable to parse URL");
-        let mut req = self.client.post(url.clone()).json(&req);
+        debug!(%url, "making request to");
+        let req = self.client.post(url.clone()).json(&req);
+        self.send_request(req, route, url, error_constructor).await
+    }
+
+    async fn send_request<F>(
+        &self,
+        mut req: RequestBuilder,
+        route: &str,
+        url: Url,
+        error_constructor: F,
+    ) -> Result<(), HttpClientError>
+    where
+        F: Fn(String) -> HttpClientError,
+    {
         if let Some(jwt) = self.jwt()? {
+            trace!("setting authorization header to JWT");
             req = req.bearer_auth(jwt);
         }
         let resp = req
             .send()
             .await
             .map_err(|err| HttpClientError::Request { url, source: err })?;
-        if resp.status().is_success() {
+        let status_code = resp.status();
+        if status_code.is_success() {
             Ok(())
         } else {
             let err = error_constructor(
@@ -164,7 +180,7 @@ impl HttpClient {
                     .await
                     .unwrap_or_else(|err| format_error_chain(&err)),
             );
-            error!(%err, route);
+            error!(%err, %status_code, route);
             Err(err)
         }
     }
@@ -197,23 +213,9 @@ impl PolicyClient for HttpClient {
         let url = self.participants[to]
             .join(route)
             .expect("unable to parse URL");
-        let mut req = self.client.post(url.clone()).body(msg.data);
-        if let Some(jwt) = self.jwt()? {
-            req = req.bearer_auth(jwt);
-        }
-        let resp = req
-            .send()
+        let req = self.client.post(url.clone()).body(msg.data);
+        self.send_request(req, route, url, HttpClientError::MpcMsg)
             .await
-            .map_err(|err| HttpClientError::Request { url, source: err })?;
-        if resp.status().is_success() {
-            Ok(())
-        } else {
-            Err(HttpClientError::MpcMsg(
-                resp.text()
-                    .await
-                    .unwrap_or_else(|err| format_error_chain(&err)),
-            ))
-        }
     }
 
     #[tracing::instrument(skip(self, result), fields(%to), err)]
@@ -226,23 +228,10 @@ impl PolicyClient for HttpClient {
             error!(%err, "Sending error to output party");
         }
         let result = MpcResult::from(result);
-        let mut req = self.client.post(to.clone()).json(&result);
-        if let Some(jwt) = self.jwt()? {
-            req = req.bearer_auth(jwt);
-        }
-        let resp = req.send().await.map_err(|err| HttpClientError::Request {
-            url: to,
-            source: err,
-        })?;
-        if resp.status().is_success() {
-            Ok(())
-        } else {
-            Err(HttpClientError::Output(
-                resp.text()
-                    .await
-                    .unwrap_or_else(|err| format_error_chain(&err)),
-            ))
-        }
+        debug!(url = %to, "making request to");
+        let req = self.client.post(to.clone()).json(&result);
+        self.send_request(req, "", to, HttpClientError::Output)
+            .await
     }
 }
 
