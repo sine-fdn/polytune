@@ -8,7 +8,7 @@ FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /usr/src/polytune/target/release/polytune-http-server /app/polytune-http-server
 RUN mkdir /app/tmp
-RUN apt update && apt install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
 RUN update-ca-certificates
 
 ENV SERVER_ADDR="0.0.0.0:8000"
