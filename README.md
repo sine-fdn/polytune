@@ -63,6 +63,13 @@ pub fn main(
 
 You can see examples of using Garble and Polytune together, e.g., `benches/.join.garble.rs` or in `examples/sql-integration/.example.garble.rs`.
 
+## Polytune HTTP Server
+
+The [Polytune HTTP server] uses the Polytune library (the top-level crate in this workspace) and the Garble compiler to implement a more complete MPC service that communicates using HTTP requests. It contains a concrete implementation of Polytune's [`Channel`] trait and handles the coordination of multiple instances, including exchanging of constants, compilation of the Garble program, execution of the protocol, and sending of the output to an output destination.
+
+[Polytune HTTP server]: ./crates/polytune-http-server/
+[`Channel`]: https://docs.rs/polytune/latest/polytune/channel/trait.Channel.html
+
 ## Benchmarks
 
 Polytune contains multple benchmarks in the [`benches`](./benches/) directory using [criterion](https://bheisler.github.io/criterion.rs/book/criterion_rs.html). These benchmarks require the Polytune-internal cargo feature `__bench`, which is not intended for downstream use.
