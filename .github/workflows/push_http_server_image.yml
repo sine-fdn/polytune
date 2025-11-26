@@ -14,7 +14,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
       - run: cargo test --profile debug-release --package polytune --package polytune-server-core --package polytune-http-server
+      - name: Extract version
+        if: startsWith(github.ref, 'refs/tags/http-server-v')
+        id: get-version
+        run: |
+          # Strip the http-server-v prefix
+          RAW_TAG=${{ github.ref_name }}
+          echo "version=${RAW_TAG#http-server-v}" >> $GITHUB_OUTPUT
       - name: Install taplo for extracting http-server version
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         if: startsWith(github.ref, 'refs/tags/http-server-v')
@@ -24,10 +34,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/http-server-v')
         run: |
           http_server_version=$(taplo get -f crates/polytune-http-server/Cargo.toml 'package.version')
-          tag_version=$(echo "${{ github.ref_name }}" | sed 's/^http-server-v//')
-          
-          if [[ "$http_server_version" != "$tag_version" ]]; then
-            echo "::error:: polytune-http-server crate version ${http_server_version} does not match tag version ${tag_version}"
+          if [[ "$http_server_version" != "${{ steps.get-version.outputs.version }}" ]]; then
+            echo "::error:: polytune-http-server crate version ${http_server_version} does not match tag version ${{ steps.get-version.outputs.version }}"
             exit 1
           fi
       - name: Log in to GitHub Container Registry
@@ -42,13 +50,17 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}/polytune-http-server
           tags: |
-            # 1. Branch: main -> 'dev'
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            # Tags main branch pushes as 'dev'
+            type=raw,value=dev,enable={{ is_default_branch }}
 
-            # 2. Tag: http-server-v1.2.3 -> '1.2.3', '1.2', '1'
-            type=semver,pattern=^http-server-v(.*)$,value={{version}}
-            type=semver,pattern=^http-server-v(.*)$,value={{major}}.{{minor}}
-            type=semver,pattern=^http-server-v(.*)$,value={{major}}
+            # On git tag pushes, push e.g. 1.2.4, 1.2, and 1 versions (if major 0 is zero, skip major only push) 
+            # metadata-action also tags a :latest image automatically when type=semver is enabled
+            # TODO, there might be an issue with this action when releasing e.g. a patch release 1.2.1 when 2.0.0 is already
+            # released, as then 1.2.1 would be tagged as :latest which is wrong.
+            # See https://github.com/docker/metadata-action/issues/407
+            type=semver,pattern={{major}},value=${{ steps.get-version.outputs.version }},enable=${{ steps.get-version.outputs.version != '' && !startsWith(steps.get-version.outputs.version, '0.') }}
+            type=semver,pattern={{major.minor}},value=${{ steps.get-version.outputs.version }},enable=${{ steps.get-version.outputs.version != '' }}
+            type=semver,pattern={{version}},value=${{ steps.get-version.outputs.version }},enable=${{ steps.get-version.outputs.version != '' }}
 
       - name: Build and push http-server image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
