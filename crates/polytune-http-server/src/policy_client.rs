@@ -121,6 +121,8 @@ pub(crate) enum HttpClientError {
     Output(String),
     #[error("JWT signing failed")]
     Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("the {0} URL is not a base URL")]
+    NoBaseUrl(Url),
 }
 
 impl HttpClient {
@@ -145,9 +147,7 @@ impl HttpClient {
         R: Serialize,
         F: Fn(String) -> HttpClientError,
     {
-        let url = self.participants[to]
-            .join(route)
-            .expect("unable to parse URL");
+        let url = extend_url(&self.participants[to], [route])?;
         debug!(%url, "making request to");
         let req = self.client.post(url.clone()).json(&req);
         self.send_request(req, route, url, error_constructor).await
@@ -209,10 +209,13 @@ impl PolicyClient for HttpClient {
 
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn msg(&self, to: usize, msg: MpcMsg) -> Result<(), Self::Error> {
+        let path_segments = [
+            "msg",
+            &format!("{}", self.computation_id),
+            &format!("{}", self.party),
+        ];
         let route = &format!("msg/{}/{}", self.computation_id, self.party);
-        let url = self.participants[to]
-            .join(route)
-            .expect("unable to parse URL");
+        let url = extend_url(&self.participants[to], path_segments)?;
         let req = self.client.post(url.clone()).body(msg.data);
         self.send_request(req, route, url, HttpClientError::MpcMsg)
             .await
@@ -257,11 +260,56 @@ impl From<Result<Literal, OutputError>> for MpcResult {
     }
 }
 
+/// Join URL with the specified path. Contrary to the [`Url::join`] method,
+/// this method does not replace the last part of the base URL path if there
+/// is no trailing slash.
+///
+/// ```ignore
+/// let base = Url::parse("http://localhost:8000/some-path").unwrap();
+/// let joined = extend_url(&base, ["validate"]).unwrap();
+///
+/// assert_eq!("http://localhost:8000/some-path/validate", joined.as_str());
+///
+/// // With trailing slash
+/// let base = Url::parse("http://localhost:8000/some-path/").unwrap();
+/// let joined = extend_url(&base, ["validate"]).unwrap();
+///
+/// assert_eq!("http://localhost:8000/some-path/validate", joined.as_str());
+///
+/// // Join multiple segments
+/// let base = Url::parse("http://localhost:8000/some-path/").unwrap();
+/// let joined = extend_url(&base, ["msg", "to-id", "party"]).unwrap();
+///
+/// assert_eq!(
+///     "http://localhost:8000/some-path/msg/to-id/party",
+///     joined.as_str()
+/// );
+/// ```
+fn extend_url<'a>(
+    url: &Url,
+    segments: impl IntoIterator<Item = &'a str>,
+) -> Result<Url, HttpClientError> {
+    let mut url = url.clone();
+    // limit scope of segments as otherwise drop conflicts with returning url
+    {
+        let Ok(mut path_segments) = url.path_segments_mut() else {
+            return Err(HttpClientError::NoBaseUrl(url));
+        };
+        path_segments
+            // Remove trailing slash if segment is empty, i.e. some-path/ -> some-path
+            .pop_if_empty()
+            // Add new segments, i.e. some-path -> some-path/validate
+            .extend(segments);
+    }
+    Ok(url)
+}
+
 #[cfg(test)]
 mod tests {
     use schemars::schema_for;
+    use url::Url;
 
-    use crate::MpcResult;
+    use crate::{MpcResult, policy_client::extend_url};
 
     #[test]
     #[ignore = "Run manually with --include-ignored --nocapture to get MpcResult schema"]
@@ -270,5 +318,28 @@ mod tests {
         let serialized =
             serde_json::to_string_pretty(&schema).expect("schema serialization failed");
         println!("{serialized}");
+    }
+
+    #[test]
+    fn test_join_url() {
+        let base = Url::parse("http://localhost:8000/some-path").expect("Url parse failed");
+        let joined = extend_url(&base, ["validate"]).expect("Url extend failed");
+
+        assert_eq!("http://localhost:8000/some-path/validate", joined.as_str());
+
+        // With trailing slash
+        let base = Url::parse("http://localhost:8000/some-path/").expect("Url parse failed");
+        let joined = extend_url(&base, ["validate"]).expect("Url extend failed");
+
+        assert_eq!("http://localhost:8000/some-path/validate", joined.as_str());
+
+        // Join multiple segments
+        let base = Url::parse("http://localhost:8000/some-path/").expect("Url parse failed");
+        let joined = extend_url(&base, ["msg", "to-id", "party"]).expect("Url extend failed");
+
+        assert_eq!(
+            "http://localhost:8000/some-path/msg/to-id/party",
+            joined.as_str()
+        );
     }
 }
