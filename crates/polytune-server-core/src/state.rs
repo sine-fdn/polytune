@@ -952,7 +952,7 @@ where
 }
 
 /// MPC message data from one party intended for a [`polytune::channel::Channel`].
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MpcMsg {
     /// The party this message originates from.
     pub from: usize,
@@ -1072,15 +1072,6 @@ impl<C> Debug for PolicyStateKind<C> {
             Self::Running { .. } => f.write_str("Running"),
             Self::Executing { .. } => f.write_str("Executing"),
         }
-    }
-}
-
-impl Debug for MpcMsg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MpcMsg")
-            .field("from", &self.from)
-            .field("data_len", &self.data.len())
-            .finish()
     }
 }
 

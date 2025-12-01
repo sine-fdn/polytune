@@ -10,7 +10,7 @@ use axum::{
 };
 use serde::Serialize;
 use tokio::{sync::Semaphore, task::JoinSet};
-use tracing::{Instrument, debug, error, warn, warn_span};
+use tracing::{Instrument, debug, error, trace, warn, warn_span};
 use uuid::Uuid;
 
 use polytune_server_core::{
@@ -154,6 +154,7 @@ pub(crate) async fn msg(
     Path((computation_id, from)): Path<(Uuid, usize)>,
     body: Bytes,
 ) -> Result<(), ApiError> {
+    trace!(body = ?&body[..]);
     let state_handles = state.state_handles.read().await;
     let handle = state_handles
         .get(&computation_id)

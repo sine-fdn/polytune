@@ -207,8 +207,9 @@ impl PolicyClient for HttpClient {
             .await
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, msg))]
     async fn msg(&self, to: usize, msg: MpcMsg) -> Result<(), Self::Error> {
+        trace!(?msg, "sending");
         let path_segments = [
             "msg",
             &format!("{}", self.computation_id),
