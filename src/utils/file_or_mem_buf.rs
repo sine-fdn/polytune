@@ -9,6 +9,7 @@ use std::{
 use bincode::Options;
 use serde::{Serialize, de::DeserializeOwned};
 use tempfile::tempfile_in;
+use tracing::debug;
 
 /// Abstraction over a chunked buffer backed by a temporary file or in-memory
 ///
@@ -18,9 +19,20 @@ use tempfile::tempfile_in;
 /// chunk into the file. Once all data is written, [`FileOrMemBuf::iter`] can be used to create
 /// an iterator for the temporary file (or the in-memory Vec if no directory was provided).
 /// Only ever one of the previously written chunks will be held in memory.
+///
+/// When backed by a temporary file, the [`FileOrMemBuf`] will print the bytes written as a
+/// tracing debug event when dropped.
 pub(crate) enum FileOrMemBuf<T> {
-    ChunkedTmpFile { write: BufWriter<Arc<File>> },
+    ChunkedTmpFile { write: TrackWrite },
     Memory { data: Vec<T> },
+}
+
+/// Wraps a BufWriter<Arc<File>> to track the number of bytes written.
+///
+/// Logs the number of bytes written as a `debug` tracing event when dropped.
+pub(crate) struct TrackWrite {
+    written: usize,
+    writer: BufWriter<Arc<File>>,
 }
 
 pub(crate) enum Iter<'a, T> {
@@ -44,8 +56,8 @@ impl<T> FileOrMemBuf<T> {
     /// The capacity is only used for the in-memory buf if `dir` is `None`.
     pub(crate) fn new(dir: Option<&Path>, capacity: usize) -> std::io::Result<Self> {
         if let Some(dir) = dir {
-            let f = Arc::new(tempfile_in(dir)?);
-            let write = BufWriter::new(Arc::clone(&f));
+            let file = tempfile_in(dir)?;
+            let write = TrackWrite::new(file);
             Ok(Self::ChunkedTmpFile { write })
         } else {
             Ok(Self::Memory {
@@ -64,7 +76,7 @@ impl<T> FileOrMemBuf<T> {
         match self {
             FileOrMemBuf::ChunkedTmpFile { write } => {
                 write.flush()?;
-                let mut file = Arc::clone(write.get_ref());
+                let mut file = write.clone_file();
                 file.rewind()?;
                 let read = BufReader::new(file);
                 Ok(Iter::ChunkedTmpFile {
@@ -84,7 +96,7 @@ impl<T> FileOrMemBuf<T> {
         match self {
             FileOrMemBuf::ChunkedTmpFile { write } => {
                 write.flush()?;
-                let mut file = Arc::clone(write.get_ref());
+                let mut file = write.clone_file();
                 file.rewind()?;
                 let read = BufReader::new(file);
                 Ok(ChunkIter::ChunkedTmpFile { read })
@@ -185,6 +197,51 @@ impl<'a, T: DeserializeOwned + Clone> Iterator for ChunkIter<'a, T> {
                 }
             }
             ChunkIter::Memory { iter } => iter.next().map(|e| Ok(Cow::Borrowed(e))),
+        }
+    }
+}
+
+impl TrackWrite {
+    pub(crate) fn new(file: File) -> Self {
+        Self {
+            written: 0,
+            writer: BufWriter::new(Arc::new(file)),
+        }
+    }
+
+    pub(crate) fn clone_file(&self) -> Arc<File> {
+        Arc::clone(self.writer.get_ref())
+    }
+}
+
+impl Write for TrackWrite {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let bytes = self.writer.write(buf)?;
+        self.written += bytes;
+        Ok(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let bytes = self.writer.write_vectored(bufs)?;
+        self.written += bytes;
+        Ok(bytes)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.writer.write_all(buf)?;
+        self.written += buf.len();
+        Ok(())
+    }
+}
+
+impl<T> Drop for FileOrMemBuf<T> {
+    fn drop(&mut self) {
+        if let Self::ChunkedTmpFile { write } = self {
+            debug!(bytes_written = write.written, "bytes written to tmp file")
         }
     }
 }
