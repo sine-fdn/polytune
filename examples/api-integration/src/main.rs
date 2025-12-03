@@ -15,7 +15,7 @@ use axum::{
     http::{Request, Response},
 };
 use clap::Parser;
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use garble_lang::{CircuitKind, CompileOptions, compile_with_options};
 use polytune::{channel::Channel, garble_lang::literal::Literal, mpc};
 use polytune_test_utils::peak_alloc::{PeakAllocator, create_instrumented_runtime, scale_memory};

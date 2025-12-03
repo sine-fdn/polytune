@@ -1,7 +1,7 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
 use std::{fmt, vec};
 
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use rand::{Rng, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -742,7 +742,7 @@ async fn fhaand(
         }
     }));
 
-    let (vi_all, received_h0h1) = futures::try_join!(send_all, recv_all)?;
+    let (vi_all, received_h0h1) = futures_util::try_join!(send_all, recv_all)?;
 
     // Finish step 2) Calculate v.
     let mut vi = vi_all.iter().fold(vec![false; l], |mut vi, el| {
