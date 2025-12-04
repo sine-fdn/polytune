@@ -5,7 +5,10 @@ use anyhow::Context;
 use axum::{Extension, routing::IntoMakeService};
 use jsonwebtoken::EncodingKey;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use tokio::sync::{Notify, Semaphore};
+use tokio::{
+    net::TcpListener,
+    sync::{Notify, Semaphore},
+};
 use tracing::info;
 
 use crate::{
@@ -18,6 +21,7 @@ use crate::{
 pub struct Server {
     addr: SocketAddr,
     opts: ServerOpts,
+    listener: Option<TcpListener>,
 }
 
 /// Configuration options for a [`Server`].
@@ -76,20 +80,44 @@ impl Server {
         Self {
             addr,
             opts: ServerOpts::default(),
+            listener: None,
         }
     }
 
     /// Create a new server for the provided address with options.
     pub fn new_with_opts(addr: SocketAddr, opts: ServerOpts) -> Self {
-        Self { addr, opts }
+        Self {
+            addr,
+            opts,
+            listener: None,
+        }
+    }
+
+    /// Explicitly bind socket so provided address and return bound address.
+    ///
+    /// This is useful if the [`SocketAddr`] provided to [`Server::new`] had a port
+    /// of `0`. The return address of this function will include the randomly chosen
+    /// port by the OS.
+    pub async fn bind_socket(&mut self) -> anyhow::Result<SocketAddr> {
+        let listener = TcpListener::bind(&self.addr)
+            .await
+            .context("unable to bind to socket")?;
+        let addr = listener
+            .local_addr()
+            .context("unable to get local addr of socket")?;
+        self.listener = Some(listener);
+        Ok(addr)
     }
 
     /// Start the server.
     pub async fn start(self) -> anyhow::Result<()> {
         info!("starting polytune server on {}", self.addr);
-        let listener = tokio::net::TcpListener::bind(&self.addr)
-            .await
-            .context("unable to bind to socket")?;
+        let listener = match self.listener {
+            Some(listener) => listener,
+            None => TcpListener::bind(&self.addr)
+                .await
+                .context("unable to bind to socket")?,
+        };
         axum::serve(listener, service(self.opts)?)
             .await
             .context("axum server error")?;
