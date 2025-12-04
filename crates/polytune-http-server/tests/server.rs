@@ -60,7 +60,7 @@ async fn concurrent_eval() {
                         .clone(),
                 ),
                 iss: "polytune".to_string(),
-                exp: 300,
+                exp: 1,
             }),
             cancel: None,
         },
