@@ -1,6 +1,6 @@
 //! The FPre preprocessor as a (semi-)trusted party, providing correlated randomness.
 
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use rand::random;
 use tracing::{Level, debug, instrument};
 

@@ -38,7 +38,7 @@ use std::iter;
 use std::path::Path;
 use std::{cmp, sync::Mutex};
 
-use futures::future::{try_join, try_join_all};
+use futures_util::future::{try_join, try_join_all};
 use garble_lang::register_circuit::CircuitError;
 use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;

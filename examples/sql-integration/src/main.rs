@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use clap::Parser;
-use futures::future::try_join_all;
+use futures_util::future::try_join_all;
 use polytune::{
     channel::Channel,
     garble_lang::{

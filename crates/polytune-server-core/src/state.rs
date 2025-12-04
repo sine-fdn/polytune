@@ -8,7 +8,7 @@ use std::{
     thread,
 };
 
-use futures::future;
+use futures_util::future;
 use garble_lang::{
     CircuitKind, CompileOptions, GarbleConsts, TypedProgram, compile_with_options, literal::Literal,
 };

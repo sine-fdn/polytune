@@ -25,7 +25,7 @@ use std::fmt;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use futures::future::{try_join, try_join_all};
+use futures_util::future::{try_join, try_join_all};
 use serde::{Serialize, de::DeserializeOwned};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::{
