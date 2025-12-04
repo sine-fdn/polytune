@@ -113,5 +113,4 @@ ignored = ["hybrid-array"]
 # Use this profile when profiling polytune with e.g. samply or perf
 [profile.debug-release]
 debug = true
-debug-assertions = true
 inherits = "release"
