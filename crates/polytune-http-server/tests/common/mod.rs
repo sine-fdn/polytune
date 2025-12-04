@@ -4,7 +4,6 @@
 
 use std::{
     env,
-    net::SocketAddr,
     sync::{LazyLock, Mutex, MutexGuard},
     time::Duration,
 };
@@ -14,6 +13,7 @@ use polytune_http_server::{Server, ServerOpts};
 use polytune_server_core::Policy;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use tracing::{Instrument, info, info_span};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use url::Url;
 use uuid::Uuid;
 
@@ -33,28 +33,28 @@ pub(crate) fn test_rng() -> MutexGuard<'static, StdRng> {
     TEST_RNG.lock().expect("TEST_RNG poisoned")
 }
 
-pub(crate) async fn start_servers(addrs: [SocketAddr; 2], opts: ServerOpts) {
-    for (i, addr) in addrs.into_iter().enumerate() {
-        let server = Server::new_with_opts(addr, opts.clone());
+/// Start two local servers and return the URLs at which they are reachable.
+pub(crate) async fn start_servers(opts: ServerOpts) -> Vec<Url> {
+    let mut urls = vec![];
+
+    for i in 0..2 {
+        let mut server =
+            Server::new_with_opts("127.0.0.1:0".parse().expect("addr parse"), opts.clone());
+        let socket_addr = server.bind_socket().await.expect("bind");
+        urls.push(Url::parse(&format!("http://{socket_addr}")).expect("url parse"));
         let span = info_span!("server", server = i);
         tokio::spawn(
             async move { server.start().await.expect("polytune server crashed") }.instrument(span),
         );
     }
-    tokio::time::sleep(Duration::from_millis(50)).await
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    urls
 }
 
 const MEASLES_PROGRAM: &str = include_str!("../../garble_programs/measles.garble.rs");
 
-pub(crate) fn random_policy(addrs: [SocketAddr; 2], output: Url) -> ([Policy; 2], Literal) {
+pub(crate) fn random_policy(participants: Vec<Url>, output: Url) -> ([Policy; 2], Literal) {
     let computation_id = Uuid::new_v4();
-    let participants = addrs
-        .map(|addr| {
-            format!("http://{addr}")
-                .parse()
-                .expect("unable to parse URL")
-        })
-        .to_vec();
     let mut rng = test_rng();
     let leader = rng.random_range(0..=1);
     let program = MEASLES_PROGRAM;
@@ -102,4 +102,12 @@ pub(crate) fn random_policy(addrs: [SocketAddr; 2], output: Url) -> ([Policy; 2]
     });
     let expected = rows_0 > 0 && id_0 == 1;
     (policies, Literal::from(expected))
+}
+
+pub(crate) fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_test_writer()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .try_init();
 }

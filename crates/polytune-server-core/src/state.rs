@@ -611,7 +611,7 @@ pub struct RunRequest {
 #[non_exhaustive]
 pub enum RunError {
     #[error(
-        "unabel to run policy {computation_id}. state must be Validated or Running but is {state}"
+        "unable to run policy {computation_id}. state must be Validated or Running but is {state}"
     )]
     InvalidState { state: String, computation_id: Uuid },
 }
@@ -634,8 +634,7 @@ where
                 typed_program,
             } => {
                 // insert own constants
-                self.consts
-                    .insert(format!("PARTY_{}", policy.party), policy.constants.clone());
+                self.insert_consts(policy.party, policy.constants.clone());
                 let cmd_sender = self.cmd_tx.clone();
                 let policy_cl = policy.clone();
                 let (client_send, client_recv) = oneshot::channel();
@@ -649,34 +648,40 @@ where
                 if let Some(ret) = run_ret {
                     let _ = ret.send(Ok(()));
                 }
-                tokio::spawn(
-                    async move {
-                        let const_futs = policy_cl.other_parties().map(async |p| {
-                            let const_req = ConstsRequest {
-                                from: policy_cl.party,
-                                consts: policy_cl.constants.clone(),
-                                computation_id: policy_cl.computation_id,
-                            };
-                            client.consts(p, const_req).await
-                        });
-                        if let Err(err) = future::try_join_all(const_futs).await
-                            && let Some(url) = policy_cl.output
-                        {
-                            let _ = client
-                                .output(
-                                    url,
-                                    Err(OutputError::SendConstsError {
-                                        source: Box::new(err),
-                                    }),
-                                )
-                                .await;
+                if !policy_cl.constants.is_empty() {
+                    tokio::spawn(
+                        async move {
+                            let const_futs = policy_cl.other_parties().map(async |p| {
+                                let const_req = ConstsRequest {
+                                    from: policy_cl.party,
+                                    consts: policy_cl.constants.clone(),
+                                    computation_id: policy_cl.computation_id,
+                                };
+                                client.consts(p, const_req).await
+                            });
+                            if let Err(err) = future::try_join_all(const_futs).await
+                                && let Some(url) = policy_cl.output
+                            {
+                                let _ = client
+                                    .output(
+                                        url,
+                                        Err(OutputError::SendConstsError {
+                                            source: Box::new(err),
+                                        }),
+                                    )
+                                    .await;
+                            }
+                            // returns an error if the state machine is dropped, nothing to do
+                            let _ = client_send.send(client);
+                            let _ = cmd_sender.send(PolicyCmd::InternalConstsSent).await;
                         }
-                        // returns an error if the state machine is dropped, nothing to do
-                        let _ = client_send.send(client);
-                        let _ = cmd_sender.send(PolicyCmd::InternalConstsSent).await;
-                    }
-                    .in_current_span(),
-                );
+                        .in_current_span(),
+                    );
+                } else {
+                    // No constants to send
+                    let _ = client_send.send(client);
+                    let _ = cmd_sender.send(PolicyCmd::InternalConstsSent).await;
+                }
             }
             PolicyStateKind::Running { policy, channel } => {
                 let (compiled_tx, compiled_rx) = oneshot::channel();
@@ -850,7 +855,7 @@ pub struct ConstsRequest {
 #[non_exhaustive]
 pub enum ConstsError {
     #[error(
-        "unabel to add consts for policy {computation_id}. state must be Validate, SendingConsts or SendingConstsCompleted but is {state}"
+        "unable to add consts for policy {computation_id}. state must be Validate, SendingConsts or SendingConstsCompleted but is {state}"
     )]
     InvalidState { state: String, computation_id: Uuid },
 }
@@ -869,8 +874,7 @@ where
         match mem::take(&mut self.state_kind) {
             state @ (PolicyStateKind::Validated { .. } | PolicyStateKind::SendingConsts { .. }) => {
                 self.state_kind = state;
-                let const_prefix = format!("PARTY_{}", consts_request.from);
-                self.consts.insert(const_prefix, consts_request.consts);
+                self.insert_consts(consts_request.from, consts_request.consts);
                 let _ = ret.send(Ok(()));
             }
             PolicyStateKind::SendingConstsCompleted {
@@ -878,8 +882,7 @@ where
                 typed_program,
                 client,
             } => {
-                let const_prefix = format!("PARTY_{}", consts_request.from);
-                self.consts.insert(const_prefix, consts_request.consts);
+                self.insert_consts(consts_request.from, consts_request.consts);
                 let _ = ret.send(Ok(()));
                 self.check_consts(client, policy, typed_program).await;
             }
@@ -895,6 +898,16 @@ where
             }
         }
         ControlFlow::Continue(self)
+    }
+
+    fn insert_consts(&mut self, party: usize, consts: Consts) {
+        // Only insert constants for party if there are actually constants in the request
+        // otherwise the `check_consts` comparison with typed_program.const_deps.len()
+        // will not work
+        if !consts.is_empty() {
+            let const_prefix = format!("PARTY_{}", party);
+            self.consts.insert(const_prefix, consts);
+        }
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self))]
