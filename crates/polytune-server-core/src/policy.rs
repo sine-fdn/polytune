@@ -63,7 +63,7 @@ impl Debug for Policy {
             .field("party", &self.party)
             // We don't want to potentially log the sensitive input information
             .field("input", &"<REDACTED>")
-            .field("output", &self.output)
+            .field("output", &self.output.as_ref().map(Url::to_string))
             .field("constants", &self.constants)
             .finish()
     }
