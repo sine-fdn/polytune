@@ -4,6 +4,9 @@ This crate implements a full-fledged MPC server which can receive requests conta
 
 The MPC program as well as any configuration necessary is specified using a JSON configuration that is provided via an API call to the `polytune-http-server`.
 
+> [!CAUTION]
+> Currently, the Polytune HTTP server does not perform authentication of the communication between the parties. If you want to deploy Polytune in an environment where untrusted requests can be sent to the server, you need to implement your own server atop the server-core, or proxy the communication between Polytune using something like mTLS for mutual authentication. 
+
 ## How to Deploy the Engine
 
 The following example shows how to deploy the MPC engine for two parties. If you want to deploy the engine with more parties or a different Garble program, the same principles apply.
