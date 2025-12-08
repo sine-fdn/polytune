@@ -27,6 +27,13 @@ use crate::{
 mod tests;
 
 /// A state-machine that coordinates the secure execution of a [`Policy`].
+///
+/// When you create a new [`PolicyState`], you receive the state machine and
+/// a [`PolicyStateHandle`]. The state machine's [start] future is usually
+/// spawned on a tokio [task] and controlled using the handle.
+///
+/// [start]: PolicyState::start
+/// [task]: tokio::spawn
 pub struct PolicyState<B, C> {
     client_builder: B,
     concurrency: Arc<Semaphore>,
@@ -88,6 +95,11 @@ where
     }
 
     /// Executes the policy state machine.
+    ///
+    /// This future completes once the state machines execution is finished, either due to completion or
+    /// an error. If the computation was successful, the result was sent to the URL specified in the
+    /// policies output field (if present). Errors are returned by the methods of the [`PolicyStateHandle`]
+    /// and/or sent to the output URL.
     pub async fn start(mut self) {
         // We manually create the span with empty fields for the computation id and party so that we can store a
         // clone of the span in the policy state and record those values later once we know them
@@ -175,11 +187,16 @@ enum PolicyStateKind<C> {
         typed_program: TypedProgram,
         client: C,
     },
+    // All consts have been received, but the actual mpc computation has not started yet
     Running {
         policy: Policy,
         channel: Channel<C>,
     },
+    // mpc computation is executing in a separate tokio task
     Executing {
+        // use Notify because we notify in both directions, first from the `cancel` method
+        // to the tokio task to signal cancellation, and then the other direction if the
+        // cancel error has been sent to the output URL
         cancel: Arc<Notify>,
     },
 }
@@ -190,6 +207,8 @@ where
     C: PolicyClient,
 {
     async fn handle_cmd(mut self, cmd: PolicyCmd) -> ControlFlow<(), Self> {
+        // By always consuming self and returning a ControlFlow with a Continue type of self,
+        // the state transitions are easier to do than with &mut methods
         match cmd {
             PolicyCmd::Schedule(policy, ret) => {
                 self = self.schedule(policy, ret).await?;

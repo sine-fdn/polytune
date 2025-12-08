@@ -12,9 +12,11 @@ use crate::{
 /// A handle for an executing [`PolicyState`] state-machine.
 ///
 /// This cheaply clonable handle to an executing [`PolicyState`] is used
-/// to control the state-machine.
+/// to control the state-machine. When implementing a server atop this core crate,
+/// the methods on this handle correspond to the RPC methods on the [`PolicyClient`].
 ///
 /// [`PolicyState`]: crate::PolicyState
+/// [`PolicyClient`]: crate::PolicyClient
 #[derive(Clone)]
 pub struct PolicyStateHandle(pub(crate) mpsc::Sender<PolicyCmd>);
 
