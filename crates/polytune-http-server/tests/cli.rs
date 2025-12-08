@@ -125,9 +125,12 @@ fn test_and_profile_server() {
             .build()
             .unwrap();
 
-        rt.block_on(
-            async move { output_server::server("127.0.0.1:8099".parse().unwrap(), s).await },
-        );
+        rt.block_on(async move {
+            output_server::server(s, Some("127.0.0.1:8099"))
+                .await
+                .1
+                .await
+        });
     });
 
     thread::spawn(move || {
