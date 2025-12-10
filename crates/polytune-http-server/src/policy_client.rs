@@ -1,3 +1,4 @@
+//! An implementation of [`PolicyClient`] corresponding to the [`crate::api`].
 use std::{
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},

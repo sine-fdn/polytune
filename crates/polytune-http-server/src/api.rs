@@ -1,3 +1,4 @@
+//! A thin HTTP API around [`PolicyStateHandle`].
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use aide::{OperationIo, axum::IntoApiResponse, openapi::OpenApi, transform::TransformOperation};
