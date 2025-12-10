@@ -1,8 +1,3 @@
-#![allow(missing_docs)] // Remove once module is improved
-// TODO I think this module will require some changes once we actually implement
-// a client using HTTP communication, specifically the error handling might need
-// changes.
-
 use garble_lang::literal::Literal as GarbleLiteral;
 use url::Url;
 
@@ -11,33 +6,57 @@ use crate::{
     state::{ConstsRequest, MpcMsg, OutputError, RunRequest, ValidateRequest},
 };
 
+/// Produces a [`PolicyClient`] for a [`Policy`].
 pub trait PolicyClientBuilder {
+    /// The associated [`PolicyClient`] type.
     type Client: PolicyClient;
 
+    /// Returns a client suitable for the participants specified in the [`Policy`].
     fn new_client(&self, policy: &Policy) -> Self::Client;
 }
 
+/// Handles the communication between two executing [`PolicyStates`].
+///
+/// This is effectively a trait for a remote procedure call (RPC) client. Calling the
+/// methods (except `output`) on this trait must result in the corresponding methods on
+/// a [`PolicyStateHandle`] being called on the remote party.
+///
+/// [`PolicyStates`]: crate::PolicyState
+/// [`PolicyStateHandle`]: crate::PolicyStateHandle
 pub trait PolicyClient: Send + Sync + 'static {
+    /// The error returned by the client's methods.
     type Error: std::error::Error + Send + Sync;
 
+    /// Corresponds to [`PolicyStateHandle::validate()`] on a remote.
+    ///
+    /// [`PolicyStateHandle::validate()`]: crate::PolicyStateHandle::validate
     fn validate(
         &self,
         to: usize,
         req: ValidateRequest,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Corresponds to [`PolicyStateHandle::run()`] on a remote.
+    ///
+    /// [`PolicyStateHandle::run()`]: crate::PolicyStateHandle::run
     fn run(
         &self,
         to: usize,
         req: RunRequest,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Corresponds to [`PolicyStateHandle::consts()`] on a remote.
+    ///
+    /// [`PolicyStateHandle::consts()`]: crate::PolicyStateHandle::consts
     fn consts(
         &self,
         to: usize,
         req: ConstsRequest,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Corresponds to [`PolicyStateHandle::mpc_msg()`] on a remote.
+    ///
+    /// [`PolicyStateHandle::mpc_msg()`]: crate::PolicyStateHandle::mpc_msg
     fn msg(&self, to: usize, msg: MpcMsg) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Send the output to the specified Url.
