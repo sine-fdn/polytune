@@ -157,8 +157,14 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<bincode::Error> for Error {
-    fn from(e: bincode::Error) -> Self {
+impl From<bincode::error::EncodeError> for Error {
+    fn from(e: bincode::error::EncodeError) -> Self {
+        Self::TempFileSerDe(Box::new(e))
+    }
+}
+
+impl From<bincode::error::DecodeError> for Error {
+    fn from(e: bincode::error::DecodeError) -> Self {
         Self::TempFileSerDe(Box::new(e))
     }
 }
