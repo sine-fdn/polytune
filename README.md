@@ -67,7 +67,14 @@ You can see examples of using Garble and Polytune together, e.g., `benches/.join
 
 The [Polytune HTTP server] uses the Polytune library (the top-level crate in this workspace) and the Garble compiler to implement a more complete MPC service that communicates using HTTP requests. It contains a concrete implementation of Polytune's [`Channel`] trait and handles the coordination of multiple instances, including exchanging of constants, compilation of the Garble program, execution of the protocol, and sending of the output to an output destination.
 
+This server implementation is split into multiple parts. The [`polytune-server-core`] crate implements a state machine that coordinates the execution of a Garble program between multiple parties. The server core crate itself does not implement the communication between the parties. Instead, it is generic over a `PolicyClient` client trait, which defines multiple remote procedure calls that need to be implemented. The [`polytune-http-server`] uses the [`polytune-server-core`] crate and provides an implementation of the `PolicyClient` trait using an HTTP API.
+
+> [!CAUTION]
+> Currently, the Polytune HTTP server does not perform authentication of the communication between the parties. If you want to deploy Polytune in an environment where untrusted requests can be sent to the server, you need to implement your own server atop the server-core, or proxy the communication between Polytune using something like mTLS for mutual authentication. 
+
 [Polytune HTTP server]: ./crates/polytune-http-server/
+[`polytune-http-server`]: ./crates/polytune-http-server/
+[polytune-server-core]: ./crates/polytune-server-core/
 [`Channel`]: https://docs.rs/polytune/latest/polytune/channel/trait.Channel.html
 
 ## Benchmarks
