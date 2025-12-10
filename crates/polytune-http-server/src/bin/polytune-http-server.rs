@@ -1,5 +1,5 @@
 //! An HTTP-based Polytune server.
-use std::{fs, net::SocketAddr, path::PathBuf};
+use std::{env, fs, net::SocketAddr, path::PathBuf};
 
 use anyhow::Context;
 use clap::Parser;
@@ -112,10 +112,12 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn init_tracing() -> anyhow::Result<()> {
-    let env_filter = EnvFilter::builder()
-        .with_env_var("POLYTUNE_LOG")
-        .with_default_directive("polytune_http_server=info".parse()?)
-        .from_env_lossy();
+    let env_var = "POLYTUNE_LOG";
+    let env_filter = if env::var(env_var).is_ok() {
+        EnvFilter::builder().with_env_var(env_var).from_env_lossy()
+    } else {
+        "polytune_http_server=info,polytune-server-core=info,polytune=info".parse()?
+    };
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
