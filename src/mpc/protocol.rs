@@ -36,6 +36,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::iter;
 use std::path::Path;
+use std::time::Instant;
 use std::{cmp, sync::Mutex};
 
 use futures_util::future::{try_join, try_join_all};
@@ -362,6 +363,7 @@ impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p,
 pub(crate) async fn _mpc(
     ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
 ) -> Result<Vec<bool>, Error> {
+    let now = Instant::now();
     debug!(
         "MPC protocol execution with {} parties, of which output parties have indices {:?} and the circuit has {} AND gates",
         ctx.p_max, ctx.p_out, ctx.num_and_ops
@@ -398,8 +400,10 @@ pub(crate) async fn _mpc(
     let outputs = output(ctx, delta, shares, labels, values, labels_eval).await?;
 
     info!(
-        "MPC protocol execution of a circuit with {} AND gates completed successfully",
-        ctx.num_and_ops
+        elapsed = ?now.elapsed(),
+        and_ops = ctx.num_and_ops,
+        total_ops = ctx.circ.insts.len(),
+        "MPC protocol execution completed successfully",
     );
     Ok(outputs)
 }
