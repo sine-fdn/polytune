@@ -78,7 +78,7 @@ tempfile = "3.23.0"
 thiserror = "2.0.16"
 tokio = { version = "1.48.0", features = ["macros", "sync", "time"] }
 tracing = "0.1.43"
-wide = { version = "0.7.33", features = ["serde"] }
+wide = { version = "1.0.2", features = ["serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # For wasm compatibility, we need to enable the getrandom js features
