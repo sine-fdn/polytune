@@ -7,6 +7,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "wednesday"
+    open-pull-requests-limit: 15
 
   - package-ecosystem: "github-actions"
     directory: ".github/workflows/"
@@ -15,3 +16,5 @@ updates:
     schedule:
       interval: "weekly"
       day: "wednesday"
+    open-pull-requests-limit: 10
+
