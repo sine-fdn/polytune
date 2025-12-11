@@ -26,7 +26,7 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - run: cargo fmt --check --all
       - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core --package polytune-http-server -- -Dwarnings
       - name: Install cargo-machete
@@ -43,7 +43,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - run: cargo doc --no-deps --package polytune --package polytune-server-core
         env:
           RUSTDOCFLAGS: '-D warnings'
@@ -95,7 +95,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       # No avx2 on apple ARM
       - name: Set RUSTFLAGS for macOS
         if: runner.os == 'macOS'
@@ -120,7 +120,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           key: ${{ matrix.workspace-member }}
       - if: ${{ matrix.workspace-member == 'sql-integration' }}
@@ -142,7 +142,7 @@ jobs:
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - name: Install wasm-pack
         uses: taiki-e/install-action@537c30d2b45cc3aa3fb35e2bbcfb61ef93fd6f02
         with:
@@ -160,7 +160,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
       - run: cargo test --profile debug-release --package polytune-server-core --package polytune-http-server -- --nocapture
 
   build-polytune-http-server-image:
