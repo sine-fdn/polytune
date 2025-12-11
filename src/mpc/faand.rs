@@ -13,7 +13,7 @@ use crate::{
     crypto::AesRng,
     mpc::data_types::{Auth, Delta, Key, Mac, Share},
     ot::{kos_ot_receiver, kos_ot_sender},
-    utils::xor_inplace,
+    utils::{serialize, xor_inplace},
 };
 
 /// The statistical security parameter `RHO` used for cryptographic operations.
@@ -114,7 +114,7 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
     if data.is_empty() {
         return Err(Error::EmptyVector);
     }
-    let serialized_data = bincode::serialize(data).map_err(|_| Error::ConversionErr)?;
+    let serialized_data = serialize(data).map_err(|_| Error::ConversionErr)?;
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(&serialized_data);

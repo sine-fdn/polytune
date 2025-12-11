@@ -6,7 +6,11 @@ use std::{
     sync::Arc,
 };
 
-use bincode::Options;
+use bincode::{
+    config::legacy,
+    error::{DecodeError, EncodeError},
+    serde::{decode_from_std_read, encode_into_std_write},
+};
 use serde::{Serialize, de::DeserializeOwned};
 use tempfile::tempfile_in;
 use tracing::debug;
@@ -106,10 +110,6 @@ impl<T> FileOrMemBuf<T> {
             }),
         }
     }
-
-    fn bincode() -> impl bincode::Options {
-        bincode::options().allow_trailing_bytes()
-    }
 }
 
 impl<T> Default for FileOrMemBuf<T> {
@@ -120,11 +120,10 @@ impl<T> Default for FileOrMemBuf<T> {
 
 impl<T: Serialize + Clone> FileOrMemBuf<T> {
     /// Write a chunk to the temporary file or in-memory buffer.
-    pub(crate) fn write_chunk(&mut self, chunk: &[T]) -> bincode::Result<()> {
+    pub(crate) fn write_chunk(&mut self, chunk: &[T]) -> Result<(), EncodeError> {
         match self {
             FileOrMemBuf::ChunkedTmpFile { write, .. } => {
-                let opts = Self::bincode();
-                opts.serialize_into(write, chunk)?;
+                encode_into_std_write(chunk, write, legacy())?;
             }
             FileOrMemBuf::Memory { data } => {
                 data.extend_from_slice(chunk);
@@ -135,7 +134,7 @@ impl<T: Serialize + Clone> FileOrMemBuf<T> {
 }
 
 impl<'a, T: DeserializeOwned + Clone> Iterator for Iter<'a, T> {
-    type Item = bincode::Result<T>;
+    type Item = Result<T, DecodeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -143,14 +142,13 @@ impl<'a, T: DeserializeOwned + Clone> Iterator for Iter<'a, T> {
                 if let Some(gate) = chunk_iter.next() {
                     return Some(Ok(gate));
                 }
-                let opts = FileOrMemBuf::<T>::bincode();
-                match opts.deserialize_from::<_, Vec<T>>(read) {
+                match decode_from_std_read::<Vec<T>, _, _>(read, legacy()) {
                     Ok(chunk) => {
                         *chunk_iter = chunk.into_iter();
                         self.next()
                     }
                     Err(err) => {
-                        if let bincode::ErrorKind::Io(io) = &*err
+                        if let DecodeError::Io { inner: io, .. } = &err
                             && std::io::ErrorKind::UnexpectedEof == io.kind()
                         {
                             return None;
@@ -178,16 +176,15 @@ impl<'a, T> Drop for Iter<'a, T> {
 }
 
 impl<'a, T: DeserializeOwned + Clone> Iterator for ChunkIter<'a, T> {
-    type Item = bincode::Result<Cow<'a, [T]>>;
+    type Item = Result<Cow<'a, [T]>, DecodeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             ChunkIter::ChunkedTmpFile { read } => {
-                let opts = FileOrMemBuf::<T>::bincode();
-                match opts.deserialize_from::<_, Vec<T>>(read) {
+                match decode_from_std_read::<Vec<T>, _, _>(read, legacy()) {
                     Ok(chunk) => Some(Ok(Cow::Owned(chunk))),
                     Err(err) => {
-                        if let bincode::ErrorKind::Io(io) = &*err
+                        if let DecodeError::Io { inner: io, .. } = &err
                             && std::io::ErrorKind::UnexpectedEof == io.kind()
                         {
                             return None;

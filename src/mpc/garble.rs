@@ -5,7 +5,10 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
 };
 
-use crate::mpc::data_types::{Label, Mac};
+use crate::{
+    mpc::data_types::{Label, Mac},
+    utils::{deserialize, serialize},
+};
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -39,7 +42,7 @@ pub(crate) fn encrypt(
 ) -> Result<Vec<u8>, Error> {
     let (key, nonce) = key_and_nonce(garbling_key);
     let cipher = ChaCha20Poly1305::new(&key);
-    let bytes = bincode::serialize(&triple).map_err(|e| Error::Serde(format!("{e:?}")))?;
+    let bytes = serialize(&triple).map_err(|e| Error::Serde(format!("{e:?}")))?;
     let ciphertext = cipher
         .encrypt(&nonce, bytes.as_ref())
         .map_err(|_| Error::EncryptionFailed)?;
@@ -55,7 +58,7 @@ pub(crate) fn decrypt(
     let plaintext = cipher
         .decrypt(&nonce, bytes)
         .map_err(|_| Error::DecryptionFailed)?;
-    bincode::deserialize(&plaintext).map_err(|e| Error::Serde(format!("{e:?}")))
+    deserialize(&plaintext).map_err(|e| Error::Serde(format!("{e:?}")))
 }
 
 fn key_and_nonce(

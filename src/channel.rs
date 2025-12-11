@@ -35,6 +35,8 @@ use tokio::sync::{
 #[cfg(not(target_arch = "wasm32"))]
 use tracing::{Level, trace};
 
+use crate::utils::{deserialize, serialize};
+
 /// Errors related to sending / receiving / (de-)serializing messages.
 #[derive(Debug)]
 pub struct Error {
@@ -92,7 +94,7 @@ pub(crate) async fn send_to<S: Serialize + std::fmt::Debug>(
     phase: &str,
     msg: &[S],
 ) -> Result<(), Error> {
-    let data = bincode::serialize(&msg).map_err(|e| Error {
+    let data = serialize(msg).map_err(|e| Error {
         phase: format!("sending {phase}"),
         reason: ErrorKind::SerdeError(format!("{e:?}")),
     })?;
@@ -119,7 +121,7 @@ pub(crate) async fn recv_from<T: DeserializeOwned + std::fmt::Debug>(
             phase: phase.to_string(),
             reason: ErrorKind::RecvError(format!("{e:?}")),
         })?;
-    let msg: Vec<T> = bincode::deserialize(&data).map_err(|e| Error {
+    let msg: Vec<T> = deserialize(&data).map_err(|e| Error {
         phase: format!("receiving {phase}"),
         reason: ErrorKind::SerdeError(format!("{e:?}")),
     })?;
