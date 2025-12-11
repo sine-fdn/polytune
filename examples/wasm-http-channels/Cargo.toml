@@ -48,7 +48,7 @@ tower-http = { version = "0.6.7", features = [
     "cors",
     "trace",
 ], optional = true }
-tracing = { version = "0.1.40", optional = true }
+tracing = { version = "0.1.43", optional = true }
 tracing-subscriber = { version = "0.3.20", optional = true }
 #
 # for the client:
