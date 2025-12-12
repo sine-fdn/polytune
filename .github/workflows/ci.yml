@@ -47,6 +47,9 @@ jobs:
       - run: cargo doc --no-deps --package polytune --package polytune-server-core
         env:
           RUSTDOCFLAGS: '-D warnings'
+      - run: cargo doc --no-deps --document-private-items --package polytune-http-server
+        env:
+          RUSTDOCFLAGS: '-D warnings'
 
   # This job checks that we can build polytune with the msrv specified in the
   # Cargo.toml and that we *can't build* with one previous version.
