@@ -299,32 +299,32 @@ pub async fn mpc(
     _mpc(&ctx).await
 }
 
-pub(crate) struct Context<'circ, 'inp, 'out, 'ch, 'p, C: Channel> {
-    channel: &'ch C,
-    circ: &'circ Circuit,
-    inputs: &'inp [bool],
+pub(crate) struct Context<'c, C: Channel> {
+    channel: &'c C,
+    circ: &'c Circuit,
+    inputs: &'c [bool],
     is_contrib: bool,
     p_fpre: Preprocessor,
     p_eval: usize,
     p_own: usize,
     p_max: usize,
-    p_out: &'out [usize],
+    p_out: &'c [usize],
     num_and_ops: usize,
     num_inputs: usize,
-    tmp_dir: Option<&'p Path>,
+    tmp_dir: Option<&'c Path>,
 }
 
-impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p, C> {
+impl<'c, C: Channel> Context<'c, C> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        channel: &'ch C,
-        circ: &'circ Circuit,
-        inputs: &'inp [bool],
+        channel: &'c C,
+        circ: &'c Circuit,
+        inputs: &'c [bool],
         p_fpre: Preprocessor,
         p_eval: usize,
         p_own: usize,
-        p_out: &'out [usize],
-        tmp_dir: Option<&'p Path>,
+        p_out: &'c [usize],
+        tmp_dir: Option<&'c Path>,
     ) -> Self {
         let p_max = circ.input_regs.len();
         let is_contrib = p_own != p_eval;
@@ -366,9 +366,7 @@ impl<'circ, 'inp, 'out, 'ch, 'p, C: Channel> Context<'circ, 'inp, 'out, 'ch, 'p,
     }
 }
 
-pub(crate) async fn _mpc(
-    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
-) -> Result<Vec<bool>, Error> {
+pub(crate) async fn _mpc(ctx: &Context<'_, impl Channel>) -> Result<Vec<bool>, Error> {
     let now = Instant::now();
     debug!(
         "MPC protocol execution with {} parties, of which output parties have indices {:?} and the circuit has {} AND gates",
@@ -450,7 +448,7 @@ fn validate(ctx: &Context<impl Channel>) -> Result<(), Error> {
 #[allow(clippy::type_complexity)]
 #[instrument(level=Level::DEBUG, skip(ctx), err)]
 async fn fn_independent_pre(
-    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, impl Channel>,
 ) -> Result<
     (
         Delta,
@@ -557,7 +555,7 @@ fn init_and_shares(
 
 #[instrument(level=Level::DEBUG, skip_all, err)]
 async fn gen_auth_bits(
-    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, impl Channel>,
     delta: Delta,
     mut and_shares: FileOrMemBuf<(Share, Share)>,
     mut shared_two_by_two: Option<Vec<Vec<Option<ChaCha20Rng>>>>,
@@ -627,7 +625,7 @@ async fn gen_auth_bits(
 #[allow(clippy::type_complexity)]
 #[instrument(level=Level::DEBUG, skip_all, err)]
 async fn garble(
-    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, impl Channel>,
     delta: Delta,
     mut auth_bits: FileOrMemBuf<Share>,
     random_shares: &mut FileOrMemBuf<Share>,
@@ -812,7 +810,7 @@ async fn garble(
     num_inputs = ctx.num_inputs,
 ), err)]
 async fn input_processing(
-    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, impl Channel>,
     delta: Delta,
     input_labels: &[Label],
     random_shares: &mut FileOrMemBuf<Share>,
@@ -1043,7 +1041,7 @@ fn evaluate(
     num_output_wires = ctx.circ.output_regs.len(),
 ), err)]
 async fn output(
-    ctx: &Context<'_, '_, '_, '_, '_, impl Channel>,
+    ctx: &Context<'_, impl Channel>,
     delta: Delta,
     shares: Vec<Share>,
     labels: Vec<Label>,
