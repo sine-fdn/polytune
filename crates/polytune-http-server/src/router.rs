@@ -20,6 +20,7 @@ pub(crate) fn router(state: PolytuneState) -> ApiRouter {
     ApiRouter::new()
         // to start an MPC session as a leader:
         .api_route("/schedule", post_with(api::schedule, api::schedule_docs))
+        // returns 200 if the server is healthy
         .api_route("/health", get_with(api::health, api::health_docs))
         .route("/validate", axum::routing::post(api::validate))
         // to kick off an MPC session:

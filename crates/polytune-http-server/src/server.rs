@@ -29,7 +29,7 @@ pub struct Server {
 pub struct ServerOpts {
     /// Maximum number of policies this party can concurrently evaluate as a leader.
     pub concurrency: usize,
-    /// Temporary directory to store intermediate files during [`polytune::mpc`] evaluation.
+    /// Temporary directory to store intermediate files during `polytune::mpc` evaluation.
     pub tmp_dir: Option<PathBuf>,
     /// JWT configuration for requests made to other Polytune instances..
     pub jwt_conf: Option<JwtConf>,
