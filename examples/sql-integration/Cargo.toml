@@ -16,7 +16,7 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 garble_lang = { version = "0.7.0-alpha.1", features = ["serde"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 polytune-test-utils = { path = "../../crates/polytune-test-utils" }
-reqwest = { version = "0.12.24", features = ["json"] }
+reqwest = { version = "0.12.25", features = ["json"] }
 serde = "1.0.228"
 serde_json = "1.0.145"
 sqlx = { version = "0.8.6", features = [
