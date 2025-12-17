@@ -95,7 +95,7 @@ getrandom_0_3 = { package = "getrandom", version = "0.3", features = [
 cpufeatures = "0.2.17"
 
 [dev-dependencies]
-criterion = { version = "0.8.0", features = ["async_tokio"] }
+criterion = { version = "0.8.1", features = ["async_tokio"] }
 polytune-test-utils = { path = "crates/polytune-test-utils" }
 proptest = "1.9.0"
 tokio = { version = "1.48.0", features = ["full"] }
