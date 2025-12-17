@@ -1,4 +1,43 @@
 //! Preprocessing protocol generating authenticated triples for secure multi-party computation.
+//!
+//! This module implements the preprocessing phase of the [WRK17b](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979)
+//! protocol, which generates the cryptographic material needed for maliciously-secure MPC. The
+//! preprocessing is function-independent, meaning the same authenticated shares and multiplication
+//! triples can be used for any boolean circuit of appropriate size.
+//!
+//! The preprocessing phase generates shares of **authenticated multiplication triples** (x, y, z) where z = x ∧ y:
+//! Each share consists of:
+//! - A secret bit value held by the party
+//! - MACs on the bit values held by other parties
+//! - Keys held by the bit holder for verifying the MACs
+//!
+//! This authentication structure ensures that malicious parties cannot deviate from the protocol
+//! without being detected with overwhelming probability depending on the statistical security
+//! parameter RHO = 40 (this means that any cheating attempt is detected with probability
+//! at least `1 - 2^-40`).
+//!
+//! The preprocessing consists of several layered protocols, each building on the previous:
+//!
+//! ## 1. Randomness Generation
+//! - [`shared_rng`]: Multi-party coin-tossing to generate shared randomness across all parties
+//! - [`shared_rng_pairwise`]: Pairwise coin-tossing for party-to-party OT operations
+//!   These ensure that no single party can bias the random values used throughout preprocessing.
+//!
+//! ## 2. Authenticated Bit Generation
+//! - [`fabitn`]: Generates random authenticated bits using oblivious transfer (OT) between each
+//!   pair of parties, with statistical verification to detect malicious behavior
+//!
+//! ## 3. Authenticated Share Generation
+//! - [`fashare`]: Builds on `fabitn` with additional commitment-based verification to generate
+//!   authenticated random shares
+//!
+//! ## 4. AND Triple Generation
+//! The core preprocessing output is authenticated AND triples (x, y, z) where z = x ∧ y:
+//! - [`fhaand`]: Computes half-authenticated AND operations (one party authenticates)
+//! - [`flaand`]: Combines half-authenticated ANDs into "leaky" authenticated AND triples
+//! - [`faand`]: Uses bucketing to combine multiple leaky ANDs into fully secure AND triples
+//! - [`beaver_aand`]: Transforms random AND triples into specific triples needed for computation, i.e.,
+//!   where x and y are shares of specific input values
 use std::{fmt, vec};
 
 use futures_util::future::try_join_all;
@@ -19,7 +58,7 @@ use crate::{
 /// The statistical security parameter `RHO` used for cryptographic operations.
 const RHO: usize = 40;
 
-/// Errors occurring during preprocessing.
+/// A custom error type for MPC precomputation. All errors in this module represent protocol aborts.
 #[derive(Debug)]
 pub enum Error {
     /// A message could not be sent or received.
@@ -81,7 +120,6 @@ impl fmt::Display for Error {
     }
 }
 
-/// Converts a `channel::Error` into a custom `Error` type.
 impl From<channel::Error> for Error {
     fn from(e: channel::Error) -> Self {
         Self::ChannelErr(e)
@@ -90,7 +128,7 @@ impl From<channel::Error> for Error {
 
 /// Represents a cryptographic commitment as a fixed-size 32-byte array (a BLAKE3 hash).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-struct Commitment(pub(crate) [u8; 32]);
+struct Commitment([u8; 32]);
 
 /// Commits to a value using the BLAKE3 cryptographic hash function.
 /// This is not a general-purpose commitment scheme, the input value is assumed to have high entropy.
@@ -104,13 +142,17 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
 }
 
-/// Hashes a Vec<T> using blake3 and returns the resulting hash as `u128`.
+/// Hashes a Vec<T> using BLAKE3 and returns the resulting hash as `u128`.
 ///
 /// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
 /// to be the case in all real-world usages of our protocol.
-pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
+///
+/// This function is used for broadcast consistency checks.
+fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
+    // Empty vectors would always serialize to the same byte sequence, producing a
+    // fixed hash.
     if data.is_empty() {
         return Err(Error::EmptyVector);
     }
@@ -130,8 +172,25 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
     Ok(hash)
 }
 
-/// Implements the verification step of broadcast with abort based on Goldwasser and Lindell's protocol.
-pub(crate) async fn broadcast_verification<
+/// Performs the verification step of *broadcast with abort* following the
+/// Goldwasser–Lindell protocol.
+///
+/// This function checks the correctness of a broadcast performed via
+/// `unverified_broadcast` by ensuring that *all parties* report *consistent
+/// hashes* of the values they claim to have received.
+///
+/// Each party `i`:
+/// - Computes a hash of every vector it received from other parties.
+/// - Sends these hashes (except its own and the recipient’s) in a modified
+///   vector via `scatter`.
+/// - Receives similar modified vectors from all other parties.
+/// - Verifies that every party reports the same hash for the value coming
+///   from index `j`.
+///
+/// # Note
+/// If `n == 2`, broadcast verification is skipped because consistency is
+/// trivially guaranteed in the two-party case.
+async fn broadcast_verification<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
     channel: &impl Channel,
@@ -184,9 +243,14 @@ pub(crate) async fn broadcast_verification<
     Ok(())
 }
 
-/// Implements broadcast with abort based on Goldwasser and Lindell's protocol
-/// for all parties at once, where each party sends its vector to all others.
-/// The function returns the vector received and verified by broadcast.
+/// Implements broadcast with abort among all parties using the Goldwasser–Lindell
+/// protocol.
+///
+/// This function:
+/// 1. Performs an unverified broadcast of the local vector.
+/// 2. Runs broadcast verification to ensure all parties received
+///    consistent values.
+/// 3. Returns the verified matrix of broadcasted values.
 pub(crate) async fn broadcast<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -202,22 +266,37 @@ pub(crate) async fn broadcast<
     Ok(res_vec)
 }
 
-/// Combined verified broadcast and scatter.
+/// Performs a *combined* verified broadcast and scatter.
 ///
-/// Broadcast with abort the vector resulting from taking each first
-/// element of the tuples contained in one of the vectors in data
-/// and scatter the second value.
+/// Each party provides a vector of tuples `(T, S)`.  
+/// - must be *identical across all parties* at each position `k`.
+/// - `S` may differ and is scattered normally.
 ///
-/// This means, that the following must hold
+/// The protocol:
+/// 1. **Scatters** the full `(T, S)` tuples (unverified broadcast of `T`,
+///    scatter of `S`).  
+/// 2. Collects all first components `T`.
+/// 3. Performs **broadcast verification** on the collected `T` to ensure
+///    consistency.  
+///
+/// If verification succeeds, the function returns all received tuples;
+/// otherwise it aborts.
+///
+/// # Correctness Requirement
+/// The following must hold, otherwise broadcast verification will detect the
+/// disagreement and abort:
 /// ```ignore
 /// for each i,j in {0,..,n}^2:
 ///     for k in {0,.., data[0].len()}:
 ///         data[i].0[k] == data[j].0[k]
 ///
 /// ```
-/// If the tuple elements are not equal, the broadcast verification
-/// will fail and this method returns an error.
-pub(crate) async fn broadcast_first_scatter_second<
+///
+/// # Note
+/// This function was added as an optimization of the protocol rounds. By scattering
+/// together multiple independent elements and performing the broadcast verification
+/// only on one of them, we reduce the number of communication rounds needed.
+async fn broadcast_first_scatter_second<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
     S: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -227,31 +306,34 @@ pub(crate) async fn broadcast_first_scatter_second<
     phase: &str,
     data: &[Vec<(T, S)>],
 ) -> Result<Vec<Vec<(T, S)>>, Error> {
-    // first we scatter the data, as the second elements of the tuple with type `S`
-    // might be different. This effectively `unverified_broadcasts`s the first
-    // elements
+    // First we scatter the data, as the second elements of the tuple with type `S`
+    // might be different. This effectively `unverified_broadcasts`s the first elements
     let recv_vec = scatter(channel, i, phase, data).await?;
-    // now we extract those first elements of the tuples which we scattered which
+    // Now we extract those first elements of the tuples which we scattered which
     // should have been equal
     let first_vec: Vec<Vec<T>> = recv_vec
         .iter()
         .map(|inner_vec| inner_vec.iter().map(|(a, _)| a.clone()).collect())
         .collect();
     let string = "broadcast ";
-    // and verify that the first elements of the tuples were indeed broadcasted correctly
+    // And verify that the first elements of the tuples were indeed broadcasted correctly
     broadcast_verification(channel, i, n, &(string.to_owned() + phase), &first_vec).await?;
-    // As a result, we have broadcasted the first elements of the vec and
-    // scattered the second
+    // As a result, we have broadcasted the first elements of the vec and scattered the second
     Ok(recv_vec)
 }
 
-/// Multi-party coin tossing to generate shared randomness in a secure, distributed manner.
+/// Multi-party coin tossing to derive a *shared* cryptographically secure RNG.
 ///
-/// This function generates a shared random number generator (RNG) using multi-party
-/// coin tossing in a secure multi-party computation (MPC) setting. Each participant contributes
-/// to the randomness generation, and all contributions are combined securely to generate
-/// a final shared random seed. This shared seed is then used to create a `ChaCha20Rng`, a
-/// cryptographically secure random number generator.
+/// This function implements standard MPC coin tossing:
+/// - Each party samples a random 256-bit seed.
+/// - Commits to it and broadcasts the commitment.
+/// - Broadcasts the seed (decommitment).
+/// - Verifies every other party’s commitment.
+/// - XORs all revealed seeds together to obtain a joint random seed.
+///
+/// The resulting seed is used to instantiate a `ChaCha20Rng` that is **identical
+/// for all honest parties** and unpredictable to any adversary unless it
+/// corrupts *all* parties.
 #[instrument(level=Level::DEBUG, skip_all, err)]
 pub(crate) async fn shared_rng(
     channel: &impl Channel,
@@ -310,10 +392,18 @@ pub(crate) async fn shared_rng(
     Ok(ChaCha20Rng::from_seed(buf_xor))
 }
 
-/// Pairwise two-party coin tossing to generate shared randomness in a secure, distributed manner.
+/// Pairwise two-party coin tossing for generating shared RNGs between
+/// every pair of parties.
 ///
-/// This function generates a shared random number generator (RNG) between every two parties using
-/// two-party coin tossing for the two-party KOS OT protocol.
+/// This is used by protocols that require pairwise shared randomness, such as the
+/// two-party KOS Oblivious Transfer extension protocol (see `ot_core/kos.rs`).
+///
+/// For each ordered pair `(i, k)`:
+/// - Both parties generate random 256-bit seeds.
+/// - Exchange commitments, then seeds.
+/// - Verify commitments.
+/// - XOR the two seeds to obtain a shared 256-bit value.
+/// - Use that to create a `ChaCha20Rng`.
 #[instrument(level=Level::DEBUG, skip_all, err)]
 pub(crate) async fn shared_rng_pairwise(
     channel: &impl Channel,
@@ -366,16 +456,36 @@ pub(crate) async fn shared_rng_pairwise(
     Ok(shared_two_by_two)
 }
 
-/// Protocol PI_aBit^n that performs F_aBit^n from the paper
+/// Implements protocol PI_aBit^n from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// This function implements a secure multi-party computation protocol to generate a random
-/// bit-string and the corresponding keys and MACs (the latter are sent to the other parties),
-/// i.e., shares of random authenticated bits.
-/// The two main steps of the protocol are running two-party oblivious transfers (OTs) for
-/// each pair of parties and then checking the validity of the MACs and keys by checking the XOR
-/// of a linear combination of the bits, keys and the MACs and then removing 2 * RHO objects,
-/// where RHO is the statistical security parameter.
+/// This protocol realizes the ideal functionality F_aBit^n, generating:
+///   - a random bit-string `x` of length `l`, and  
+///   - for each party pair `(i, k)`, correlated keys and MACs authenticating
+///     the bits of `x`.
+///
+/// The protocol consists of three main phases:
+///
+/// 1. Random-bit generation
+/// Each party samples a local random bit-string `x` of length `l' = l + 3*RHO`,
+/// where RHO is the statistical security parameter.  
+/// The last `3*RHO` bits are used only for MAC/key verification and are
+/// discarded at the end.
+///
+///
+/// 2. Pairwise OTs to construct keys and MACs
+/// For every party pair `(i, k)`, the parties run two KOS OT extensions
+/// using their pairwise shared RNG (`shared_two_by_two`):
+///   • Sender role produces keys  
+///   • Receiver role produces MACs for its chosen bits `x`  
+///
+/// 3. Global MAC consistency check
+/// The parties jointly sample `3*RHO` random challenge vectors `r` using the shared
+/// multi-party RNG `multi_shared_rand`, and if any check fails, the protocol aborts.
+///
+///
+/// 4. Output truncation
+/// Only the first `l` bits, keys, and MACs are kept.  
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_bits = l,
 ), err)]
@@ -389,6 +499,9 @@ async fn fabitn(
 ) -> Result<Vec<Share>, Error> {
     debug!("PI_aBit^n protocol of WRK17b");
     // Step 1) Pick random bit-string x of length lprime.
+    // (!) Different from the paper: we generate 3*RHO extra bits instead of 2*RHO bits as
+    // specified in theorem B.1 on page 26 of [WRK17b]. The proof in the paper is erroneous
+    // and only holds for 3*RHO bits.
     let three_rho = 3 * RHO;
     let lprime = l + three_rho;
     let mut x: Vec<bool> = (0..lprime).map(|_| random()).collect();
@@ -458,7 +571,8 @@ async fn fabitn(
         .collect();
 
     // Step 3 b) Compute xj and xjmac for each party, broadcast xj.
-    // We batch messages and send xjmac with xj as well, as from Step 3 d).
+    // (!) Different from paper: We batch messages and send xjmac with xj as well, as from
+    // Step 3 d).
     let mut xj = Vec::with_capacity(three_rho);
     for rbits in &r {
         let mut xm = false;
@@ -469,7 +583,6 @@ async fn fabitn(
         xj.push(xm);
     }
 
-    // Step 3 b continued) Send xj and its corresponding MACs to all parties except self.
     let mut xj_xjmac = vec![vec![]; n];
     for k in (0..n).filter(|k| *k != i) {
         let macs = &macs[k];
@@ -483,6 +596,7 @@ async fn fabitn(
         }
     }
 
+    // Step 3 b continued) Send xj and its corresponding MACs to all parties except self.
     let xj_xjmac_k = broadcast_first_scatter_second(channel, i, n, "fabitn", &xj_xjmac).await?;
 
     // Step 3 c) Compute keys.
@@ -565,17 +679,17 @@ fn chunked_update_with_rbits<T>(x: &[T], rbits: &[Block], mut update: impl FnMut
 
 /// Protocol PI_aShare that performs F_aShare from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
+/// We closely follow the description in the paper.
 ///
 /// This protocol allows parties to generate and distribute authenticated random shares securely.
 /// It consists of the following steps:
 ///
-/// 1. **Random Bit String Generation**: Each party picks a random bit string of a specified length.
-/// 2. **Autenticated Bit Generation**: The parties generate random authenticated bit shares.
-/// 3. **Commitment and Verification**:
+/// a. **Autenticated Bit Generation**: The parties generate random authenticated bit shares.
+/// b. **Commitment and Verification**:
 ///    - The parties compute commitments based on a subset of their shares and broadcast these to ensure consistency.
 ///    - They then verify these commitments by performing decommitments and checking the validity of the
 ///      MACs against the commitments.
-/// 4. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
+/// c. **Return Shares**: Finally, the function returns the first `l` authenticated bit shares.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_shares = l,
 ), err)]
@@ -587,9 +701,9 @@ pub(crate) async fn fashare(
     shared_two_by_two: &mut [Vec<Option<ChaCha20Rng>>],
     multi_shared_rand: &mut ChaCha20Rng,
 ) -> Result<Vec<Share>, Error> {
-    // Step 1) Pick random bit-string x (input).
-
-    // Step 2) Run Pi_aBit^n to compute shares.
+    // Step 1) Pick random bit-string x (input). This is done inside fabitn.
+    // Step 2) Run Pi_aBit^n to to obtain l + RHO authenticated bits. The last RHO bits are
+    // reserved exclusively for consistency checking and will be discarded.
     debug!("PI_aShare protocol of WRK17b");
     let mut xishares = fabitn(
         (channel, delta),
@@ -601,8 +715,13 @@ pub(crate) async fn fashare(
     )
     .await?;
 
-    // Step 3) Compute commitments and verify consistency.
-    // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
+    // Step 3) Compute commitments and verify consistency:
+    // 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
+    // For each of the last ρ authenticated bits, we compute:
+    //   • d0  = XOR of all keys,
+    //   • d1  = d0 XOR delta,
+    //   • dm  = local bit and all MACs (concatenated),
+    // and commit to all three values.
     let mut d0 = vec![0; RHO];
     let mut d1 = vec![0; RHO];
     let mut c0_c1_cm = Vec::with_capacity(RHO); // c0, c1, cm
@@ -611,13 +730,17 @@ pub(crate) async fn fashare(
     for r in 0..RHO {
         let xishare = &xishares[l + r];
         let mut dm = Vec::with_capacity(n * 16);
+        // First byte is the local bit
         dm.push(xishare.0 as u8);
+        // Collect MACs and XOR keys
         for k in (0..n).filter(|k| *k != i) {
             let (mac, key) = xishare.1.0[k];
             d0[r] ^= key.0;
             dm.extend(&mac.0.to_be_bytes());
         }
+        // Alternative key value for bit = 1
         d1[r] = d0[r] ^ delta.0;
+        // Commit to both possibilities and the MAC vector
         let c0 = commit(&d0[r].to_be_bytes());
         let c1 = commit(&d1[r].to_be_bytes());
         let cm = commit(&dm);
@@ -626,6 +749,7 @@ pub(crate) async fn fashare(
         dmvec.push(dm);
     }
 
+    // Broadcast commitments
     let mut c0_c1_cm_k = broadcast(channel, i, n, "fashare comm", &c0_c1_cm).await?;
 
     c0_c1_cm_k[i] = c0_c1_cm;
@@ -634,24 +758,29 @@ pub(crate) async fn fashare(
     let mut dm_k = broadcast(channel, i, n, "fashare ver", &dmvec).await?;
     dm_k[i] = dmvec;
 
-    // 3 c) Compute bi to determine di_bi and send to all parties.
+    // Step 4) Determine the effective bit b_i for each check index
+    // and broadcast the corresponding di_bi.
     let mut bi = [false; RHO];
     let mut di_bi = vec![0; RHO];
     for r in 0..RHO {
+        // Reconstruct b_i by XORing all revealed bit values
         for k in (0..n).filter(|k| *k != i) {
             if dm_k[k][r][0] > 1 {
                 return Err(Error::InvalidBitValue);
             }
             bi[r] ^= dm_k[k][r][0] != 0;
         }
+        // Select d0 or d1 depending on b_i
         di_bi[r] = if bi[r] { d1[r] } else { d0[r] };
     }
 
     let di_bi_k = broadcast(channel, i, n, "fashare di_bi", &di_bi).await?;
 
-    // 3 d) Consistency check of macs: open commitment of xor of keys and check if it equals to the xor of all macs.
+    // 3 d) Consistency check of macs: open commitment of xor of keys and check if it equals
+    // to the xor of all macs.
     let mut xor_xk_macs = vec![vec![0; RHO]; n];
     for r in 0..RHO {
+        // Reconstruct XOR of MACs from all parties
         for (k, dmv) in dm_k.iter().enumerate().take(n) {
             for kk in (0..n).filter(|pp| *pp != k) {
                 if dmv.is_empty() {
@@ -672,10 +801,11 @@ pub(crate) async fn fashare(
                 }
             }
         }
+        // Check commitment openings and MAC equality
         for k in (0..n).filter(|k| *k != i) {
             let d_bj = &di_bi_k[k][r].to_be_bytes();
-            let commitments = &c0_c1_cm_k[k][r];
-            if !open_commitment(&commitments.0, d_bj) && !open_commitment(&commitments.1, d_bj) {
+            let (c0, c1, _) = &c0_c1_cm_k[k][r];
+            if !open_commitment(c0, d_bj) && !open_commitment(c1, d_bj) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             if xor_xk_macs[k][r] != di_bi_k[k][r] {
@@ -692,10 +822,34 @@ pub(crate) async fn fashare(
 
 /// Protocol Pi_HaAND that performs F_HaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
+/// We closely follow the description in the paper.
 ///
 /// This protocol computes the half-authenticated AND of two bit strings.
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
+/// - `x` is provided as authenticated shares,
+/// - `y` is provided as a local cleartext bit vector.
+///
+/// The output is a vector `v` such that, for each position `i`:
+///
+/// ```text
+/// v[i] = XOR_j (x_j[i] ∧ y_i[i])
+/// ```
+/// where the XOR ranges over all parties’ contributions. This value corresponds
+/// to the unauthenticated component of an authenticated AND share.
+///
+///
+/// # High-level idea
+///
+/// Each party masks its contribution with random bits and uses
+/// hash-based correlation checks (derived from MAC keys) so that:
+/// - no party learns the other parties’ inputs,
+/// - correctness is guaranteed assuming the MACs are valid,
+/// - the result can later be completed into a fully authenticated AND.
+///
+/// This protocol performs no MAC verification itself; correctness relies on the
+/// validity of the input authenticated shares. The output must be combined with
+/// additional steps to obtain a fully authenticated AND.
 #[instrument(level=Level::DEBUG, skip_all, err)]
 async fn fhaand(
     (channel, delta): (&impl Channel, Delta),
@@ -711,27 +865,36 @@ async fn fhaand(
         return Err(Error::InvalidLength);
     }
 
-    // Step 2) Calculate v for each party.
+    // Step 2) Oblivious computation of masked AND contributions for each party.
+    //
+    // Each party j not i:
+    //   - samples random masks s_j,
+    //   - derives hash-based correlations from MAC keys,
+    //   - sends masked values (h0, h1) to party j,
+    //   - accumulates its local contribution to v.
     let send_all = try_join_all((0..n).filter(|j| *j != i).map(async |j| {
         let mut vi = vec![false; l];
-        // Step 2 a) Pick random sj, compute h0, h1 for all j != i, and send to the respective party.
+        // Step 2 a) For each bit, sample s_j and compute h0, h1.
         let mut h0h1_for_j = vec![(false, false); l];
         for ll in 0..l {
             let sj: bool = random();
             let (_, kixj) = xshares[ll].1.0[j];
+            // Hash MAC keys to derive pseudorandom bits
             let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
             let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
             h0h1_for_j[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
             h0h1_for_j[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
+            // Accumulate masked local contribution
             vi[ll] ^= sj;
         }
+        // Send masked values to party j
         send_to(channel, j, "haand", &h0h1_for_j)
             .await
             .map_err(Error::from)?;
         Ok(vi)
     }));
 
-    // Step 2 b) Receive h0, h1 from all parties.
+    // Step 2 b) Receive masked values (h0, h1) from all other parties.
     let recv_all = try_join_all((0..n).map(async |j| {
         if j != i {
             recv_vec_from::<(bool, bool)>(channel, j, "haand", l)
@@ -744,13 +907,14 @@ async fn fhaand(
 
     let (vi_all, received_h0h1) = futures_util::try_join!(send_all, recv_all)?;
 
-    // Finish step 2) Calculate v.
+    // Finish step 2) Calculate v by combining all random masks.
     let mut vi = vi_all.iter().fold(vec![false; l], |mut vi, el| {
         xor_inplace(&mut vi, el);
         vi
     });
 
-    // Process received h0h1 and compute t
+    // Use received h0, h1 values and authenticated x-shares to compute
+    // the final masked AND result v.
     for j in (0..n).filter(|j| *j != i) {
         let h0h1_j = &received_h0h1[j];
         for ll in 0..l {
@@ -766,13 +930,15 @@ async fn fhaand(
         }
     }
 
-    // Step 3) Return v.
+    // Step 3) Return v, the half-authenticated AND shares.
     Ok(vi)
 }
 
 /// This function takes a 128-bit unsigned integer (`u128`) as input and produces a 128-bit hash value.
 ///
 /// We use the BLAKE3 cryptographic hash function to hash the input value and return the resulting hash.
+///
+/// # Security Note
 /// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
@@ -782,6 +948,7 @@ fn hash128(input: u128) -> Result<u128, Error> {
     let mut hasher = Hasher::new();
     hasher.update(&input.to_le_bytes());
     let mut xof = hasher.finalize_xof();
+    // Enforce that truncation provides sufficient security
     if RHO > 64 {
         return Err(Error::InvalidHashLength);
     }
@@ -796,6 +963,10 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
 /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
 /// the XOR of the output values z.
+///
+/// # Notes
+/// This protocol is leaky by design and must be combined with bucketing
+/// (as described in WRK17b) to obtain fully secure authenticated AND gates.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_leaky_auth_ands = l,
 ), err)]
@@ -813,11 +984,15 @@ async fn flaand(
         return Err(Error::InvalidLength);
     }
 
-    // Step 2) Run Pi_HaAND to get back some v.
+    // Step 2) Half-authenticated AND: Run Pi_HaAND to compute masked AND contributions v.
     let y = yshares.iter().take(l).map(|share| share.0).collect();
     let v = fhaand((channel, delta), i, n, l, xshares, y).await?;
 
-    // Step 3) Compute z and e AND shares.
+    // Step 3) Local computation of z and masking with r.
+    // z = v XOR (x AND y)
+    // e = z XOR r
+    //
+    // e will be revealed later in a controlled way.
     let mut z = vec![false; l];
     let mut e = vec![false; l];
     let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
@@ -831,7 +1006,7 @@ async fn flaand(
     drop(z);
 
     // Triple Checking.
-    // Step 4) Compute phi.
+    // Step 4) Compute phi values used for MAC consistency checking.
     let mut phi = vec![0; l];
     for (ll, phi_l) in phi.iter_mut().enumerate().take(l) {
         for k in (0..n).filter(|k| *k != i) {
@@ -854,14 +1029,22 @@ async fn flaand(
         }
     }
 
+    // (!) Different from the paper: We send e and uij together to reduce the number of
+    // communication rounds. The e values are not used until this point so we can safely postpone
+    // their sending until this step in the protocol (in the paper they are broadcast in Step 3).
     let ei_uij_k = broadcast_first_scatter_second(channel, i, n, "flaand", &ei_uij).await?;
 
+    // Compute ki_xj_phi and finalize zshares from Step 3).
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1.0[j];
+            // (!) Different from the paper: This step should only compute mi_xj_phi as per Step 5), which
+            // is then added to ki_xj_phi later. We do this here to reduce the number of loops over l and
+            // improve performance.
             ki_xj_phi[j][ll] ^= hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
-            // mi_xj_phi added here
-            // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
+            // (!) Different from the paper: Since the e values were sent here, we finalize MACs for z depending
+            // on mask e only in this step. This completes Step 3).
+            // Note: If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             let (mac, key) = rshares[ll].1.0[j];
             if ei_uij_k[j][ll].0 {
                 zshares[ll].1.0[j] = (mac, Key(key.0 ^ delta.0));
@@ -871,7 +1054,9 @@ async fn flaand(
         }
     }
 
-    // Step 6) Compute hash and comm and send to all parties.
+    // Step 6) Commitment-based global consistency check.
+    // Each party computes h_i and commits to it, then opens it. The XOR of all h_i
+    // must equal zero for correctness.
     let mut hi = vec![0; l];
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
@@ -891,6 +1076,7 @@ async fn flaand(
     // Then all parties broadcast Hi.
     let hi_k = broadcast(channel, i, n, "flaand hash", &hi).await?;
 
+    // Step 7) Open commitments and verify global XOR is zero.
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
     for k in (0..n).filter(|k| *k != i) {
         for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k[k].clone()).enumerate() {
@@ -901,14 +1087,15 @@ async fn flaand(
         }
     }
 
-    // Step 7) Check that the xor of all his is zero.
     if xor_all_hi.iter().take(l).any(|&xh| xh != 0) {
         return Err(Error::LaANDXorNotZero);
     }
     Ok(zshares)
 }
 
-/// Calculates the bucket size according to WRK17a, Table 4 for statistical security ρ = 40 (rho).
+/// Calculates the bucket size according to the paper WRK17a [Authenticated Garbling and Efficient
+/// Maliciously Secure Two-Party Computation](https://acmccs.github.io/papers/p21-wangA.pdf),
+/// Table 4 for statistical security ρ = 40 (rho).
 pub(crate) fn bucket_size(circuit_size: usize) -> usize {
     match circuit_size {
         n if n >= 280_000 => 3,
@@ -922,7 +1109,26 @@ type Bucket<'a> = Vec<(&'a Share, &'a Share, &'a Share)>;
 /// Protocol Pi_aAND that performs F_aAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// The protocol combines leaky authenticated bits into non-leaky authenticated bits.
+/// This protocol converts *leaky authenticated AND triples* into
+/// *fully authenticated AND triples* using bucketing and consistency checks.
+///
+/// Each output triple `(⟨x⟩, ⟨y⟩, ⟨z⟩)` satisfies:
+///
+/// ```text
+/// XOR_i z_i = (XOR_i x_i) ∧ (XOR_i y_i)
+/// ```
+/// with full authentication and negligible leakage.
+///
+/// The protocol consists of the following steps:
+/// 1. Generate `lb` leaky AND triples using Pi_LaAND.
+/// 2. Randomly permute and partition the triples into `l` buckets of size `b`.
+/// 3. For each bucket, perform a consistency check and combine the
+///    `b` leaky triples into a single non-leaky authenticated AND triple.
+///
+/// # Notes
+/// The bucket size `b` is chosen according to [WRK17a]. Bucketing removes the leakage introduced by
+/// Pi_LaAND at the cost of additional preprocessing. The resulting triples are safe to use
+/// in the online MPC phase.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_ands = l,
 ), err)]
@@ -935,25 +1141,30 @@ async fn faand(
     xyr_shares: &[Share],
 ) -> Result<Vec<(Share, Share, Share)>, Error> {
     debug!("PI_aAND protocol of WRK17b");
+    // Determine bucket size b and total number of leaky triples.
     let b = bucket_size(l);
     let lprime = l * b;
+    // Expect x, y, and r shares for all lprime triples.
     if xyr_shares.len() != 3 * lprime {
         return Err(Error::InvalidLength);
     }
 
+    // Split inputs into x, y, and r shares.
     let (xshares, rest) = xyr_shares.split_at(lprime);
     let (yshares, rshares) = rest.split_at(lprime);
 
-    // Step 1) Generate all leaky AND triples by calling flaand l' times.
+    // Step 1) Generate all leaky authenticated AND triples by calling flaand l' times.
+    // This produces l' triples (⟨x⟩, ⟨y⟩, ⟨z⟩) with controlled leakage.
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
 
-    // Step 2) Randomly partition all objects into l buckets, each with b objects.
+    // Step 2) Randomly bucketing.
+    // Randomly partition all objects into l buckets, each with b objects.
     // Use SliceRandom::shuffle for unbiased random permutation
     let mut indices: Vec<usize> = (0..lprime).collect();
     indices.shuffle(shared_rand);
 
     // Distribute shuffled indices into buckets using chunks
-    // Since indices.len() == lprime == l * b, chunks_exact(b) gives us exactly l chunks of size b
+    // Since indices.len() == lprime == l * b, chunks_exact(b) gives us exactly l chunks of size b.
     let buckets: Vec<Bucket> = indices
         .chunks_exact(b)
         .map(|chunk| {
@@ -970,10 +1181,13 @@ async fn faand(
         b
     );
 
-    // Step 3) For each bucket, combine b leaky ANDs into a single non-leaky AND.
+    // Step 3) Bucket verification and combination.
+    // For each bucket, combine b leaky ANDs into a single non-leaky authenticated AND triple.
+    // (!) Different from the paper: We first check all d-values for all buckets
+    // and only if all are valid, we proceed to combine the buckets.
+    // This is done to optimize performance by reducing the number of communication rounds.
     let d_values = check_dvalue((channel, delta), i, n, &buckets).await?;
     if d_values.len() != buckets.len() {
-        //=l
         return Err(Error::InvalidLength);
     }
 
@@ -982,10 +1196,25 @@ async fn faand(
         aand_triples.push(combine_bucket(i, n, bucket, d)?);
     }
 
+    // Return the final authenticated AND triples.
     Ok(aand_triples)
 }
 
-/// Protocol that transforms precomputed AND triples to specific triples using Beaver's method.
+/// Transforms random authenticated AND triples into AND triples for specific inputs
+/// using Beaver’s method (https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4).
+///
+/// This protocol takes:
+/// - precomputed *random* authenticated AND triples,
+/// - authenticated input shares for specific values alpha and beta,
+/// and produces authenticated shares of α · β.
+///
+/// The transformation follows Beaver’s method:
+/// 1. Parties locally compute blinded differences d and e.
+/// 2. Parties broadcast d and e together with MACs and verify correctness.
+/// 3. Using the public d and e values, parties locally derive the final AND share.
+///
+/// The resulting shares are fully authenticated and can be used as inputs
+/// to MPC computations.
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_ands = l,
 ), err)]
@@ -1007,13 +1236,14 @@ pub(crate) async fn beaver_aand(
         return Err(Error::InvalidLength);
     }
 
+    // Obtain random authenticated AND triples using Pi_aAND.
     let abc_triples = faand((channel, delta), i, n, l, shared_rand, abc_shares).await?;
     debug!("Received {} AND triples from faand", abc_triples.len());
     let len = abc_triples.len();
 
     // Beaver triple precomputation - transform random triples to specific triples.
-    // Steps 1 and 2) of https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4: compute blinded shares d and e and
-    // send to all parties with corresponding macs.
+    // Steps 1 and 2) of https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4:
+    // compute blinded difference shares for d and e and prepare their macs for verification.
     let mut d_e_dmac_emac = Vec::with_capacity(len);
     let mut de_shares = Vec::with_capacity(len);
 
@@ -1024,6 +1254,8 @@ pub(crate) async fn beaver_aand(
         de_shares.push((a ^ alpha, b ^ beta));
         d_e_dmac_emac.push((a.0 ^ alpha.0, b.0 ^ beta.0, Mac(0), Mac(0)));
     }
+
+    // Scatter d and e together with their MACs to all parties.
     let scatter_data: Vec<Vec<(bool, bool, Mac, Mac)>> = (0..n)
         .map(|k| {
             if k != i {
@@ -1040,6 +1272,7 @@ pub(crate) async fn beaver_aand(
         })
         .collect();
 
+    // Verify correctness of MACs for d and e.
     let d_e_dmac_emac_k: Vec<Vec<(bool, bool, Mac, Mac)>> =
         scatter(channel, i, "faand", &scatter_data).await?;
     for k in (0..n).filter(|k| *k != i) {
@@ -1054,6 +1287,7 @@ pub(crate) async fn beaver_aand(
             }
         }
     }
+    // Aggregate all parties' contributions to obtain the final d and e values.
     for (j, (d, e, _, _)) in d_e_dmac_emac.iter_mut().enumerate() {
         for k in (0..n).filter(|&k| k != i) {
             let (d_k, e_k, _, _) = d_e_dmac_emac_k[k][j];
@@ -1063,7 +1297,8 @@ pub(crate) async fn beaver_aand(
     }
     let mut alpha_and_beta = Vec::with_capacity(len);
 
-    // Step 3) of https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4: compute and return the final shares.
+    // Step 3) of https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4:
+    // compute and return the final shares.
     for j in 0..len {
         let (a, _, c) = &abc_triples[j];
         let (_, beta) = &alpha_beta_shares[j];
@@ -1080,7 +1315,16 @@ pub(crate) async fn beaver_aand(
     Ok(alpha_and_beta)
 }
 
-/// Check and return d-values for a vector of shares.
+/// Computes and verifies the d-values used for bucket combination in Pi_aAND.
+///
+/// For each bucket of leaky AND triples, this function:
+/// 1. Computes local `d`-values as XORs of the `y`-shares within the bucket.
+/// 2. Collects corresponding MACs from all parties.
+/// 3. Verifies that the MACs are consistent with the global MAC key delta.
+/// 4. Aggregates all parties' contributions to obtain the final d-values.
+///
+/// These d-values are used to safely combine leaky AND triples into a single
+/// non-leaky authenticated AND.
 #[instrument(level=Level::DEBUG, skip_all, err)]
 async fn check_dvalue(
     (channel, delta): (&impl Channel, Delta),
@@ -1088,7 +1332,7 @@ async fn check_dvalue(
     n: usize,
     buckets: &[Bucket<'_>],
 ) -> Result<Vec<Vec<bool>>, Error> {
-    // Step (a) compute and check macs of d-values.
+    // Step (a) Compute and verify d-values for each bucket.
     let len = buckets.len();
     let mut d_values: Vec<Vec<bool>> = vec![vec![]; len];
     if len == 0 {
@@ -1102,6 +1346,7 @@ async fn check_dvalue(
         }
     }
 
+    // Collect MACs for the d-values and scatter them to all parties.
     let scatter_data: Vec<Vec<(Vec<bool>, Vec<Mac>)>> = (0..n)
         .map(|k| {
             if k != i {
@@ -1124,6 +1369,7 @@ async fn check_dvalue(
 
     let dvalues_macs_all = scatter(channel, i, "dvalue", &scatter_data).await?;
 
+    // Verify MAC correctness and aggregate d-values across parties.
     for k in (0..n).filter(|k| *k != i) {
         let dvalues_macs_k = &dvalues_macs_all[k];
         for (j, dval) in d_values.iter_mut().enumerate().take(len) {
@@ -1143,13 +1389,17 @@ async fn check_dvalue(
     Ok(d_values)
 }
 
-/// Combine the whole bucket by combining elements one by one.
+/// Combines all leaky AND triples in a bucket into a single authenticated AND.
+///
+/// The bucket is reduced sequentially by repeatedly combining two leaky ANDs
+/// using the corresponding `d`-values.
 fn combine_bucket(
     i: usize,
     n: usize,
     bucket: Vec<(&Share, &Share, &Share)>,
     d_vec: Vec<bool>,
 ) -> Result<(Share, Share, Share), Error> {
+    // Take the first triple as the initial accumulator.
     let mut bucket = bucket.into_iter();
     let (x, y, z) = match bucket.next() {
         Some(item) => item,
@@ -1164,7 +1414,10 @@ fn combine_bucket(
     Ok(result)
 }
 
-/// Combine two leaky ANDs into one non-leaky AND.
+/// Combines two leaky authenticated AND triples into one non-leaky authenticated AND.
+///
+/// Given two leaky AND triples and a corresponding `d`-value, this function produces a
+/// new non-leaky authenticated AND triple.
 fn combine_two_leaky_ands(
     i: usize,
     n: usize,
@@ -1182,6 +1435,7 @@ fn combine_two_leaky_ands(
     }
     let xshare = Share(xbit, xauth);
 
+    // Combine z-shares using the d-value term.
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
     let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
     for k in (0..n).filter(|k| *k != i) {
