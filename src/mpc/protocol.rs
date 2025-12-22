@@ -46,6 +46,7 @@ use rand::random;
 use rand_chacha::ChaCha20Rng;
 use tracing::{Level, debug, info, instrument};
 
+use crate::block::Block;
 use crate::utils::file_or_mem_buf::FileOrMemBuf;
 use crate::{
     channel::{self, Channel, recv_from, recv_vec_from, scatter, send_to},
@@ -653,7 +654,7 @@ async fn garble(
     } = ctx;
     let mut random_shares = random_shares.iter()?;
     let mut shares = vec![Share(false, Auth(vec![])); circ.max_reg_count];
-    let mut labels = vec![Label(0); circ.max_reg_count];
+    let mut labels = vec![Label(Block::ZERO); circ.max_reg_count];
     let mut input_labels = vec![];
     let mut auth_bits = auth_bits.iter()?;
     let mut table_shares = FileOrMemBuf::default();
@@ -913,7 +914,7 @@ async fn input_processing(
             let mut input_labels = other_input_labels.lock().expect("poison");
             for (w, label) in labels_of_own_inputs.iter().enumerate() {
                 if let Some(label) = label {
-                    let labels = input_labels[w].get_or_insert(vec![Label(0); p_max]);
+                    let labels = input_labels[w].get_or_insert(vec![Label(Block::ZERO); p_max]);
                     labels[p] = *label;
                 }
             }
@@ -993,7 +994,7 @@ fn evaluate(
                         .next()
                         .ok_or(MpcError::MissingTableShareForInst(w))??;
 
-                    let mut label = vec![Label(0); p_max];
+                    let mut label = vec![Label(Block::ZERO); p_max];
                     let mut macs = vec![vec![]; p_max];
                     let Share(mut s, mac_s_key_r) = table_shares[i].clone();
                     macs[p_eval] = mac_s_key_r.macs();
