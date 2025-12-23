@@ -21,7 +21,7 @@ broken_intra_doc_links = "warn"
 
 [package]
 name = "polytune"
-version = "0.2.0-alpha.2"
+version = "0.2.0-alpha.4"
 edition = "2024"
 rust-version = "1.89.0"
 description = "Maliciously-Secure Multi-Party Computation (MPC) Engine using Authenticated Garbling"
