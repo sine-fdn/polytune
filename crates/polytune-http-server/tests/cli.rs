@@ -33,11 +33,6 @@ fn test_and_profile_server() {
     let polytune_bin = PathBuf::from(env!("CARGO_BIN_EXE_polytune-http-server"));
     let crate_dir: PathBuf = env!("CARGO_MANIFEST_DIR").parse().unwrap();
 
-    #[cfg(not(debug_assertions))]
-    if samply_profiling || heaptrack_profiling {
-        panic!("Use --profile=debug-release when profiling")
-    }
-
     let cmd_prog = if heaptrack_profiling {
         "heaptrack".into()
     } else if samply_profiling {
