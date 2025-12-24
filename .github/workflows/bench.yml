@@ -56,7 +56,7 @@ jobs:
           path: ${{ env.CRITERION_HOME }}
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
       - name: Upload benchmark reports
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: benchmark-reports
           path: ${{ env.CRITERION_HOME }}
