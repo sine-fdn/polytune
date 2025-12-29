@@ -40,7 +40,7 @@ jobs:
         uses: ubicloud/rust-cache@65b3ff06b9bcc69d88c25e212f1ae3d14a0953c3
       - name: Restore criterion cache
         id: restore-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.CRITERION_HOME }}
           key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.cpu-info.outputs.cpu_model }}-criterion-data-${{ github.sha }}
@@ -51,7 +51,7 @@ jobs:
           cargo bench --features "__bench" -- "${{ github.event.inputs.filter }}"
       - name: Save criterion cache
         if: ${{ !github.event.inputs.ref }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.CRITERION_HOME }}
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
