@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.100"
-axum = "0.8.7"
+axum = "0.8.8"
 blake3 = "1.5.1"
 clap = { version = "4.5.53", features = ["derive"] }
 futures-util = { version = "0.3.31", default-features = false, features = [
