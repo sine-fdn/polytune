@@ -4,21 +4,23 @@ use std::ops::{BitAnd, BitXor};
 
 use serde::{Deserialize, Serialize};
 
+use crate::block::Block;
+
 /// The global key known only to a single party that is used to authenticate bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Delta(pub(crate) u128);
+pub(crate) struct Delta(pub(crate) Block);
 
 impl BitAnd<Delta> for bool {
     type Output = Delta;
 
     fn bitand(self, rhs: Delta) -> Self::Output {
-        if self { rhs } else { Delta(0) }
+        Delta(rhs.0.const_mul(self))
     }
 }
 
 /// A message authentication code held by a party together with an authenticated bit.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Mac(pub(crate) u128);
+pub(crate) struct Mac(pub(crate) Block);
 
 impl BitXor<Delta> for Mac {
     type Output = Key;
@@ -38,7 +40,7 @@ impl BitXor for Mac {
 
 /// A key used to authenticate (together with the [Delta] global key) a bit for the other party.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Key(pub(crate) u128);
+pub(crate) struct Key(pub(crate) Block);
 
 impl BitXor<Delta> for Key {
     type Output = Mac;
@@ -111,11 +113,11 @@ impl Auth {
     }
 
     pub(crate) fn xor_keys(&self) -> Key {
-        let mut k = 0;
+        let mut k = Key::default();
         for (_, key) in &self.0 {
-            k ^= key.0;
+            k = k ^ *key;
         }
-        Key(k)
+        k
     }
 
     pub(crate) fn xor_key(mut self, i: usize, delta: Delta) -> Auth {
@@ -134,7 +136,7 @@ pub(crate) struct GarbledGate(pub(crate) [Vec<u8>; 4]);
 
 /// A label for a particular wire in the circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Label(pub(crate) u128);
+pub(crate) struct Label(pub(crate) Block);
 
 impl BitXor for Label {
     type Output = Self;
