@@ -55,7 +55,7 @@ tracing-subscriber = { version = "0.3.22", optional = true }
 #
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = "0.12.28"
-url = "2.5.7"
+url = "2.5.8"
 wasm-bindgen = "0.2.100"
 wasm-bindgen-futures = "0.4.50"
 

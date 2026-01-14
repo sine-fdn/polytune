@@ -33,7 +33,7 @@ tower = { version = "0.5.1", features = ["util"] }
 tower-http = { version = "0.6.8", features = ["catch-panic", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-url = { version = "2.5.7", features = ["serde"] }
+url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.19.0", features = ["serde"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.dependencies]
