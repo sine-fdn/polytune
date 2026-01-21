@@ -2137,7 +2137,7 @@ dependencies = [
  "garble_lang",
  "polytune",
  "polytune-test-utils",
- "reqwest",
+ "reqwest 0.12.28",
  "schemars",
  "serde",
  "serde_json",
@@ -2158,7 +2158,7 @@ dependencies = [
  "axum",
  "clap",
  "polytune",
- "reqwest",
+ "reqwest 0.12.28",
  "tokio",
  "tower-http",
  "tracing",
@@ -2180,8 +2180,8 @@ dependencies = [
  "nix",
  "polytune-server-core",
  "rand 0.9.2",
- "reqwest",
- "reqwest-middleware",
+ "reqwest 0.12.28",
+ "reqwest-middleware 0.5.0",
  "reqwest-retry",
  "schemars",
  "serde",
@@ -2206,7 +2206,7 @@ dependencies = [
  "axum",
  "clap",
  "polytune",
- "reqwest",
+ "reqwest 0.12.28",
  "tokio",
  "tower-http",
  "tracing",
@@ -2244,7 +2244,7 @@ dependencies = [
  "garble_lang",
  "polytune",
  "polytune-test-utils",
- "reqwest",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sqlx",
@@ -2273,7 +2273,7 @@ dependencies = [
  "gloo-timers",
  "http",
  "polytune",
- "reqwest",
+ "reqwest 0.12.28",
  "tokio",
  "tower-http",
  "tracing",
@@ -2564,6 +2564,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04e9018c9d814e5f30cc16a0f03271aeab3571e609612d9fe78c1aa8d11c2f62"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-core",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "js-sys",
+ "log",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "sync_wrapper",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "reqwest-middleware"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2572,9 +2603,24 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http",
- "reqwest",
+ "reqwest 0.12.28",
  "serde",
  "thiserror 1.0.69",
+ "tower-service",
+]
+
+[[package]]
+name = "reqwest-middleware"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f42e2f48018a33d679ee7f477a446b697663a14e91ab0b3a0206792a22dd3aa8"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "http",
+ "reqwest 0.13.1",
+ "serde",
+ "thiserror 2.0.17",
  "tower-service",
 ]
 
@@ -2591,8 +2637,8 @@ dependencies = [
  "http",
  "hyper",
  "parking_lot 0.11.2",
- "reqwest",
- "reqwest-middleware",
+ "reqwest 0.12.28",
+ "reqwest-middleware 0.4.2",
  "retry-policies",
  "thiserror 1.0.69",
  "tokio",
