@@ -8,7 +8,7 @@ publish = false
 aide = { version = "0.15.1", features = ["axum", "axum-json", "swagger"] }
 anyhow = "1.0.100"
 axum = "0.8.8"
-blake3 = "1.5.1"
+blake3 = "1.8.3"
 clap = { version = "4.5.54", features = ["derive"] }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "alloc",

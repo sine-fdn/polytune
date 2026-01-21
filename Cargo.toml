@@ -58,7 +58,7 @@ __bench = []
 [dependencies]
 aes = "=0.9.0-rc.2"
 bincode = { version = "2.0.1", default-features = false, features = ["std", "serde"] }
-blake3 = "1.5.0"
+blake3 = "1.8.3"
 bytemuck = { version = "1.24.0", features = ["latest_stable_rust"] }
 chacha20poly1305 = "0.10.1"
 curve25519-dalek = { version = "4.1.0", features = ["rand_core"] }
