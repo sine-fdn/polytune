@@ -27,7 +27,7 @@ sqlx = { version = "0.8.6", features = [
     "sqlite",
 ] }
 tokio = { version = "1.49.0", features = ["macros", "rt", "rt-multi-thread"] }
-tower = { version = "0.5.1", features = ["util"] }
+tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.6.8", features = ["fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
