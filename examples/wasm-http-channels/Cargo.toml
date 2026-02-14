@@ -42,7 +42,7 @@ web-sys = { version = "0.3.77", features = ["console"] }
 #
 anyhow = { version = "1.0.100", optional = true }
 axum = { version = "0.8.8", optional = true }
-clap = { version = "4.5.54", features = ["derive"], optional = true }
+clap = { version = "4.5.57", features = ["derive"], optional = true }
 http = { version = "1.4", optional = true }
 tower-http = { version = "0.6.8", features = [
     "cors",
