@@ -18,7 +18,7 @@ anyhow = "1.0.100"
 axum = { version = "0.8.8", features = ["macros"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 garble_lang = { version = "0.7.0-alpha.1", features = ["json_schema"] }
-jsonwebtoken = {version = "10.2.0", features = ["rust_crypto"]}
+jsonwebtoken = {version = "10.3.0", features = ["rust_crypto"]}
 polytune-server-core = { path = "../polytune-server-core", version = "0.1.0" }
 rand = "0.9.2"
 reqwest = { version = "0.12.28", features = ["json"] }
