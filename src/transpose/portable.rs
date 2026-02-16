@@ -67,7 +67,7 @@ pub(super) fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) 
             // └─────────────────────────────────────────────────────────────┘
             for output_row_offset in (0..8).rev() {
                 // get msb of each byte
-                let msbs = v.move_mask().to_le_bytes();
+                let msbs = v.to_bitmask().to_le_bytes();
                 // write msbs to output at transposed position
                 let idx = out(row, col + output_row_offset, rows) as isize;
                 // This should result in only one bounds check for the output
