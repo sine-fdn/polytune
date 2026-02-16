@@ -25,7 +25,7 @@ bin = [
 ]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.48.0", features = [
+tokio = { version = "1.49.0", features = [
     "macros",
     "rt",
     "rt-multi-thread",
@@ -41,23 +41,23 @@ web-sys = { version = "0.3.77", features = ["console"] }
 # for the server:
 #
 anyhow = { version = "1.0.100", optional = true }
-axum = { version = "0.8.7", optional = true }
-clap = { version = "4.5.53", features = ["derive"], optional = true }
+axum = { version = "0.8.8", optional = true }
+clap = { version = "4.5.57", features = ["derive"], optional = true }
 http = { version = "1.4", optional = true }
 tower-http = { version = "0.6.8", features = [
     "cors",
     "trace",
 ], optional = true }
-tracing = { version = "0.1.43", optional = true }
+tracing = { version = "0.1.44", optional = true }
 tracing-subscriber = { version = "0.3.22", optional = true }
 #
 # for the client:
 #
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
-reqwest = "0.12.26"
-url = "2.5.7"
+reqwest = "0.12.28"
+url = "2.5.8"
 wasm-bindgen = "0.2.100"
-wasm-bindgen-futures = "0.4.50"
+wasm-bindgen-futures = "0.4.56"
 
 [package.metadata.cargo-machete]
 # needed by wasm-bindgen

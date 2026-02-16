@@ -7,9 +7,9 @@ publish = false
 [dependencies]
 aide = { version = "0.15.1", features = ["axum", "axum-json", "swagger"] }
 anyhow = "1.0.100"
-axum = "0.8.7"
-blake3 = "1.5.1"
-clap = { version = "4.5.53", features = ["derive"] }
+axum = "0.8.8"
+blake3 = "1.8.3"
+clap = { version = "4.5.57", features = ["derive"] }
 futures-util = { version = "0.3.31", default-features = false, features = [
     "alloc",
     "async-await-macro",
@@ -17,14 +17,14 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 garble_lang = { version = "0.7.0-alpha.1", features = ["json_schema"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 polytune-test-utils = { path = "../../crates/polytune-test-utils" }
-reqwest = { version = "0.12.26", features = ["blocking", "json"] }
+reqwest = { version = "0.12.28", features = ["blocking", "json"] }
 schemars = { version = "0.9", features = ["url2"] }
 serde = "1.0.228"
-serde_json = "1.0.145"
-tempfile = "3.23.0"
-tokio = { version = "1.48.0", features = ["macros", "rt", "rt-multi-thread"] }
-tower = { version = "0.5.1", features = ["util"] }
+serde_json = "1.0.149"
+tempfile = "3.24.0"
+tokio = { version = "1.49.0", features = ["macros", "rt", "rt-multi-thread"] }
+tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.6.8", features = ["fs", "trace"] }
-tracing = "0.1.43"
+tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
-url = { version = "2.5.7", features = ["serde"] }
+url = { version = "2.5.8", features = ["serde"] }
