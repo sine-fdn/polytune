@@ -56,7 +56,7 @@ bench = false
 __bench = []
 
 [dependencies]
-aes = "=0.9.0-rc.2"
+aes = "=0.9.0-rc.4"
 bincode = { version = "2.0.1", default-features = false, features = ["std", "serde"] }
 blake3 = "1.8.3"
 bytemuck = { version = "1.24.0", features = ["latest_stable_rust"] }
