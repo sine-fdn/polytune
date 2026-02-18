@@ -97,7 +97,7 @@ cpufeatures = "0.2.17"
 [dev-dependencies]
 criterion = { version = "0.8.1", features = ["async_tokio"] }
 polytune-test-utils = { path = "crates/polytune-test-utils" }
-proptest = "1.9.0"
+proptest = "1.10.0"
 tokio = { version = "1.49.0", features = ["full"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
