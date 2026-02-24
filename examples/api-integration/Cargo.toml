@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 aide = { version = "0.15.1", features = ["axum", "axum-json", "swagger"] }
-anyhow = "1.0.100"
+anyhow = "1.0.101"
 axum = "0.8.8"
 blake3 = "1.8.3"
 clap = { version = "4.5.57", features = ["derive"] }
