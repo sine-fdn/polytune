@@ -62,7 +62,7 @@ blake3 = "1.8.3"
 bytemuck = { version = "1.25.0", features = ["latest_stable_rust"] }
 chacha20poly1305 = "0.10.1"
 curve25519-dalek = { version = "4.1.0", features = ["rand_core"] }
-futures-util = { version = "0.3.31", default-features = false, features = [
+futures-util = { version = "0.3.32", default-features = false, features = [
     "alloc",
     "async-await-macro",
 ] }
