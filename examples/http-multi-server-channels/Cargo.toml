@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 anyhow = "1.0.101"
 axum = "0.8.8"
-clap = { version = "4.5.57", features = ["derive"] }
+clap = { version = "4.5.59", features = ["derive"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
 reqwest = "0.13.2"
 tokio = { version = "1.49.0", features = ["macros", "rt", "rt-multi-thread"] }
