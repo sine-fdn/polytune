@@ -70,8 +70,8 @@ fn key_and_nonce(
     }: &GarblingKey,
 ) -> (Key, Nonce) {
     let mut key = [0; 32];
-    key[..16].copy_from_slice(&label_x.0.to_be_bytes());
-    key[16..].copy_from_slice(&label_y.0.to_be_bytes());
+    key[..16].copy_from_slice(label_x.0.as_bytes());
+    key[16..].copy_from_slice(label_y.0.as_bytes());
     let mut nonce = [0; 12];
     nonce[..8].copy_from_slice(&(*w as u64).to_be_bytes());
     nonce[8] = *row;
@@ -82,9 +82,9 @@ fn key_and_nonce(
 mod tests {
     use rand::random_range;
 
-    use crate::{
-        mpc::data_types::{Label, Mac},
-        mpc::garble::{GarblingKey, decrypt, encrypt},
+    use crate::mpc::{
+        data_types::{Label, Mac},
+        garble::{GarblingKey, decrypt, encrypt},
     };
 
     #[test]
@@ -99,7 +99,7 @@ mod tests {
         };
         let triple = (
             random(),
-            vec![Mac(random()), Mac(0), Mac(random())],
+            vec![Mac(random()), Mac::default(), Mac(random())],
             Label(random()),
         );
         let encrypted = encrypt(&key, triple.clone()).unwrap();
