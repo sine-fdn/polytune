@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 axum = "0.8.8"
 clap = { version = "4.5.60", features = ["derive"] }
 polytune = { path = "../../", version = "0.2.0-alpha.1" }
