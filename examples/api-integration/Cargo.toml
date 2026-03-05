@@ -9,7 +9,7 @@ aide = { version = "0.15.1", features = ["axum", "axum-json", "swagger"] }
 anyhow = "1.0.101"
 axum = "0.8.8"
 blake3 = "1.8.3"
-clap = { version = "4.5.59", features = ["derive"] }
+clap = { version = "4.5.60", features = ["derive"] }
 futures-util = { version = "0.3.32", default-features = false, features = [
     "alloc",
     "async-await-macro",
