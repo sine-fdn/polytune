@@ -160,6 +160,12 @@ impl Block {
         }
         BitIter { blk: *self, idx: 0 }
     }
+
+    /// Computes self * b, where b is `bool` in constant time.
+    #[inline]
+    pub fn const_mul(&self, b: bool) -> Block {
+        Block::conditional_select(&Block::ZERO, self, Choice::from(u8::from(b)))
+    }
 }
 
 // Implement standard operators for more ergonomic usage
