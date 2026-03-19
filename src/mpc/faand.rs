@@ -2,16 +2,18 @@
 //!
 //! This module implements the preprocessing phase of the [WRK17b](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979)
 //! protocol, which generates the cryptographic material needed for maliciously-secure MPC. The
-//! preprocessing is function-independent, meaning the same authenticated shares and multiplication
-//! triples can be used for any boolean circuit of appropriate size.
+//! preprocessing has a function-independent and function-dependent phase.
+//! The authenticated shares and multiplication triples computed in the function-independent preprocessing
+//! can be used for any boolean circuit of appropriate size. The function-dependent preprocessing uses
+//! multiplication triples to compute the AND of the input authenticated shares to each AND gate.
 //!
 //! The preprocessing phase generates shares of **authenticated multiplication triples** (x, y, z) where z = x ∧ y:
 //! Each share consists of:
-//! - A secret bit value held by the party
-//! - MACs on the bit values held by other parties
-//! - Keys held by the bit holder for verifying the MACs
+//! - A share x_i of a secret bit value x held by party i
+//! - MACs of x_i authenticated by all other parties j != i
+//! - The Keys of party i for the MACs of the shared bits x_j held by the other parties j != i
 //!
-//! This authentication structure ensures that malicious parties cannot deviate from the protocol
+//! The authentication structure and protocols ensure that malicious parties cannot deviate from the protocol
 //! without being detected with overwhelming probability depending on the statistical security
 //! parameter RHO = 40 (this means that any cheating attempt is detected with probability
 //! at least `1 - 2^-40`).
@@ -33,11 +35,14 @@
 //!
 //! ## 4. AND Triple Generation
 //! The core preprocessing output is authenticated AND triples (x, y, z) where z = x ∧ y:
-//! - [`fhaand`]: Computes half-authenticated AND operations (one party authenticates)
+//! - [`fhaand`]: Computes authenticated x of the triple and unauthenticated cross terms of x ∧ y
+//!   (half authenticated AND)
 //! - [`flaand`]: Combines half-authenticated ANDs into "leaky" authenticated AND triples
 //! - [`faand`]: Uses bucketing to combine multiple leaky ANDs into fully secure AND triples
-//! - [`beaver_aand`]: Transforms random AND triples into specific triples needed for computation, i.e.,
-//!   where x and y are shares of specific input values
+//!
+//! ## 5. Function-dependent preprocessing
+//! - [`beaver_aand`]: Uses authenticated AND triples to multiply randomly sampled authenticated
+//!   input shares of AND gates to compute output share.
 use std::{fmt, vec};
 
 use futures_util::future::try_join_all;
@@ -173,7 +178,7 @@ fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
 }
 
 /// Performs the verification step of *broadcast with abort* following the
-/// Goldwasser–Lindell protocol.
+/// Goldwasser–Lindell protocol[^broadcast].
 ///
 /// This function checks the correctness of a broadcast performed via
 /// `unverified_broadcast` by ensuring that *all parties* report *consistent
@@ -190,6 +195,9 @@ fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
 /// # Note
 /// If `n == 2`, broadcast verification is skipped because consistency is
 /// trivially guaranteed in the two-party case.
+///
+/// [^broadcast]: [Secure Multi-Party Computation Without Agreement](https://eprint.iacr.org/2002/040.pdf)
+///     p. 16, Protocol 1 using hashes of values instead of actual values.
 async fn broadcast_verification<
     T: Clone + Serialize + DeserializeOwned + std::fmt::Debug + PartialEq,
 >(
@@ -269,7 +277,7 @@ pub(crate) async fn broadcast<
 /// Performs a *combined* verified broadcast and scatter.
 ///
 /// Each party provides a vector of tuples `(T, S)`.  
-/// - must be *identical across all parties* at each position `k`.
+/// - `T` must be *identical across all parties* at each position `k`.
 /// - `S` may differ and is scattered normally.
 ///
 /// The protocol:
@@ -827,7 +835,7 @@ pub(crate) async fn fashare(
 /// This protocol computes the half-authenticated AND of two bit strings.
 /// The XOR of xiyj values are generated obliviously, which is half of the z value in an
 /// authenticated share, i.e., a half-authenticated share.
-/// - `x` is provided as authenticated shares,
+/// - `x` is provided as authenticated shares as input to the protocol (slight difference from paper),
 /// - `y` is provided as a local cleartext bit vector.
 ///
 /// The output is a vector `v` such that, for each position `i`:
@@ -836,7 +844,7 @@ pub(crate) async fn fashare(
 /// v[i] = XOR_j (x_j[i] ∧ y_i[i])
 /// ```
 /// where the XOR ranges over all parties’ contributions. This value corresponds
-/// to the unauthenticated component of an authenticated AND share.
+/// to the unauthenticated cross terms of x ∧ y.
 ///
 ///
 /// # High-level idea
@@ -960,9 +968,9 @@ fn hash128(input: u128) -> Result<u128, Error> {
 /// Protocol Pi_LaAND that performs F_LaAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// This asynchronous function implements the "leaky authenticated AND" protocol. It computes
+/// This function implements the "leaky authenticated AND" protocol. It computes
 /// shares <x>, <y>, and <z> such that the AND of the XORs of the input values x and y equals
-/// the XOR of the output values z.
+/// the XOR of the output values z. TODO: I don't think it is right that the "XOR of input values equals output value".
 ///
 /// # Notes
 /// This protocol is leaky by design and must be combined with bucketing
@@ -1097,6 +1105,11 @@ async fn flaand(
 /// Maliciously Secure Two-Party Computation](https://acmccs.github.io/papers/p21-wangA.pdf),
 /// Table 4 for statistical security ρ = 40 (rho).
 pub(crate) fn bucket_size(circuit_size: usize) -> usize {
+    const {
+        if RHO != 40 {
+            panic!("RHO must be 40 for the bucket sizes of the WRK17a paper");
+        }
+    };
     match circuit_size {
         n if n >= 280_000 => 3,
         n if n >= 3_100 => 4,
@@ -1109,7 +1122,7 @@ type Bucket<'a> = Vec<(&'a Share, &'a Share, &'a Share)>;
 /// Protocol Pi_aAND that performs F_aAND from the paper
 /// [Global-Scale Secure Multiparty Computation](https://dl.acm.org/doi/pdf/10.1145/3133956.3133979).
 ///
-/// This protocol converts *leaky authenticated AND triples* into
+/// This protocol converts *random authenticated shares* into
 /// *fully authenticated AND triples* using bucketing and consistency checks.
 ///
 /// Each output triple `(⟨x⟩, ⟨y⟩, ⟨z⟩)` satisfies:
@@ -1120,15 +1133,17 @@ type Bucket<'a> = Vec<(&'a Share, &'a Share, &'a Share)>;
 /// with full authentication and negligible leakage.
 ///
 /// The protocol consists of the following steps:
-/// 1. Generate `lb` leaky AND triples using Pi_LaAND.
+/// 1. Generate `lb` leaky AND triples using [Pi_LaAND].
 /// 2. Randomly permute and partition the triples into `l` buckets of size `b`.
 /// 3. For each bucket, perform a consistency check and combine the
 ///    `b` leaky triples into a single non-leaky authenticated AND triple.
 ///
 /// # Notes
 /// The bucket size `b` is chosen according to [WRK17a]. Bucketing removes the leakage introduced by
-/// Pi_LaAND at the cost of additional preprocessing. The resulting triples are safe to use
+/// [Pi_LaAND] at the cost of additional preprocessing. The resulting triples are safe to use
 /// in the online MPC phase.
+///
+/// [Pi_LaAND]: `flaand`
 #[instrument(level=Level::DEBUG, skip_all, fields(
     num_auth_ands = l,
 ), err)]
@@ -1154,7 +1169,7 @@ async fn faand(
     let (yshares, rshares) = rest.split_at(lprime);
 
     // Step 1) Generate all leaky authenticated AND triples by calling flaand l' times.
-    // This produces l' triples (⟨x⟩, ⟨y⟩, ⟨z⟩) with controlled leakage.
+    // This produces l' the missing <z> shares of the triples (⟨x⟩, ⟨y⟩, ⟨z⟩) with controlled leakage.
     let zshares = flaand((channel, delta), (xshares, yshares, rshares), i, n, lprime).await?;
 
     // Step 2) Randomly bucketing.
@@ -1200,13 +1215,15 @@ async fn faand(
     Ok(aand_triples)
 }
 
-/// Transforms random authenticated AND triples into AND triples for specific inputs
-/// using Beaver’s method (https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4).
+/// Uses authenticated AND to compute AND of pairs of shares.
+///
+/// This uses Beaver’s method (https://securecomputation.org/docs/pragmaticmpc.pdf#section.3.4)
+/// to compute the output share <α ∧ β> of and AND gate with inputs α and β.
 ///
 /// This protocol takes:
 /// - precomputed *random* authenticated AND triples,
 /// - authenticated input shares for specific values alpha and beta,
-/// and produces authenticated shares of α · β.
+/// and produces authenticated shares of α ∧ β (inputs to AND gates)
 ///
 /// The transformation follows Beaver’s method:
 /// 1. Parties locally compute blinded differences d and e.
