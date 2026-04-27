@@ -1158,7 +1158,7 @@ fn combine_bucket(
     let mut result = (x.clone(), y.clone(), z.clone());
 
     // Combine elements one by one, starting from the second element.
-    for (triple, d) in bucket.zip(d_vec.into_iter()) {
+    for (triple, d) in bucket.zip(d_vec) {
         result = combine_two_leaky_ands(i, n, result, triple, d)?;
     }
     Ok(result)
