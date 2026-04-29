@@ -26,7 +26,7 @@ jobs:
           RAW_TAG=${{ github.ref_name }}
           echo "version=${RAW_TAG#http-server-v}" >> $GITHUB_OUTPUT
       - name: Install taplo for extracting http-server version
-        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
+        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458
         if: startsWith(github.ref, 'refs/tags/http-server-v')
         with:
           tool: taplo@0.10.0
