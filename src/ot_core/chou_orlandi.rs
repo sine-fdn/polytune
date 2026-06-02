@@ -75,7 +75,7 @@ impl OtSender for Sender {
         }
         self.counter += inputs.len() as u128;
         let mut c0c1vec = vec![];
-        for (input, k) in inputs.iter().zip(ks.into_iter()) {
+        for (input, k) in inputs.iter().zip(ks) {
             let c0 = k.0 ^ input.0;
             let c1 = k.1 ^ input.1;
             c0c1vec.push((c0, c1));
