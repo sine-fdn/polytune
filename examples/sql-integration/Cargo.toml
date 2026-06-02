@@ -7,7 +7,7 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1.0.102"
 axum = "0.8.8"
-blake3 = "1.8.3"
+blake3 = "1.8.5"
 clap = { version = "4.5.60", features = ["derive"] }
 futures-util = { version = "0.3.32", default-features = false, features = [
     "alloc",
