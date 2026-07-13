@@ -5,6 +5,7 @@ use futures_util::future::try_join_all;
 use rand::{Rng, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use subtle::{Choice, ConditionallySelectable};
 use tracing::{Level, debug, instrument};
 
 use crate::{
@@ -104,13 +105,13 @@ fn open_commitment(commitment: &Commitment, value: &[u8]) -> bool {
     blake3::hash(value).as_bytes() == &commitment.0
 }
 
-/// Hashes a Vec<T> using blake3 and returns the resulting hash as `u128`.
+/// Hashes a Vec<T> using blake3 and returns the resulting hash as a [`Block`].
 ///
 /// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
 /// to be the case in all real-world usages of our protocol.
-pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
+pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<Block, Error> {
     if data.is_empty() {
         return Err(Error::EmptyVector);
     }
@@ -125,7 +126,7 @@ pub(crate) fn hash_vec<T: Serialize>(data: &Vec<T>) -> Result<u128, Error> {
     }
     let mut buf = [0u8; 16];
     binding.fill(&mut buf);
-    let hash = u128::from_le_bytes(buf);
+    let hash = Block::from(buf);
 
     Ok(hash)
 }
@@ -146,7 +147,7 @@ pub(crate) async fn broadcast_verification<
     if vec.is_empty() {
         return Err(Error::EmptyVector);
     }
-    let mut hash_vecs: Vec<u128> = vec![0; n];
+    let mut hash_vecs: Vec<Block> = vec![Block::ZERO; n];
     for k in (0..n).filter(|k| *k != i) {
         if let Ok(hash) = hash_vec(&vec[k]) {
             hash_vecs[k] = hash;
@@ -395,7 +396,7 @@ async fn fabitn(
     debug!("Generated local bitstring x of length {}", lprime);
 
     // Steps 2) Use the output of the oblivious transfers between each pair of parties to generate keys and macs.
-    let deltas = vec![Block::from(delta.0.to_be_bytes()); lprime];
+    let deltas = vec![delta.0; lprime];
 
     // Step 2: Use the shared RNGs for key and MAC generation
     if !(shared_two_by_two.len() == n && shared_two_by_two.iter().all(|row| row.len() == n)) {
@@ -474,10 +475,10 @@ async fn fabitn(
     for k in (0..n).filter(|k| *k != i) {
         let macs = &macs[k];
         for (rbits, xj) in r.iter().zip(xj.iter()) {
-            let mut xjmac = 0;
+            let mut xjmac = Block::ZERO;
             chunked_update_with_rbits(macs, rbits, |mac, rbit| {
-                let mask = (-(rbit as i128)) as u128;
-                xjmac ^= mac & mask;
+                let mask = Block::from((-(rbit as i128)) as u128);
+                xjmac ^= *mac & mask;
             });
             xj_xjmac[k].push((*xj, xjmac));
         }
@@ -489,11 +490,11 @@ async fn fabitn(
     for (j, rbits) in r.iter().enumerate() {
         for k in (0..n).filter(|k| *k != i) {
             let (xj, xjmac) = &xj_xjmac_k[k][j];
-            let mut xjkey = 0;
+            let mut xjkey = Block::ZERO;
 
             chunked_update_with_rbits(&keys[k], rbits, |key, rbit| {
-                let mask = (-(rbit as i128)) as u128;
-                xjkey ^= key & mask;
+                let mask = Block::from((-(rbit as i128)) as u128);
+                xjkey ^= *key & mask;
             });
 
             // Step 3 d) Validity check of macs.
@@ -512,7 +513,7 @@ async fn fabitn(
     }
     let mut res = Vec::with_capacity(l);
     for (l, xi) in x.iter().enumerate().take(l) {
-        let mut authvec = vec![(Mac(0), Key(0)); n];
+        let mut authvec = vec![(Mac::default(), Key::default()); n];
         for k in (0..n).filter(|k| *k != i) {
             authvec[k] = (Mac(macs[k][l]), Key(keys[k][l]));
         }
@@ -603,8 +604,8 @@ pub(crate) async fn fashare(
 
     // Step 3) Compute commitments and verify consistency.
     // Step 3 a) Compute d0, d1, dm, c0, c1, cm and broadcast commitments to all parties.
-    let mut d0 = vec![0; RHO];
-    let mut d1 = vec![0; RHO];
+    let mut d0 = vec![Block::ZERO; RHO];
+    let mut d1 = vec![Block::ZERO; RHO];
     let mut c0_c1_cm = Vec::with_capacity(RHO); // c0, c1, cm
     let mut dmvec = Vec::with_capacity(RHO);
 
@@ -615,11 +616,13 @@ pub(crate) async fn fashare(
         for k in (0..n).filter(|k| *k != i) {
             let (mac, key) = xishare.1.0[k];
             d0[r] ^= key.0;
-            dm.extend(&mac.0.to_be_bytes());
+            // TODO endianness? Do we want to support eval between LE and BE system? If yes,
+            // this might break
+            dm.extend(mac.0.as_bytes());
         }
         d1[r] = d0[r] ^ delta.0;
-        let c0 = commit(&d0[r].to_be_bytes());
-        let c1 = commit(&d1[r].to_be_bytes());
+        let c0 = commit(d0[r].as_bytes());
+        let c1 = commit(d1[r].as_bytes());
         let cm = commit(&dm);
 
         c0_c1_cm.push((c0, c1, cm));
@@ -636,7 +639,7 @@ pub(crate) async fn fashare(
 
     // 3 c) Compute bi to determine di_bi and send to all parties.
     let mut bi = [false; RHO];
-    let mut di_bi = vec![0; RHO];
+    let mut di_bi = vec![Block::ZERO; RHO];
     for r in 0..RHO {
         for k in (0..n).filter(|k| *k != i) {
             if dm_k[k][r][0] > 1 {
@@ -644,13 +647,13 @@ pub(crate) async fn fashare(
             }
             bi[r] ^= dm_k[k][r][0] != 0;
         }
-        di_bi[r] = if bi[r] { d1[r] } else { d0[r] };
+        di_bi[r] = Block::conditional_select(&d0[r], &d1[r], Choice::from(u8::from(bi[r])));
     }
 
     let di_bi_k = broadcast(channel, i, n, "fashare di_bi", &di_bi).await?;
 
     // 3 d) Consistency check of macs: open commitment of xor of keys and check if it equals to the xor of all macs.
-    let mut xor_xk_macs = vec![vec![0; RHO]; n];
+    let mut xor_xk_macs = vec![vec![Block::ZERO; RHO]; n];
     for r in 0..RHO {
         for (k, dmv) in dm_k.iter().enumerate().take(n) {
             for kk in (0..n).filter(|pp| *pp != k) {
@@ -665,7 +668,7 @@ pub(crate) async fn fashare(
                     1 + kk * 16
                 };
                 let end = start + 16;
-                if let Ok(mac) = dm[start..end].try_into().map(u128::from_be_bytes) {
+                if let Ok(mac) = Block::try_from(&dm[start..end]) {
                     xor_xk_macs[kk][r] ^= mac;
                 } else {
                     return Err(Error::ConversionErr);
@@ -673,7 +676,7 @@ pub(crate) async fn fashare(
             }
         }
         for k in (0..n).filter(|k| *k != i) {
-            let d_bj = &di_bi_k[k][r].to_be_bytes();
+            let d_bj = di_bi_k[k][r].as_bytes();
             let commitments = &c0_c1_cm_k[k][r];
             if !open_commitment(&commitments.0, d_bj) && !open_commitment(&commitments.1, d_bj) {
                 return Err(Error::CommitmentCouldNotBeOpened);
@@ -719,8 +722,8 @@ async fn fhaand(
         for ll in 0..l {
             let sj: bool = random();
             let (_, kixj) = xshares[ll].1.0[j];
-            let hash_kixj = blake3::hash(&kixj.0.to_le_bytes());
-            let hash_kixj_delta = blake3::hash(&(kixj.0 ^ delta.0).to_le_bytes());
+            let hash_kixj = blake3::hash(kixj.0.as_bytes());
+            let hash_kixj_delta = blake3::hash((kixj.0 ^ delta.0).as_bytes());
             h0h1_for_j[ll].0 = (hash_kixj.as_bytes()[31] & 1 != 0) ^ sj;
             h0h1_for_j[ll].1 = (hash_kixj_delta.as_bytes()[31] & 1 != 0) ^ sj ^ yi[ll];
             vi[ll] ^= sj;
@@ -755,7 +758,7 @@ async fn fhaand(
         let h0h1_j = &received_h0h1[j];
         for ll in 0..l {
             let (mixj, _) = xshares[ll].1.0[j];
-            let hash_mixj = blake3::hash(&mixj.0.to_le_bytes());
+            let hash_mixj = blake3::hash(mixj.0.as_bytes());
             let mut t = hash_mixj.as_bytes()[31] & 1 != 0;
             t ^= if xshares[ll].0 {
                 h0h1_j[ll].1
@@ -770,24 +773,24 @@ async fn fhaand(
     Ok(vi)
 }
 
-/// This function takes a 128-bit unsigned integer (`u128`) as input and produces a 128-bit hash value.
+/// This function takes a 128-bit [`Block`] as input and produces a 128-bit [`Block`] hash value.
 ///
 /// We use the BLAKE3 cryptographic hash function to hash the input value and return the resulting hash.
 /// The hash is truncated to 128 bits to match the input size. Due to the truncation, the security
 /// guarantees of the hash function are reduced to 64-bit collision resistance and 128-bit preimage
 /// resistance. This is sufficient for the purposes of the protocol if RHO <= 64, which we expect
 /// to be the case in all real-world usages of our protocol.
-fn hash128(input: u128) -> Result<u128, Error> {
+fn hash128(input: Block) -> Result<Block, Error> {
     use blake3::Hasher;
     let mut hasher = Hasher::new();
-    hasher.update(&input.to_le_bytes());
+    hasher.update(input.as_bytes());
     let mut xof = hasher.finalize_xof();
     if RHO > 64 {
         return Err(Error::InvalidHashLength);
     }
     let mut buf = [0u8; 16];
     xof.fill(&mut buf);
-    Ok(u128::from_le_bytes(buf))
+    Ok(Block::from(buf))
 }
 
 /// Protocol Pi_LaAND that performs F_LaAND from the paper
@@ -820,7 +823,7 @@ async fn flaand(
     // Step 3) Compute z and e AND shares.
     let mut z = vec![false; l];
     let mut e = vec![false; l];
-    let mut zshares = vec![Share(false, Auth(vec![(Mac(0), Key(0)); n])); l];
+    let mut zshares = vec![Share(false, Auth(vec![(Mac::default(), Key::default()); n])); l];
 
     for ll in 0..l {
         z[ll] = v[ll] ^ (xshares[ll].0 & yshares[ll].0);
@@ -832,18 +835,18 @@ async fn flaand(
 
     // Triple Checking.
     // Step 4) Compute phi.
-    let mut phi = vec![0; l];
+    let mut phi = vec![Block::ZERO; l];
     for (ll, phi_l) in phi.iter_mut().enumerate().take(l) {
         for k in (0..n).filter(|k| *k != i) {
             let (mk_yi, ki_yk) = yshares[ll].1.0[k];
             *phi_l ^= ki_yk.0 ^ mk_yi.0;
         }
-        *phi_l ^= yshares[ll].0 as u128 * delta.0;
+        *phi_l ^= delta.0.const_mul(yshares[ll].0);
     }
 
     // Step 5) Compute uij and send to all parties along with e from Step 3).
     // Receive uij from all parties and compute mi_xj_phi.
-    let mut ki_xj_phi = vec![vec![0; l]; n];
+    let mut ki_xj_phi = vec![vec![Block::ZERO; l]; n];
     let mut ei_uij = vec![vec![]; n];
     for j in (0..n).filter(|j| *j != i) {
         for (ll, phi_l) in phi.iter().enumerate().take(l) {
@@ -859,28 +862,28 @@ async fn flaand(
     for j in (0..n).filter(|j| *j != i) {
         for (ll, xbit) in xshares.iter().enumerate().take(l) {
             let (mi_xj, _) = xshares[ll].1.0[j];
-            ki_xj_phi[j][ll] ^= hash128(mi_xj.0)? ^ (xbit.0 as u128 * ei_uij_k[j][ll].1);
+            let mul_x_ei_uij_k = ei_uij_k[j][ll].1.const_mul(xbit.0);
+            ki_xj_phi[j][ll] ^= hash128(mi_xj.0)? ^ mul_x_ei_uij_k;
             // mi_xj_phi added here
             // Part of Step 3) If e is true, this is negation of r as described in WRK17b, if e is false, this is a copy.
             let (mac, key) = rshares[ll].1.0[j];
-            if ei_uij_k[j][ll].0 {
-                zshares[ll].1.0[j] = (mac, Key(key.0 ^ delta.0));
-            } else {
-                zshares[ll].1.0[j] = (mac, key);
-            }
+            let key = Key(key.0 ^ delta.0.const_mul(ei_uij_k[j][ll].0));
+            zshares[ll].1.0[j] = (mac, key);
         }
     }
 
     // Step 6) Compute hash and comm and send to all parties.
-    let mut hi = vec![0; l];
+    let mut hi = vec![Block::ZERO; l];
     let mut commhi = Vec::with_capacity(l);
     for ll in 0..l {
         for k in (0..n).filter(|k| *k != i) {
             let (mk_zi, ki_zk) = zshares[ll].1.0[k];
             hi[ll] ^= mk_zi.0 ^ ki_zk.0 ^ ki_xj_phi[k][ll];
         }
-        hi[ll] ^= (xshares[ll].0 as u128 * phi[ll]) ^ (zshares[ll].0 as u128 * delta.0);
-        commhi.push(commit(&hi[ll].to_be_bytes()));
+        let mul_x_i_phi_i = phi[ll].const_mul(xshares[ll].0);
+        let mul_z_i_delta_i = delta.0.const_mul(zshares[ll].0);
+        hi[ll] ^= mul_x_i_phi_i ^ mul_z_i_delta_i;
+        commhi.push(commit(hi[ll].as_bytes()));
     }
     drop(phi);
     drop(ki_xj_phi);
@@ -894,7 +897,7 @@ async fn flaand(
     let mut xor_all_hi = hi; // XOR for all parties, including p_own
     for k in (0..n).filter(|k| *k != i) {
         for (ll, (xh, hi_k)) in xor_all_hi.iter_mut().zip(hi_k[k].clone()).enumerate() {
-            if !open_commitment(&commhi_k[k][ll], &hi_k.to_be_bytes()) {
+            if !open_commitment(&commhi_k[k][ll], hi_k.as_bytes()) {
                 return Err(Error::CommitmentCouldNotBeOpened);
             }
             *xh ^= hi_k;
@@ -902,7 +905,7 @@ async fn flaand(
     }
 
     // Step 7) Check that the xor of all his is zero.
-    if xor_all_hi.iter().take(l).any(|&xh| xh != 0) {
+    if xor_all_hi.iter().take(l).any(|&xh| xh != Block::ZERO) {
         return Err(Error::LaANDXorNotZero);
     }
     Ok(zshares)
@@ -1022,7 +1025,7 @@ pub(crate) async fn beaver_aand(
         let (alpha, beta) = &alpha_beta_shares[j];
 
         de_shares.push((a ^ alpha, b ^ beta));
-        d_e_dmac_emac.push((a.0 ^ alpha.0, b.0 ^ beta.0, Mac(0), Mac(0)));
+        d_e_dmac_emac.push((a.0 ^ alpha.0, b.0 ^ beta.0, Mac::default(), Mac::default()));
     }
     let scatter_data: Vec<Vec<(bool, bool, Mac, Mac)>> = (0..n)
         .map(|k| {
@@ -1047,8 +1050,8 @@ pub(crate) async fn beaver_aand(
             let (_, dkey) = de_shares[j].0.1.0[k];
             let (_, ekey) = de_shares[j].1.1.0[k];
 
-            let expected_dmac = dkey.0 ^ if d { delta.0 } else { 0 };
-            let expected_emac = ekey.0 ^ if e { delta.0 } else { 0 };
+            let expected_dmac = dkey.0 ^ delta.0.const_mul(d);
+            let expected_emac = ekey.0 ^ delta.0.const_mul(e);
             if dmac.0 != expected_dmac || emac.0 != expected_emac {
                 return Err(Error::BeaverWrongMAC);
             }
@@ -1131,7 +1134,7 @@ async fn check_dvalue(
             let (_, y0key) = buckets[j][0].1.1.0[k];
             for (m, (d, dmac)) in dval.iter_mut().zip(d_macs_p).enumerate() {
                 let (_, ykey) = buckets[j][m + 1].1.1.0[k];
-                let expected_mac = y0key.0 ^ ykey.0 ^ if d_value_p[m] { delta.0 } else { 0 };
+                let expected_mac = y0key.0 ^ ykey.0 ^ delta.0.const_mul(d_value_p[m]);
                 if dmac.0 != expected_mac {
                     return Err(Error::AANDWrongMAC);
                 }
@@ -1174,7 +1177,7 @@ fn combine_two_leaky_ands(
 ) -> Result<(Share, Share, Share), Error> {
     //Step (b) compute x, y, z.
     let xbit = x1.0 ^ x2.0;
-    let mut xauth = Auth(vec![(Mac(0), Key(0)); n]);
+    let mut xauth = Auth(vec![(Mac::default(), Key::default()); n]);
     for k in (0..n).filter(|k| *k != i) {
         let (mk_x1, ki_x1) = x1.1.0[k];
         let (mk_x2, ki_x2) = x2.1.0[k];
@@ -1183,14 +1186,14 @@ fn combine_two_leaky_ands(
     let xshare = Share(xbit, xauth);
 
     let zbit = z1.0 ^ z2.0 ^ d & x2.0;
-    let mut zauth = Auth(vec![(Mac(0), Key(0)); n]);
+    let mut zauth = Auth(vec![(Mac::default(), Key::default()); n]);
     for k in (0..n).filter(|k| *k != i) {
         let (mk_z1, ki_z1) = z1.1.0[k];
         let (mk_z2, ki_z2) = z2.1.0[k];
         let (mk_x2, ki_x2) = x2.1.0[k];
         zauth.0[k] = (
-            mk_z1 ^ mk_z2 ^ Mac(d as u128 * mk_x2.0),
-            ki_z1 ^ ki_z2 ^ Key(d as u128 * ki_x2.0),
+            mk_z1 ^ mk_z2 ^ Mac(mk_x2.0.const_mul(d)),
+            ki_z1 ^ ki_z2 ^ Key(ki_x2.0.const_mul(d)),
         );
     }
     let zshare = Share(zbit, zauth);
