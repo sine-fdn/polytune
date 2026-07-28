@@ -22,7 +22,7 @@ use crate::{
     utils::xor_inplace,
 };
 
-use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::marker::PhantomData;
 

@@ -9,14 +9,14 @@
 //! generate multiple GiB of random data per second. Make sure to compile with
 //! the `aes` target feature enabled to have optimal performance without runtime
 //! detection of the feature.
-use std::mem;
+use std::{convert::Infallible, mem};
 
 use aes::{
     Aes128,
     cipher::{BlockCipherEncrypt, KeyInit},
 };
-use rand::rand_core::block::{BlockRng, BlockRngCore, CryptoBlockRng};
-use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use rand::rand_core::block::{BlockRng, Generator};
+use rand::{RngExt, SeedableRng, TryCryptoRng, TryRng};
 
 use crate::block::Block;
 
@@ -28,26 +28,28 @@ use crate::block::Block;
 #[derive(Clone, Debug)]
 pub(crate) struct AesRng(BlockRng<AesRngCore>);
 
-impl RngCore for AesRng {
+impl TryRng for AesRng {
+    type Error = Infallible;
+
     #[inline]
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
+    fn try_next_u32(&mut self) -> Result<u32, Infallible> {
+        Ok(self.0.next_word())
     }
 
     #[inline]
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
+    fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+        Ok(self.0.next_u64_from_u32())
     }
 
     #[inline]
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Infallible> {
         // This method is optimized by first filling dest with whole `aes::Block`s and then delegating
         // to the BlockRng<AesRngCore>::fill_bytes method which is less efficient as it writes to
         // dest as u32's
         const BLOCK_SIZE: usize = mem::size_of::<aes::Block>();
         let whole_blocks = dest.len() / BLOCK_SIZE;
         let (block_bytes, rest_bytes) = dest.split_at_mut(whole_blocks * BLOCK_SIZE);
-        // fast path so we don't unnecessarily copy u32 from BlockRngCore::generate into
+        // fast path so we don't unnecessarily copy u32 from Generator::generate into
         // dest
         let blocks = bytemuck::cast_slice_mut::<_, aes::Block>(block_bytes);
         // Chunk the blocks to make use of AES ILP
@@ -61,7 +63,8 @@ impl RngCore for AesRng {
             self.0.core.aes.encrypt_blocks(chunk);
         }
         // handle the tail
-        self.0.fill_bytes(rest_bytes)
+        self.0.fill_bytes(rest_bytes);
+        Ok(())
     }
 }
 
@@ -70,11 +73,11 @@ impl SeedableRng for AesRng {
 
     #[inline]
     fn from_seed(seed: Self::Seed) -> Self {
-        AesRng(BlockRng::<AesRngCore>::from_seed(seed))
+        AesRngCore::from_seed(seed).into()
     }
 }
 
-impl CryptoRng for AesRng {}
+impl TryCryptoRng for AesRng {}
 
 impl AesRng {
     /// Create a new random number generator using a random seed from
@@ -113,17 +116,16 @@ impl std::fmt::Debug for AesRngCore {
     }
 }
 
-impl BlockRngCore for AesRngCore {
-    type Item = u32;
-    // This is equivalent to `[Block; AES_PAR_BLOCKS]`
-    type Results = hidden::ParBlockWrapper;
+impl Generator for AesRngCore {
+    // Equivalent to `[Block; AES_PAR_BLOCKS]`
+    type Output = [u32; AES_PAR_BLOCKS * 4];
 
     /// Implement the PRG using AES in CTR mode.
     ///
     /// Computes `AES_K(state)` nine times, where `state` is an increasing counter.
     #[inline]
-    fn generate(&mut self, results: &mut Self::Results) {
-        let blocks = bytemuck::cast_slice_mut::<_, aes::Block>(results.as_mut());
+    fn generate(&mut self, output: &mut Self::Output) {
+        let blocks = bytemuck::cast_slice_mut::<_, aes::Block>(output);
         blocks.iter_mut().for_each(|blk| {
             // aes::Block is a type alias to Array, but type aliases can't be used as
             // constructors
@@ -131,33 +133,6 @@ impl BlockRngCore for AesRngCore {
             self.state += 1;
         });
         self.aes.encrypt_blocks(blocks);
-    }
-}
-
-mod hidden {
-    use crate::crypto::AES_PAR_BLOCKS;
-
-    /// Equivalent to [aes::Block; AES_PAR_BLOCKS]. Since large arrays arrays don't impl Default we write a
-    /// wrapper.
-    #[derive(Copy, Clone)]
-    pub(crate) struct ParBlockWrapper([u32; AES_PAR_BLOCKS * 4]);
-
-    impl Default for ParBlockWrapper {
-        fn default() -> Self {
-            Self([0; AES_PAR_BLOCKS * 4])
-        }
-    }
-
-    impl AsMut<[u32]> for ParBlockWrapper {
-        fn as_mut(&mut self) -> &mut [u32] {
-            &mut self.0
-        }
-    }
-
-    impl AsRef<[u32]> for ParBlockWrapper {
-        fn as_ref(&self) -> &[u32] {
-            &self.0
-        }
     }
 }
 
@@ -173,8 +148,6 @@ impl SeedableRng for AesRngCore {
         }
     }
 }
-
-impl CryptoBlockRng for AesRngCore {}
 
 impl From<AesRngCore> for AesRng {
     #[inline]

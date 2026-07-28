@@ -2,7 +2,7 @@
 use std::{fmt, vec};
 
 use futures_util::future::try_join_all;
-use rand::{Rng, SeedableRng, random, seq::SliceRandom};
+use rand::{RngExt, SeedableRng, random, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use subtle::{Choice, ConditionallySelectable};

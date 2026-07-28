@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-use rand::{CryptoRng, Rng, RngCore};
+use rand::{CryptoRng, Rng};
 use rand_chacha::ChaCha20Rng;
 
 // The statistical security parameter.
