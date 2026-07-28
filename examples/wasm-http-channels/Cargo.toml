@@ -44,7 +44,7 @@ anyhow = { version = "1.0.102", optional = true }
 axum = { version = "0.8.9", optional = true }
 clap = { version = "4.5.60", features = ["derive"], optional = true }
 http = { version = "1.4", optional = true }
-tower-http = { version = "0.6.8", features = [
+tower-http = { version = "0.7.0", features = [
     "cors",
     "trace",
 ], optional = true }
