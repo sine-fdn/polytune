@@ -21,7 +21,6 @@ use crate::{
     channel::{Channel, recv_vec_from, send_to},
     mpc::faand::Error,
     ot_core::{Malicious, Receiver as OtReceiver, SemiHonest, Sender as OtSender},
-    utils::RngCompat,
 };
 
 use curve25519_dalek::{
@@ -48,7 +47,7 @@ impl OtSender for Sender {
         p_to: usize,
         _: &mut ChaCha20Rng,
     ) -> Result<Self, Error> {
-        let y = Scalar::random(&mut RngCompat(rng));
+        let y = Scalar::random(rng);
         let s = &y * RISTRETTO_BASEPOINT_TABLE;
         send_to(channel, p_to, "CO_OT_s", s.compress().as_bytes().as_ref()).await?;
         Ok(Self { y, s, counter: 0 })
@@ -110,7 +109,7 @@ impl OtReceiver for Receiver {
         &mut self,
         channel: &C,
         inputs: &[bool],
-        mut rng: &mut RNG,
+        rng: &mut RNG,
         p_to: usize,
         _: &mut ChaCha20Rng,
     ) -> Result<Vec<Block>, Error> {
@@ -120,7 +119,7 @@ impl OtReceiver for Receiver {
 
         let mut send_vec_vec = vec![];
         for (i, b) in inputs.iter().enumerate() {
-            let x = Scalar::random(&mut RngCompat(&mut rng));
+            let x = Scalar::random(&mut *rng);
             let c = if *b { one } else { zero };
             let r = c + &x * RISTRETTO_BASEPOINT_TABLE;
 

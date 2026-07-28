@@ -11,7 +11,7 @@ use std::{
 use garble_lang::literal::Literal;
 use polytune_http_server::{Server, ServerOpts};
 use polytune_server_core::Policy;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tracing::{Instrument, info, info_span};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 use url::Url;
