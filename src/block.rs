@@ -109,7 +109,7 @@ impl Block {
     pub fn from_choices(choices: &[Choice]) -> Self {
         assert_eq!(128, choices.len(), "choices.len() must be 128");
         let mut bytes = [0_u8; 16];
-        for (chunk, byte) in choices.chunks_exact(8).zip(&mut bytes) {
+        for (chunk, byte) in choices.as_chunks::<8>().0.iter().zip(&mut bytes) {
             for (i, choice) in chunk.iter().enumerate() {
                 *byte ^= choice.unwrap_u8() << i;
             }

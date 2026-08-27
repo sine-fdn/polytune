@@ -88,12 +88,8 @@ fn avx_transpose128x128(in_out: &mut [__m256i; 64]) {
     // transpose.
 
     // Part 1: Specialized 2x2 block transpose transposing individual bits
-    for chunk in in_out.chunks_exact_mut(2) {
-        if let [x, y] = chunk {
-            transpose_2x2_matrices(x, y);
-        } else {
-            unreachable!("chunk size is 2")
-        }
+    for [x, y] in in_out.as_chunks_mut::<2>().0 {
+        transpose_2x2_matrices(x, y);
     }
 
     // Phases 1-5: swap sub-matrices of size 2x2, 4x4, 8x8, 16x16, 32x32 bit
@@ -118,7 +114,7 @@ fn avx_transpose128x128(in_out: &mut [__m256i; 64]) {
         #[allow(clippy::eq_op)] // false positive due to use of seq!
         const OFFSET~N: usize = 1 << (N - 1);
 
-        for chunk in in_out.chunks_exact_mut(2 * OFFSET~N) {
+        for chunk in in_out.as_chunks_mut::<{ 2 * OFFSET~N }>().0 {
             let (x_chunk, y_chunk) = chunk.split_at_mut(OFFSET~N);
             // For larger matrices, and larger offsets, we need to iterate over all
             // rows of the sub-matrices
@@ -133,7 +129,7 @@ fn avx_transpose128x128(in_out: &mut [__m256i; 64]) {
     const SHIFT_6: usize = 6;
     const OFFSET_6: usize = 1 << (SHIFT_6 - 1); // 32
 
-    for chunk in in_out.chunks_exact_mut(2 * OFFSET_6) {
+    for chunk in in_out.as_chunks_mut::<{ 2 * OFFSET_6 }>().0 {
         let (x_chunk, y_chunk) = chunk.split_at_mut(OFFSET_6);
         for (x, y) in x_chunk.iter_mut().zip(y_chunk.iter_mut()) {
             partial_swap_64x64_matrices(x, y);
