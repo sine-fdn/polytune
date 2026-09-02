@@ -18,7 +18,7 @@ pub async fn kos_ot_sender(
     deltas: &[Block],
     p_to: usize,
     shared_rand: &mut ChaCha20Rng,
-) -> Result<Vec<u128>, Error> {
+) -> Result<Vec<Block>, Error> {
     ot::kos_ot_sender(channel, deltas, p_to, shared_rand).await
 }
 
@@ -27,6 +27,6 @@ pub async fn kos_ot_receiver(
     bs: &[bool],
     p_to: usize,
     shared_rand: &mut ChaCha20Rng,
-) -> Result<Vec<u128>, Error> {
+) -> Result<Vec<Block>, Error> {
     ot::kos_ot_receiver(channel, bs, p_to, shared_rand).await
 }

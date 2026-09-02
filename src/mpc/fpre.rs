@@ -91,7 +91,7 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
         let mut keys = vec![];
         for i in 0..parties {
             bits.push(random());
-            keys.push(vec![Key(0); parties]);
+            keys.push(vec![Key::default(); parties]);
             for (j, key) in keys[i].iter_mut().enumerate() {
                 if i != j {
                     *key = Key(random());
@@ -99,7 +99,7 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = vec![(Mac(0), Key(0)); parties];
+            let mut mac_and_key = vec![(Mac::default(), Key::default()); parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
@@ -152,7 +152,7 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
         for (i, (a, b)) in share.iter().enumerate() {
             for (Share(bit, Auth(macs_i)), round) in [(a, 0), (b, 1)] {
                 for (j, (mac_i, _)) in macs_i.iter().enumerate() {
-                    if *mac_i != Mac(0) {
+                    if *mac_i != Mac::default() {
                         // Added when removed Option
                         let (a, b) = &share[j];
                         let Share(_, Auth(keys_j)) = if round == 0 { a } else { b };
@@ -193,7 +193,7 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
                 current_share ^= share;
                 share
             };
-            keys.push(vec![Key(0); parties]);
+            keys.push(vec![Key::default(); parties]);
             for (j, key) in keys[i].iter_mut().enumerate() {
                 if i != j {
                     *key = Key(random());
@@ -201,7 +201,7 @@ pub(crate) async fn fpre(channel: &(impl Channel + Send), parties: usize) -> Res
             }
         }
         for i in 0..parties {
-            let mut mac_and_key = vec![(Mac(0), Key(0)); parties];
+            let mut mac_and_key = vec![(Mac::default(), Key::default()); parties];
             for j in 0..parties {
                 if i != j {
                     let mac = keys[j][i] ^ (bits[i] & deltas[j]);
@@ -362,7 +362,10 @@ mod tests {
                 assert_eq!(mac_s3, key_s3 ^ (s3 & delta_a));
             } else if i == 1 {
                 // corrupted (r1 XOR s1) AND (r2 XOR s2):
-                let auth_r1_corrupted = Share(!r1, Auth(vec![(Mac(0), Key(0)), (mac_r1, key_s1)]));
+                let auth_r1_corrupted = Share(
+                    !r1,
+                    Auth(vec![(Mac::default(), Key::default()), (mac_r1, key_s1)]),
+                );
                 send_to(
                     &a,
                     fpre_party,
@@ -384,7 +387,10 @@ mod tests {
                 let mac_r1_corrupted = key_r1 ^ (!r1 & delta_b);
                 let auth_r1_corrupted = Share(
                     !r1,
-                    Auth(vec![(Mac(0), Key(0)), (mac_r1_corrupted, key_s1)]),
+                    Auth(vec![
+                        (Mac::default(), Key::default()),
+                        (mac_r1_corrupted, key_s1),
+                    ]),
                 );
                 send_to(
                     &a,
