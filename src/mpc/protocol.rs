@@ -36,6 +36,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::iter;
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 use std::{cmp, sync::Mutex};
 
@@ -368,6 +369,7 @@ impl<'c, C: Channel> Context<'c, C> {
 }
 
 pub(crate) async fn _mpc(ctx: &Context<'_, impl Channel>) -> Result<Vec<bool>, Error> {
+    #[cfg(not(target_arch = "wasm32"))]
     let now = Instant::now();
     debug!(
         "MPC protocol execution with {} parties, of which output parties have indices {:?} and the circuit has {} AND gates",
@@ -404,8 +406,15 @@ pub(crate) async fn _mpc(ctx: &Context<'_, impl Channel>) -> Result<Vec<bool>, E
     // output determination:
     let outputs = output(ctx, delta, shares, labels, values, labels_eval).await?;
 
+    #[cfg(not(target_arch = "wasm32"))]
     info!(
         elapsed = ?now.elapsed(),
+        and_ops = ctx.num_and_ops,
+        total_ops = ctx.circ.insts.len(),
+        "MPC protocol execution completed successfully",
+    );
+    #[cfg(target_arch = "wasm32")]
+    info!(
         and_ops = ctx.num_and_ops,
         total_ops = ctx.circ.insts.len(),
         "MPC protocol execution completed successfully",
