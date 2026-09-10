@@ -36,7 +36,6 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::iter;
 use std::path::Path;
-use std::time::Instant;
 use std::{cmp, sync::Mutex};
 
 use futures_util::future::{try_join, try_join_all};
@@ -45,6 +44,7 @@ use garble_lang::register_circuit::{And, Circuit, Input, Not, Op, Reg, Xor};
 use rand::random;
 use rand_chacha::ChaCha20Rng;
 use tracing::{Level, debug, info, instrument};
+use web_time::Instant;
 
 use crate::block::Block;
 use crate::utils::file_or_mem_buf::FileOrMemBuf;
