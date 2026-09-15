@@ -93,7 +93,7 @@ async fn main() -> Result<(), Error> {
         match addr.parse::<IpAddr>() {
             Ok(addr) => SocketAddr::new(addr, port),
             Err(_) => {
-                tracing::error!("Invalid IP address: {addr}, using 127.0.0.1 instead");
+                tracing::warn!("Invalid IP address: {addr}, using 127.0.0.1 instead");
                 SocketAddr::from(([127, 0, 0, 1], port))
             }
         }
@@ -138,18 +138,20 @@ async fn recv(
             .and_then(|session| session.get_mut(&from))
             .and_then(|msgs| msgs.get_mut(&to))
         else {
-            tracing::debug!("No queue from {from} to {to} ({session}/recv/{to}/{from})");
+            tracing::trace!("No queue from {from} to {to} ({session}/recv/{to}/{from})");
             sleep(Duration::from_millis(50)).await;
             continue;
         };
         let Some(msg) = msgs.pop_front() else {
-            tracing::debug!("No message in queue from {from} to {to} ({session}/recv/{to}/{from})");
+            tracing::trace!("No message in queue from {from} to {to} ({session}/recv/{to}/{from})");
             sleep(Duration::from_millis(50)).await;
             continue;
         };
         tracing::debug!("Responding with message from {from} to {to} ({session}/recv/{to}/{from})");
         return Ok(msg);
     }
-    tracing::error!("No message in queue from {from} to {to} ({session}/recv/{to}/{from})");
+    tracing::error!(
+        "Gave up waiting 30s for a message from {from} to {to} ({session}/recv/{to}/{from})"
+    );
     return Err(StatusCode::NOT_FOUND);
 }
