@@ -29,6 +29,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - run: cargo fmt --check --all
       - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core --package polytune-http-server -- -Dwarnings
+      - run: cargo clippy --all-targets --features bin --package polytune-wasm-http-channels -- -Dwarnings
       - name: Install cargo-machete
         uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
         with:

@@ -67,7 +67,7 @@ pub async fn compute(url: String, party: usize, input: i32, range: u32) -> Resul
         .as_bits();
     let p_out = vec![0, 1, 2];
     let channel = HttpChannel::new(url, party).await?;
-    let output = mpc(&channel, &circuit, &input, 0, party, &p_out, None)
+    let output = mpc(&channel, circuit, &input, 0, party, &p_out, None)
         .await
         .map_err(|e| format!("MPC computation failed: {e}"))?;
     let output = prg
@@ -124,7 +124,7 @@ impl Channel for HttpChannel {
             }
             TimeoutFuture::new(100).await;
         }
-        return Err(format!("Could not reach {url}"));
+        Err(format!("Could not reach {url}"))
     }
 
     async fn recv_bytes_from(&self, p: usize, phase: &str) -> Result<Vec<u8>, Self::RecvError> {
@@ -149,6 +149,6 @@ impl Channel for HttpChannel {
             }
             TimeoutFuture::new(100).await;
         }
-        return Err(format!("Could not reach {url}"));
+        Err(format!("Could not reach {url}"))
     }
 }

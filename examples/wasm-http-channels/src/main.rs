@@ -153,5 +153,5 @@ async fn recv(
     tracing::error!(
         "Gave up waiting 30s for a message from {from} to {to} ({session}/recv/{to}/{from})"
     );
-    return Err(StatusCode::NOT_FOUND);
+    Err(StatusCode::NOT_FOUND)
 }
