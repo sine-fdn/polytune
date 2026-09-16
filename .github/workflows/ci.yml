@@ -159,6 +159,8 @@ jobs:
         run: wasm-pack build --target nodejs --out-dir pkg-node
         env:
           RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
+      - name: Build the broker
+        run: cargo build --features bin --bin broker
       - name: Run the wasm example end-to-end and check the result
         env:
           # Only the broker's own send/receive events, which show real
@@ -168,7 +170,7 @@ jobs:
           RUST_LOG: info,broker=debug
         run: |
           echo "::group::Broker output"
-          cargo run --features bin --bin broker -- --port 9999 2>&1 &
+          ../../target/debug/broker --port 9999 2>&1 &
           for i in $(seq 1 60); do
             if curl -sf http://127.0.0.1:9999/ping > /dev/null; then
               echo "broker is up"
