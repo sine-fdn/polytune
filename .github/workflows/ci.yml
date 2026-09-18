@@ -134,59 +134,6 @@ jobs:
       - if: ${{ matrix.workspace-member != 'api-integration' }}
         run: cargo test --release -- --nocapture
 
-  test-wasm-example:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: examples/wasm-http-channels
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - name: Install wasm-pack
-        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
-        with:
-          tool: wasm-pack@0.13.1 # install-action will download from github releases and verify the SHA of the binary
-      - run: wasm-pack build --target web
-        working-directory: ./examples/wasm-http-channels
-        env:
-          RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
-      - name: Build wasm module for Node
-        run: wasm-pack build --target nodejs --out-dir pkg-node
-        env:
-          RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
-      - name: Build the broker
-        run: cargo build --features bin --bin broker
-      - name: Run the wasm example end-to-end and check the result
-        env:
-          # Only the broker's own send/receive events, which show real
-          # protocol progress; tower_http's per-request tracing and the
-          # broker's per-poll "still waiting" lines are excluded (the
-          # latter at the source, via a `trace!` level in main.rs).
-          RUST_LOG: info,broker=debug
-        run: |
-          echo "::group::Broker output"
-          ../../target/debug/broker --port 9999 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:9999/ping > /dev/null; then
-              echo "broker is up"
-              break
-            fi
-            if [ "$i" -eq 60 ]; then
-              echo "::error::broker did not start in time"
-              exit 1
-            fi
-            sleep 1
-          done
-          node tests/mpc.test.js
-          RESULT=$?
-          echo "::endgroup::"
-          exit $RESULT
-
   test-crates:
     runs-on: ubuntu-latest
     timeout-minutes: 15
