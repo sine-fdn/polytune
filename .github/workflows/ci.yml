@@ -29,6 +29,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - run: cargo fmt --check --all
       - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core --package polytune-http-server -- -Dwarnings
+      - run: cargo clippy --all-targets --features bin --package polytune-wasm-http-channels -- -Dwarnings
       - name: Install cargo-machete
         uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
         with:
@@ -132,28 +133,6 @@ jobs:
         run: cargo test --profile debug-release -- --nocapture
       - if: ${{ matrix.workspace-member != 'api-integration' }}
         run: cargo test --release -- --nocapture
-
-  test-wasm-example:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: examples/wasm-http-channels
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - name: Install wasm-pack
-        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
-        with:
-          tool: wasm-pack@0.13.1 # install-action will download from github releases and verify the SHA of the binary
-      - run: wasm-pack build --target web
-        working-directory: ./examples/wasm-http-channels
-        env:
-          RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
 
   test-crates:
     runs-on: ubuntu-latest
