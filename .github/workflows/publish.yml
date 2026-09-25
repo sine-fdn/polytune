@@ -19,7 +19,7 @@ jobs:
           toolchain: stable
           components: clippy
       - name: Install taplo for extracting polytune version
-        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
+        uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab
         with:
           tool: taplo@0.10.0
       - name: Check that crate version matches tag version

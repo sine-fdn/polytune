@@ -31,7 +31,7 @@ jobs:
       - run: cargo clippy --all-targets -F __bench --package polytune --package polytune-server-core --package polytune-http-server -- -Dwarnings
       - run: cargo clippy --all-targets --features bin --package polytune-wasm-http-channels -- -Dwarnings
       - name: Install cargo-machete
-        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
+        uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab
         with:
           tool: cargo-machete@0.8.0 # install-action checks sha for the binary
       - name: Check for unused dependencies 
@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install taplo for extracting rust-version
-        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
+        uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab
         with:
           tool: taplo@0.10.0
       - run: |
