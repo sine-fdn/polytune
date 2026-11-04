@@ -90,6 +90,9 @@ unsafe impl GlobalAlloc for PeakAllocator {
         if self.is_enabled() {
             let party_idx = PARTY_IDX.get();
 
+            // TODO(msrv): `fetch_update` was renamed to `try_update` and deprecated in Rust 1.99.
+            // Switch to `try_update` once our rust-version supports it.
+            #[allow(deprecated)]
             self.current[party_idx]
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
                     Some(val.saturating_sub(layout.size()))
