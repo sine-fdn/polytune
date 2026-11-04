@@ -34,6 +34,12 @@ jobs:
           RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
       - name: Build the broker
         run: cargo build --features bin --bin broker
+        env:
+          # Matches ci.yml's top-level RUSTFLAGS: .cargo/config.toml sets
+          # target-cpu=native, which lets curve25519-dalek's build script
+          # pick an AVX-512 backend that crashes rustc (SIGILL) on some
+          # GitHub Actions runners.
+          RUSTFLAGS: "-C target-feature=+avx2"
       - name: Run the wasm example end-to-end and check the result
         env:
           # Only the broker's own send/receive events, which show real
