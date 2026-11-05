@@ -80,7 +80,7 @@ pub(super) fn transpose_bitmatrix(input: &[u8], output: &mut [u8], rows: usize) 
                 // and call move_mask 8 times.
                 let v: &mut i64x2 = bytemuck::must_cast_mut(&mut v);
                 // shift each byte by one to the left (by shifting it as two i64)
-                *v = *v << 1;
+                *v <<= 1;
             }
             col += 8;
         }
